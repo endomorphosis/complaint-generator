@@ -133,6 +133,7 @@ _BOUND_ROUTING_RECEIPT_ORIGINS: Dict[str, Dict[str, Any]] = {}
 _ELEMENT_PROOF_EVALUATION_ORIGINS: Dict[str, Dict[str, Any]] = {}
 PROOF_ROUTING_OUTCOMES = (
     "proved",
+    "disproved",
     "refuted",
     "inconsistent",
     "unknown",
@@ -3463,6 +3464,213 @@ def _unavailable_rule_candidates(reason: str) -> Dict[str, Any]:
             "promoted_requirements": [], "candidate_count": 1, "promoted_count": 0}
 
 
+_ACQUIRED_TRUE_FLAGS = ("verified", "applicable", "support_eligible", "promoted", "proof")
+_ACQUIRED_TEXT_ALIASES = ("source_text", "text", "content", "source_passage", "full_text", "section_text")
+
+
+def _acquired_flag_is_true(payload: Any) -> bool:
+    if not isinstance(payload, Mapping):
+        return False
+    return any(payload.get(key) is True for key in _ACQUIRED_TRUE_FLAGS)
+
+
+def _acquired_hash_hex(value: Any) -> str:
+    return _normalize_sha256(value)
+
+
+def prepare_acquired_authority_record(
+    candidate: Mapping[str, Any],
+    *,
+    jurisdiction: str,
+    as_of_date: str,
+) -> Dict[str, Any]:
+    """Turn one acquired owned candidate into a canonical storage record.
+
+    Source, authority-text, and span hashes are recomputed from the owned
+    passage bytes. Caller verification flags are not stored. Metadata text
+    that is not the owned passage, and a citation that is neither the source
+    locator nor present in the owned passage, are rejected.
+    """
+    rejected = {
+        "status": "rejected",
+        "record": None,
+        "hashes": {},
+        "source_locator": "",
+        "authority_version": "",
+        "jurisdiction": "",
+        "effective_date": "",
+        "as_of_date": "",
+    }
+    if not isinstance(candidate, Mapping) or len(candidate) > 64:
+        return dict(rejected, reason="candidate_malformed")
+    if _acquired_flag_is_true(candidate) or _acquired_flag_is_true(candidate.get("metadata")):
+        return dict(rejected, reason="caller_verification_flag")
+    source_text = candidate.get("source_text")
+    locator = candidate.get("locator")
+    version = candidate.get("version")
+    if not isinstance(source_text, str) or not source_text or len(source_text) > _TEMPORAL_MAX_TEXT:
+        return dict(rejected, reason="source_text_missing")
+    if not isinstance(locator, str) or not locator.strip() or len(locator) > 1024:
+        return dict(rejected, reason="locator_missing")
+    if not isinstance(version, str) or not version.strip() or len(version) > 1024:
+        return dict(rejected, reason="missing_edition")
+    owned = source_text.encode("utf-8")
+    if candidate.get("source_byte_length") not in (None, len(owned)):
+        return dict(rejected, reason="owned_byte_mismatch")
+    locator = locator.strip()
+    version = version.strip()
+    retrieval = candidate.get("retrieval") if isinstance(candidate.get("retrieval"), Mapping) else {}
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), Mapping) else {}
+    if len(retrieval) > 64 or len(metadata) > 64:
+        return dict(rejected, reason="candidate_malformed")
+    for container in (candidate, metadata, retrieval):
+        for key in _ACQUIRED_TEXT_ALIASES:
+            value = container.get(key)
+            if isinstance(value, str) and value and value != source_text and not (container is candidate and key == "source_text"):
+                return dict(rejected, reason="substituted_metadata_text")
+    citation = candidate.get("citation")
+    if citation not in (None, ""):
+        if not isinstance(citation, str) or not citation.strip() or len(citation) > 1024:
+            return dict(rejected, reason="model_invented_citation")
+        citation = citation.strip()
+        if citation != locator and citation not in source_text:
+            return dict(rejected, reason="model_invented_citation")
+    else:
+        citation = ""
+    for container in (metadata, candidate):
+        alternate = container.get("authority_version") or container.get("corpus_version")
+        if container is candidate:
+            alternate = container.get("authority_version")
+        if isinstance(alternate, str) and alternate.strip() and alternate.strip() != version:
+            return dict(rejected, reason="substituted_authority_version")
+    meta_version = metadata.get("authority_version") or metadata.get("version") or metadata.get("corpus_version")
+    if isinstance(meta_version, str) and meta_version.strip() and meta_version.strip() != version:
+        return dict(rejected, reason="substituted_authority_version")
+    resolved_jurisdiction = str(jurisdiction or "").strip()
+    if not resolved_jurisdiction or resolved_jurisdiction.lower() in _UNKNOWN_TOKENS:
+        return dict(rejected, reason="missing_jurisdiction")
+    for container in (candidate, metadata):
+        supplied_jurisdiction = container.get("jurisdiction")
+        if isinstance(supplied_jurisdiction, str) and supplied_jurisdiction.strip():
+            if supplied_jurisdiction.strip().lower() in _UNKNOWN_TOKENS:
+                return dict(rejected, reason="substituted_jurisdiction")
+            if supplied_jurisdiction.strip() not in {resolved_jurisdiction, resolved_jurisdiction.upper(), resolved_jurisdiction.lower()}:
+                # Accept only the explicit jurisdiction already selected for admission.
+                folded = supplied_jurisdiction.strip()
+                if folded.lower() != resolved_jurisdiction.lower():
+                    return dict(rejected, reason="substituted_jurisdiction")
+    if str(retrieval.get("jurisdiction_status") or "") == "mismatch":
+        return dict(rejected, reason="substituted_jurisdiction")
+    effective = retrieval.get("effective_date")
+    if not isinstance(effective, str) or not _iso_date(effective):
+        meta_effective = metadata.get("effective_date")
+        effective = meta_effective if isinstance(meta_effective, str) else ""
+    effective = _iso_date(effective)
+    if not effective:
+        return dict(rejected, reason="missing_effective_date")
+    for container in (candidate, metadata):
+        supplied_effective = container.get("effective_date")
+        if isinstance(supplied_effective, str) and supplied_effective.strip() and _iso_date(supplied_effective) != effective:
+            return dict(rejected, reason="substituted_effective_date")
+    as_of = _iso_date(as_of_date)
+    candidate_as_of = candidate.get("law_query_date")
+    if isinstance(candidate_as_of, Mapping):
+        candidate_as_of = candidate_as_of.get("precise_date")
+    if isinstance(candidate_as_of, str) and candidate_as_of.strip() and _iso_date(candidate_as_of) not in {"", as_of}:
+        return dict(rejected, reason="substituted_as_of_date")
+    if not as_of:
+        return dict(rejected, reason="missing_as_of_date")
+    source_hash = sha256_utf8(source_text)
+    sentences = _iter_rule_sentences(source_text)
+    span_hash = ""
+    span: Optional[Dict[str, Any]] = None
+    if len(sentences) == 1:
+        sentence, char_start, char_end = sentences[0]
+        start, end = _byte_span(source_text, char_start, char_end)
+        span_bytes = owned[start:end]
+        if span_bytes.decode("utf-8") != sentence:
+            return dict(rejected, reason="span_byte_mismatch")
+        span_hash = hashlib.sha256(span_bytes).hexdigest()
+        span = {"start": start, "end": end, "text": sentence, "unit": "utf-8-bytes"}
+    elif source_text and not sentences:
+        span_hash = source_hash
+        span = {"start": 0, "end": len(owned), "text": source_text, "unit": "utf-8-bytes"}
+    supplied_span = candidate.get("source_span")
+    if isinstance(supplied_span, Mapping) and span is not None:
+        try:
+            if int(supplied_span.get("start")) != span["start"] or int(supplied_span.get("end")) != span["end"]:
+                return dict(rejected, reason="substituted_source_span")
+        except (TypeError, ValueError):
+            return dict(rejected, reason="substituted_source_span")
+        if isinstance(supplied_span.get("text"), str) and supplied_span.get("text") != span["text"]:
+            return dict(rejected, reason="substituted_source_span")
+    for container in (candidate, metadata, retrieval):
+        for key in ("source_hash", "content_hash", "authority_hash", "authority_text_sha256"):
+            if key not in container or container.get(key) in (None, ""):
+                continue
+            if _acquired_hash_hex(container.get(key)) != source_hash:
+                return dict(rejected, reason="caller_hash_mismatch")
+        if container.get("span_sha256") not in (None, "") and span_hash:
+            if _acquired_hash_hex(container.get("span_sha256")) != span_hash:
+                return dict(rejected, reason="caller_hash_mismatch")
+    authority_id = locator
+    stored_citation = citation or locator
+    hashes = {
+        "source_hash": source_hash,
+        "authority_text_sha256": source_hash,
+        "span_sha256": span_hash,
+    }
+    record_metadata = {
+        "authority_id": authority_id,
+        "authority_version": version,
+        "version": version,
+        "jurisdiction": resolved_jurisdiction,
+        "source_hash": source_hash,
+        "authority_text_sha256": source_hash,
+        "span_sha256": span_hash,
+        "content_hash_scope": "authority_text",
+        "effective_date": effective,
+        "as_of_date": as_of,
+        "source_locator": locator,
+        "locator_kind": str(candidate.get("locator_kind") or ""),
+        "law_version_id": authority_id + ":" + version,
+        "law_versions": [{
+            "law_version_id": authority_id + ":" + version,
+            "authority_id": authority_id,
+            "citation": stored_citation,
+            "jurisdiction": resolved_jurisdiction,
+            "version": version,
+            "effective_date": effective,
+        }],
+        "changes": [],
+        "source_family": str(candidate.get("source_family") or retrieval.get("source_family") or ""),
+        "parameter_api": str(candidate.get("parameter_api") or ""),
+    }
+    if span is not None:
+        record_metadata["source_span"] = span
+    record = {
+        "type": str(candidate.get("source_family") or "statute"),
+        "source": str(candidate.get("parameter_api") or candidate.get("source_family") or "canonical_corpus"),
+        "citation": stored_citation,
+        "title": locator,
+        "content": source_text,
+        "url": locator if candidate.get("locator_kind") == "uri" else "",
+        "jurisdiction": resolved_jurisdiction,
+        "metadata": record_metadata,
+    }
+    return {
+        "status": "admitted",
+        "reason": "owned_bytes",
+        "record": record,
+        "hashes": hashes,
+        "source_locator": locator,
+        "authority_version": version,
+        "jurisdiction": resolved_jurisdiction,
+        "effective_date": effective,
+        "as_of_date": as_of,
+    }
+
+
 def extract_source_bound_rule_candidates(authority: Mapping[str, Any]) -> Dict[str, Any]:
     """Extract rule candidates from authority text and promote only exact matches.
 
@@ -3851,6 +4059,8 @@ def _compile_cache_key(
     citation: str,
     legal_text_origin: str,
     excluded_user_facts: Sequence[str],
+    factual_premises: Sequence[Mapping[str, Any]] = (),
+    unresolved_assumptions: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     payload = {
         "allow_explicit_partial": allow_explicit_partial,
@@ -3858,6 +4068,8 @@ def _compile_cache_key(
         "citation": citation,
         "legal_text_origin": legal_text_origin,
         "excluded_user_facts": list(excluded_user_facts),
+        "factual_premises": [dict(item) for item in factual_premises],
+        "unresolved_assumptions": [dict(item) for item in unresolved_assumptions],
         "identities": dict(identities),
         "request_id": request_id,
         "source_cid": source_cid,
@@ -4283,6 +4495,229 @@ def _finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+_RETAINED_STAGE_IDS = (
+    "typed_family_parse",
+    "elaboration",
+    "formalization",
+    "bridge",
+)
+
+
+def _optional_exact_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or isinstance(value, bool):
+        raise ValueError(field_name)
+    return value
+
+
+def _bind_admitted_law(
+    source_text: str,
+    legal_context: Mapping[str, Any] | None,
+    admitted_law: Mapping[str, Any] | None,
+) -> tuple[str, str, Dict[str, Any], str]:
+    """Select legal bytes from admitted law when that record is present.
+
+    A factual narrative passed as ``source_text`` cannot replace an admitted
+    statute, and a hash or length that does not match the UTF-8 text is a
+    typed failure rather than a compiled source.
+    """
+
+    context = dict(legal_context) if isinstance(legal_context, Mapping) else {}
+    if admitted_law is None:
+        legal_text, origin = _legal_source_text(source_text, context)
+        return legal_text, origin, context, ""
+    if not isinstance(admitted_law, Mapping):
+        return "", "admitted_law", context, "admitted_law_malformed"
+    text = admitted_law.get("source_text")
+    if not isinstance(text, str) or not text.strip():
+        return "", "admitted_law", context, "admitted_law_missing_text"
+    try:
+        raw = text.encode("utf-8")
+        if raw.decode("utf-8") != text:
+            return "", "admitted_law", context, "utf8_correspondence_failed"
+        expected_hash = admitted_law.get("source_sha256")
+        if expected_hash is not None:
+            if not isinstance(expected_hash, str) or expected_hash != hashlib.sha256(raw).hexdigest():
+                return "", "admitted_law", context, "admitted_source_hash_mismatch"
+        if _optional_exact_int(admitted_law.get("source_character_length"), "source_character_length") not in (None, len(text)):
+            return "", "admitted_law", context, "character_length_mismatch"
+        if _optional_exact_int(admitted_law.get("source_byte_length"), "source_byte_length") not in (None, len(raw)):
+            return "", "admitted_law", context, "byte_length_mismatch"
+    except (UnicodeError, ValueError):
+        return "", "admitted_law", context, "admitted_law_malformed"
+    argument = source_text if isinstance(source_text, str) else ""
+    if argument.strip() and argument != text:
+        return "", "admitted_law", context, "source_text_conflicts_with_admitted_law"
+    context_text = str(context.get("source_text") or context.get("normalized_text") or "")
+    if context_text.strip() and context_text != text:
+        return "", "admitted_law", context, "legal_context_conflicts_with_admitted_law"
+    for key in ("citation", "authority_locator", "authority_id", "authority_version", "corpus_version", "version"):
+        if key in admitted_law and key not in context:
+            context[key] = admitted_law[key]
+    context["source_text"] = text
+    return text, "admitted_law", context, ""
+
+
+def _bind_factual_premises(
+    premises: Sequence[Any] | None,
+    legal_text: str,
+) -> tuple[List[Dict[str, Any]], str]:
+    """Bind factual premises beside the statute without copying them into it."""
+
+    if premises is None:
+        return [], ""
+    if isinstance(premises, (str, bytes)) or not isinstance(premises, Sequence):
+        return [], "factual_premises_malformed"
+    bound: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(premises):
+        if not isinstance(item, Mapping):
+            return [], "factual_premise_malformed"
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return [], "factual_premise_missing_text"
+        if text == legal_text:
+            return [], "factual_premise_replaced_admitted_law"
+        try:
+            raw = text.encode("utf-8")
+            if raw.decode("utf-8") != text:
+                return [], "factual_premise_utf8_mismatch"
+            expected_hash = item.get("text_sha256")
+            digest = hashlib.sha256(raw).hexdigest()
+            if expected_hash is not None and expected_hash != digest:
+                return [], "factual_premise_hash_mismatch"
+        except UnicodeError:
+            return [], "factual_premise_malformed"
+        premise_id = str(item.get("premise_id") or f"premise-{index}").strip()
+        if not premise_id or premise_id in seen:
+            return [], "factual_premise_identity_malformed"
+        seen.add(premise_id)
+        bound.append({
+            "premise_id": premise_id,
+            "text": text,
+            "text_sha256": digest,
+            "character_length": len(text),
+            "byte_length": len(raw),
+            "span_unit": "character",
+            "role": "factual_premise",
+            "bound_separately": True,
+            "included_in_legal_source": False,
+        })
+    return bound, ""
+
+
+def _bind_unresolved_assumptions(
+    assumptions: Sequence[Any] | None,
+) -> tuple[List[Dict[str, Any]], str]:
+    """Keep caller assumptions unresolved. Resolution is not a compiler result."""
+
+    if assumptions is None:
+        return [], ""
+    if isinstance(assumptions, (str, bytes)) or not isinstance(assumptions, Sequence):
+        return [], "unresolved_assumptions_malformed"
+    bound: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(assumptions):
+        record = {"assumption_id": f"assumption-{index}", "statement": item} if isinstance(item, str) else item
+        if not isinstance(record, Mapping):
+            return [], "unresolved_assumption_malformed"
+        if record.get("resolved") is True or record.get("status") in {"resolved", "proved", "satisfied"}:
+            return [], "assumption_resolution_unsupported"
+        statement = record.get("statement")
+        if not isinstance(statement, str) or not statement.strip():
+            return [], "unresolved_assumption_missing_statement"
+        assumption_id = str(record.get("assumption_id") or f"assumption-{index}").strip()
+        if not assumption_id or assumption_id in seen:
+            return [], "unresolved_assumption_identity_malformed"
+        seen.add(assumption_id)
+        source_ref_ids = record.get("source_ref_ids") or []
+        if not isinstance(source_ref_ids, Sequence) or isinstance(source_ref_ids, (str, bytes)):
+            return [], "unresolved_assumption_malformed"
+        bound.append({
+            "assumption_id": assumption_id,
+            "statement": statement,
+            "source_ref_ids": [str(ref) for ref in source_ref_ids],
+            "resolved": False,
+            "proves_claim": False,
+        })
+    return bound, ""
+
+
+def _retained_stage_identities(
+    stages: Sequence[Any],
+    source_map: Mapping[str, Any] | None,
+    identities: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    by_id = {
+        str(stage.get("stage_id")): stage
+        for stage in stages
+        if isinstance(stage, Mapping) and stage.get("stage_id")
+    }
+    retained: Dict[str, Any] = {}
+    for stage_id in _RETAINED_STAGE_IDS:
+        stage = by_id.get(stage_id)
+        if stage is None:
+            retained[stage_id] = None
+            continue
+        retained[stage_id] = {
+            "stage_id": stage.get("stage_id"),
+            "interface": stage.get("interface"),
+            "identity_cid": stage.get("identity_cid"),
+            "input_cid": stage.get("input_cid"),
+            "output_cid": stage.get("output_cid"),
+            "config_cid": stage.get("config_cid"),
+            "status": stage.get("status"),
+        }
+    if isinstance(source_map, Mapping):
+        retained["source_map"] = {
+            "schema_version": source_map.get("schema_version") or (identities or {}).get("source_map_schema"),
+            "source_map_id": source_map.get("source_map_id"),
+        }
+    else:
+        retained["source_map"] = None
+    return retained
+
+
+def _binding_failure_receipt(
+    *,
+    identities: Mapping[str, Any],
+    reason: str,
+    user_facts: Sequence[str],
+    legal_origin: str,
+    authority_version: str,
+    factual_premises: Sequence[Mapping[str, Any]],
+    unresolved_assumptions: Sequence[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    capability = classify_canonical_compiler_capability(
+        _canonical_evidence(executed=True, status="failed", reason=reason)
+    )
+    return _receipt_shell(
+        status="failed",
+        capability=capability,
+        identities=identities,
+        reason=reason,
+        cache_outcome="not_cached",
+        extra={
+            "user_facts": list(user_facts),
+            "legal_text_origin": legal_origin,
+            "authority_version": authority_version,
+            "factual_premises": [dict(item) for item in factual_premises],
+            "unresolved_assumptions": [dict(item) for item in unresolved_assumptions],
+            "retained_stage_identities": _retained_stage_identities((), None, identities),
+            "stage_evidence": {
+                "kind": "canonical_legal_ir_stage_evidence",
+                "status": "failed",
+                "fabricated_ir": False,
+                "source_map_present": False,
+            },
+            "establishes_governing_law_meaning": False,
+            "proves_claim": False,
+            "factual_premises_included_in_source": False,
+        },
+    )
+
+
 def compile_canonical_legal_ir(
     source_text: str,
     *,
@@ -4290,6 +4725,9 @@ def compile_canonical_legal_ir(
     vocabulary: Mapping[str, Sequence[str]],
     legal_context: Mapping[str, Any] | None = None,
     user_facts: Sequence[str] | None = None,
+    admitted_law: Mapping[str, Any] | None = None,
+    factual_premises: Sequence[Any] | None = None,
+    unresolved_assumptions: Sequence[Any] | None = None,
     allow_explicit_partial: bool = False,
     expected_schema_version: str | None = None,
     expected_compiler_interface: str | None = None,
@@ -4360,10 +4798,29 @@ def compile_canonical_legal_ir(
         )
         return _finish(_store_receipt(receipt))
 
-    legal_text, legal_origin = _legal_source_text(source_text, legal_context)
+    legal_text, legal_origin, bound_context, binding_error = _bind_admitted_law(
+        source_text, legal_context, admitted_law,
+    )
+    premise_records, premise_error = _bind_factual_premises(factual_premises, legal_text)
+    assumption_records, assumption_error = _bind_unresolved_assumptions(unresolved_assumptions)
+    input_error = binding_error or premise_error or assumption_error
     excluded_facts = [str(item) for item in (user_facts or ()) if str(item).strip()]
-    authority_version = _version_from_context(legal_context)
-    citation = _citation_from_context(legal_context, request_id)
+    for premise in premise_records:
+        if premise["text"] not in excluded_facts:
+            excluded_facts.append(premise["text"])
+    authority_version = _version_from_context(bound_context)
+    citation = _citation_from_context(bound_context, request_id)
+    if input_error:
+        receipt = _binding_failure_receipt(
+            identities=identities,
+            reason=input_error,
+            user_facts=excluded_facts,
+            legal_origin=legal_origin,
+            authority_version=authority_version,
+            factual_premises=premise_records,
+            unresolved_assumptions=assumption_records,
+        )
+        return _finish(_store_receipt(receipt))
     if not str(legal_text or "").strip():
         capability = classify_canonical_compiler_capability(
             _canonical_evidence(
@@ -4382,6 +4839,18 @@ def compile_canonical_legal_ir(
                 "user_facts": excluded_facts,
                 "legal_text_origin": legal_origin,
                 "authority_version": authority_version,
+                "factual_premises": premise_records,
+                "unresolved_assumptions": assumption_records,
+                "retained_stage_identities": _retained_stage_identities((), None, identities),
+                "stage_evidence": {
+                    "kind": "canonical_legal_ir_stage_evidence",
+                    "status": "failed",
+                    "fabricated_ir": False,
+                    "source_map_present": False,
+                },
+                "establishes_governing_law_meaning": False,
+                "proves_claim": False,
+                "factual_premises_included_in_source": False,
             },
         )
         return _finish(_store_receipt(receipt))
@@ -4404,7 +4873,21 @@ def compile_canonical_legal_ir(
             identities=identities,
             reason=str(exc),
             cache_outcome="not_cached",
-            extra={"user_facts": excluded_facts, "authority_version": authority_version},
+            extra={
+            "user_facts": excluded_facts,
+            "authority_version": authority_version,
+            "factual_premises": premise_records,
+            "unresolved_assumptions": assumption_records,
+            "retained_stage_identities": _retained_stage_identities((), None, identities),
+            "stage_evidence": {
+                "kind": "canonical_legal_ir_stage_evidence",
+                "status": "failed",
+                "fabricated_ir": False,
+                "source_map_present": False,
+            },
+            "establishes_governing_law_meaning": False,
+            "proves_claim": False,
+        },
         )
         return _finish(_store_receipt(receipt))
 
@@ -4418,6 +4901,8 @@ def compile_canonical_legal_ir(
         citation=citation,
         legal_text_origin=legal_origin,
         excluded_user_facts=excluded_facts,
+        factual_premises=premise_records,
+        unresolved_assumptions=assumption_records,
     )
     if use_cache and cache_key in _CANONICAL_FORMALIZATION_CACHE:
         cached_id = _CANONICAL_FORMALIZATION_CACHE[cache_key]
@@ -4442,7 +4927,21 @@ def compile_canonical_legal_ir(
             identities=identities,
             reason=str(exc),
             cache_outcome="not_cached",
-            extra={"user_facts": excluded_facts, "cache_key": cache_key},
+            extra={
+                "user_facts": excluded_facts,
+                "cache_key": cache_key,
+                "factual_premises": premise_records,
+                "unresolved_assumptions": assumption_records,
+                "retained_stage_identities": _retained_stage_identities((), None, identities),
+                "stage_evidence": {
+                    "kind": "canonical_legal_ir_stage_evidence",
+                    "status": "failed",
+                    "fabricated_ir": False,
+                    "source_map_present": False,
+                },
+                "establishes_governing_law_meaning": False,
+                "proves_claim": False,
+            },
         )
         return _finish(_store_receipt(receipt))
 
@@ -4551,6 +5050,22 @@ def compile_canonical_legal_ir(
         "traces": [] if bridge is None else list(bridge["traces"]),
         "vocabulary": atom_vocabulary.to_dict(),
         "allow_explicit_partial": bool(allow_explicit_partial),
+        "factual_premises": premise_records,
+        "unresolved_assumptions": assumption_records,
+        "factual_premises_included_in_source": False,
+        "establishes_governing_law_meaning": False,
+        "proves_claim": False,
+        "retained_stage_identities": _retained_stage_identities(
+            stage_payload,
+            None if bridge is None else bridge["source_map"],
+            identities,
+        ),
+        "stage_evidence": {
+            "kind": "canonical_legal_ir_stage_evidence",
+            "status": outcome,
+            "fabricated_ir": False,
+            "source_map_present": bridge is not None,
+        },
     }
     if any(fact and fact in legal_text for fact in excluded_facts):
         receipt_extra["user_facts_overlap_warning"] = (
@@ -4750,6 +5265,798 @@ def audit_canonical_formalization_payload(payload: Mapping[str, Any]) -> Dict[st
         "traceable": structurally_valid, "execution_origin_verified": executed,
         "identities": dict(recorded), "receipt_id": receipt_id,
     }
+
+
+CANONICAL_IR_ATTACHMENT_SCHEMA = "canonical-legal-ir-source-obligations/v1"
+TYPED_SOURCE_OBLIGATION_KINDS = frozenset({
+    "obligation", "prohibition", "permission", "exception", "condition", "definition", "source_span",
+})
+_APPLICABILITY_VALUES = frozenset({"applicable", "inapplicable", "limited", "unknown"})
+_APPLICABILITY_FIELDS = ("jurisdiction", "authority_version", "effective_date", "forum", "applicability")
+
+
+def _normalize_applicability_context(raw: Mapping[str, Any] | None) -> Tuple[Dict[str, Any], str]:
+    """Copy declared applicability. A caller cannot appoint governing law."""
+
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, Mapping):
+        return {}, "applicability_context_invalid"
+    context: Dict[str, Any] = {}
+    for key in _APPLICABILITY_FIELDS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if not isinstance(value, str) or value != value.strip() or not value or len(value) > 160:
+            return {}, "applicability_context_invalid"
+        context[key] = value
+    applicability = context.get("applicability", "unknown")
+    if applicability not in _APPLICABILITY_VALUES:
+        return {}, "applicability_context_invalid"
+    context["applicability"] = applicability
+    context["governing_legal_authority"] = False
+    context["selects_governing_law"] = False
+    return context, ""
+
+
+def _exact_character_span(source_text: str, start: Any, end: Any, claimed: Any) -> Dict[str, Any] | None:
+    if type(start) is not int or type(end) is not int or isinstance(start, bool) or isinstance(end, bool):
+        return None
+    if not 0 <= start < end <= len(source_text):
+        return None
+    text = source_text[start:end]
+    if not isinstance(claimed, str) or claimed != text or not text.strip():
+        return None
+    return {"unit": "character", "start": start, "end": end, "text": text}
+
+
+def _typed_obligation_record(
+    *,
+    obligation_id: str,
+    kind: str,
+    span: Mapping[str, Any],
+    applicability: Mapping[str, Any],
+    origin: str,
+) -> Dict[str, Any]:
+    return {
+        "obligation_id": obligation_id,
+        "kind": kind,
+        "statement": span["text"],
+        "source_span": dict(span),
+        "applicability_context": dict(applicability),
+        "typed": True,
+        "origin": origin,
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "discharged": False,
+        "ir_parse_is_proof": False,
+        "consistency_is_proof": False,
+        "lean_text_is_proof": False,
+    }
+
+
+def attach_canonical_legal_ir_source_obligations(
+    source_text: str,
+    *,
+    request_id: str,
+    vocabulary: Mapping[str, Sequence[str]],
+    applicability_context: Mapping[str, Any] | None = None,
+    legal_context: Mapping[str, Any] | None = None,
+    admitted_law: Mapping[str, Any] | None = None,
+    factual_premises: Sequence[Any] | None = None,
+    user_facts: Sequence[str] | None = None,
+    unresolved_assumptions: Sequence[Any] | None = None,
+    typed_obligations: Sequence[Any] | None = None,
+    current_source: str | None = None,
+    emitted_lean: str | None = None,
+    supplied_receipt: Mapping[str, Any] | None = None,
+    allow_explicit_partial: bool = False,
+) -> Dict[str, Any]:
+    """Compile current legal source and attach only span-checked typed obligations.
+
+    ``compile_canonical_legal_ir`` and ``verify_canonical_formalization_receipt``
+    are the only formalization path. A parsed IR, an internally consistent map,
+    or emitted Lean text is recorded as non-authority. A caller-supplied receipt
+    mapping is ignored and is not verified as if this process stored it.
+    """
+
+    context, context_error = _normalize_applicability_context(applicability_context)
+    limitations = [
+        "IR parsing is not executed proof.",
+        "Internal consistency is not governing legal authority.",
+        "Emitted Lean text is not executed proof.",
+        "A caller-supplied receipt JSON is not a current-source verification.",
+    ]
+    rejected: List[Dict[str, Any]] = []
+    if supplied_receipt is not None:
+        rejected.append({
+            "reason": "supplied_receipt_ignored",
+            "governing_legal_authority": False,
+            "executed_proof": False,
+        })
+    lean_text = emitted_lean if isinstance(emitted_lean, str) else ""
+    if emitted_lean is not None and not isinstance(emitted_lean, str):
+        rejected.append({"reason": "emitted_lean_not_text", "lean_text_is_proof": False})
+    base: Dict[str, Any] = {
+        "schema": CANONICAL_IR_ATTACHMENT_SCHEMA,
+        "operation": "attach_canonical_legal_ir_source_obligations",
+        "request_id": str(request_id or ""),
+        "applicability_context": context,
+        "typed_obligations": [],
+        "rejected_obligations": rejected,
+        "source_spans": [],
+        "receipt_id": "",
+        "receipt_verification": None,
+        "compile_status": "",
+        "status": "failed",
+        "reason": "",
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "ir_parse_is_proof": False,
+        "consistency_is_proof": False,
+        "lean_text_is_proof": False,
+        "emitted_lean_character_length": len(lean_text),
+        "emitted_lean_sha256": hashlib.sha256(lean_text.encode("utf-8")).hexdigest() if lean_text else "",
+        "supplied_receipt_ignored": supplied_receipt is not None,
+        "user_facts_are_not_law": True,
+        "limitations": limitations,
+    }
+    if context_error:
+        base["status"] = "failed"
+        base["reason"] = context_error
+        return base
+    if not isinstance(source_text, str) or not source_text.strip():
+        base["reason"] = "legal_source_required"
+        return base
+    if not isinstance(vocabulary, Mapping):
+        base["reason"] = "vocabulary_required"
+        return base
+    merged_context = dict(legal_context or {})
+    for key in ("jurisdiction", "authority_version", "effective_date", "forum"):
+        if key in context and key not in merged_context:
+            merged_context[key] = context[key]
+    compiled = compile_canonical_legal_ir(
+        source_text,
+        request_id=str(request_id or ""),
+        vocabulary=vocabulary,
+        legal_context=merged_context or None,
+        admitted_law=admitted_law,
+        factual_premises=factual_premises,
+        user_facts=user_facts,
+        unresolved_assumptions=unresolved_assumptions,
+        allow_explicit_partial=allow_explicit_partial,
+    )
+    base["compile_status"] = str(compiled.get("status") or "")
+    base["receipt_id"] = str(compiled.get("receipt_id") or "")
+    base["reason"] = str(compiled.get("reason") or "")
+    base["establishes_governing_law_meaning"] = False
+    base["proves_claim"] = False
+    if compiled.get("status") in {"unavailable", "schema_mismatch"} or not base["receipt_id"]:
+        base["status"] = str(compiled.get("status") or "unavailable")
+        base["reason"] = base["reason"] or "canonical_compiler_unavailable"
+        return base
+    observed_source = compiled.get("source_text") if isinstance(compiled.get("source_text"), str) else source_text
+    checked_source = observed_source if current_source is None else current_source
+    if not isinstance(checked_source, str):
+        base["status"] = "failed"
+        base["reason"] = "current_source_invalid"
+        return base
+    verification = verify_canonical_formalization_receipt(base["receipt_id"], source_text=checked_source)
+    base["receipt_verification"] = {
+        "status": verification.get("status"),
+        "tampered": verification.get("tampered") is True,
+        "traceable": verification.get("traceable") is True,
+        "execution_origin_verified": verification.get("execution_origin_verified") is True,
+        "reason": verification.get("reason") or "",
+        "issue_codes": [
+            str(item.get("code"))
+            for item in (verification.get("issues") or [])
+            if isinstance(item, Mapping) and item.get("code")
+        ],
+    }
+    verified = (
+        verification.get("status") == "verified"
+        and verification.get("tampered") is not True
+        and verification.get("execution_origin_verified") is True
+        and checked_source == observed_source
+    )
+    spans: List[Dict[str, Any]] = []
+    if verified:
+        for index, passage in enumerate(compiled.get("passages") or []):
+            if not isinstance(passage, Mapping):
+                rejected.append({"reason": "passage_invalid", "index": index})
+                continue
+            span = _exact_character_span(checked_source, passage.get("start"), passage.get("end"), passage.get("passage"))
+            if span is None:
+                rejected.append({"reason": "source_span_mismatch", "index": index, "executed_proof": False})
+                continue
+            span["source_cid"] = str(passage.get("source_cid") or compiled.get("source_cid") or "")
+            span["formula_id"] = str(passage.get("rule_cid") or passage.get("field_path") or f"passage-{index}")
+            spans.append(span)
+            base["typed_obligations"].append(_typed_obligation_record(
+                obligation_id=f"source-span-{index}",
+                kind="source_span",
+                span=span,
+                applicability=context,
+                origin="current_source_receipt",
+            ))
+    else:
+        rejected.append({
+            "reason": "current_source_receipt_unverified",
+            "verification_status": verification.get("status"),
+            "executed_proof": False,
+            "governing_legal_authority": False,
+        })
+    for index, item in enumerate(typed_obligations or ()):
+        if not isinstance(item, Mapping):
+            rejected.append({"reason": "typed_obligation_invalid", "index": index})
+            continue
+        if item.get("executed_proof") is True or item.get("governing_legal_authority") is True or item.get("discharged") is True:
+            rejected.append({
+                "reason": "typed_obligation_authority_claim_rejected",
+                "index": index,
+                "executed_proof": False,
+                "governing_legal_authority": False,
+            })
+            continue
+        kind = item.get("kind")
+        if kind not in TYPED_SOURCE_OBLIGATION_KINDS or kind == "source_span":
+            rejected.append({"reason": "typed_obligation_kind", "index": index})
+            continue
+        span_in = item.get("source_span") if isinstance(item.get("source_span"), Mapping) else {}
+        span = _exact_character_span(
+            checked_source if verified else "",
+            span_in.get("start"),
+            span_in.get("end"),
+            span_in.get("text"),
+        ) if verified else None
+        statement = item.get("statement")
+        if span is None or not isinstance(statement, str) or statement != span["text"]:
+            rejected.append({
+                "reason": "typed_obligation_span_mismatch" if verified else "current_source_receipt_unverified",
+                "index": index,
+                "executed_proof": False,
+            })
+            continue
+        obligation_id = item.get("obligation_id")
+        if not isinstance(obligation_id, str) or not obligation_id.strip() or len(obligation_id) > 80:
+            obligation_id = f"typed-{index}"
+        base["typed_obligations"].append(_typed_obligation_record(
+            obligation_id=obligation_id,
+            kind=str(kind),
+            span=span,
+            applicability=context,
+            origin="caller_typed",
+        ))
+    base["source_spans"] = spans
+    base["source_character_length"] = len(checked_source)
+    base["source_text_sha256"] = hashlib.sha256(checked_source.encode("utf-8")).hexdigest()
+    base["span_unit"] = "character"
+    if verified and spans and base["typed_obligations"]:
+        base["status"] = "attached"
+        base["reason"] = ""
+    elif verified:
+        base["status"] = "failed"
+        base["reason"] = base["reason"] or "no_exact_source_spans"
+    else:
+        base["status"] = "source_unverified"
+        base["reason"] = base["reason"] or "current_source_receipt_unverified"
+        base["typed_obligations"] = []
+        base["source_spans"] = []
+    return base
+
+
+DEFINITION_CORRESPONDENCE_SCHEMA = "current-data-definition-correspondence-binding/v1"
+_SOURCE_CORRESPONDENCE_OWNER = "ipfs_datasets_py.logic.autoformal.legal_norm_scope_correspondence_v1"
+_CORRESPONDENCE_REQUESTS_OWNER = "ipfs_datasets_py.logic.autoformal.legal_source_correspondence_requests_v1"
+_APPLICABILITY_OWNER = "ipfs_datasets_py.logic.autoformal.legal_norm_definition_applicability_v1"
+_CONTEXTUAL_REVIEW_OWNER = "ipfs_datasets_py.logic.autoformal.legal_source_sampling_context_definition_review_v2"
+_REQUIRED_CORRESPONDENCE_FAMILIES = (
+    "source_correspondence",
+    "definition_applicability",
+    "contextual_review",
+)
+_CONTEXTUAL_REVIEW_FIELDS = (
+    "expected_binding_sha256",
+    "expected_subject_sha256",
+    "contextual_replay_inputs",
+    "candidate_inputs",
+    "expected_candidate_pin",
+    "context_inputs",
+    "expected_context_population",
+    "dependency_manifest",
+    "expected_manifest_sha256",
+    "required_dependency_ids",
+)
+
+
+def _json_blob(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _walk_contains_source(value: Any, source: str) -> bool:
+    if isinstance(value, str):
+        return source in value
+    if isinstance(value, bytes):
+        encoded = source.encode("utf-8")
+        if encoded in value:
+            return True
+        try:
+            return source in value.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    if isinstance(value, Mapping):
+        return any(_walk_contains_source(item, source) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_walk_contains_source(item, source) for item in value)
+    return False
+
+
+def _missing_population(result: Any, required: Sequence[str]) -> List[str]:
+    if result is None:
+        return list(required)
+    blob = _json_blob(result)
+    missing = [item for item in required if item not in blob]
+    if isinstance(result, Mapping):
+        companion = result.get("contextual_correspondence")
+        if isinstance(companion, Mapping) and companion.get("contextual_population_complete") is False:
+            if "contextual_population_complete" not in missing:
+                missing.append("contextual_population_complete")
+    return missing
+
+
+def _selected_applicability(result: Mapping[str, Any]) -> bool:
+    decisions = result.get("decisions")
+    if not isinstance(decisions, list):
+        declaration = result.get("declaration")
+        if isinstance(declaration, Mapping):
+            decisions = declaration.get("decisions")
+    if not isinstance(decisions, list) or not decisions:
+        return False
+    selected = 0
+    for choice in decisions:
+        if not isinstance(choice, Mapping):
+            return False
+        decision = choice.get("decision")
+        if decision in (None, "", "unresolved"):
+            continue
+        if decision != "declare_one_supplied_alternative_applicable":
+            return False
+        selected += 1
+    return selected > 0 and selected == len(decisions)
+
+
+def _family_record(
+    *,
+    owner: str,
+    genuine: bool,
+    source_bound: bool,
+    missing: Sequence[str],
+    receipt_sha256: str,
+    schema: str,
+    reason: str,
+    definition_unbound: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "owner": owner,
+        "genuine_current_owner_receipt": genuine,
+        "source_bound": source_bound,
+        "population_complete": not missing,
+        "population_missing": list(missing),
+        "receipt_sha256": receipt_sha256,
+        "schema": schema,
+        "reason": reason,
+        "definition_unbound": definition_unbound,
+        "authorizes_law": False,
+        "authorizes_proof": False,
+        "user_receipt_accepted": False,
+    }
+
+
+def _failed_family(owner: str, reason: str, *, source_bound: bool = False) -> Dict[str, Any]:
+    return _family_record(
+        owner=owner,
+        genuine=False,
+        source_bound=source_bound,
+        missing=["owner_result"],
+        receipt_sha256="",
+        schema="",
+        reason=reason,
+        definition_unbound=True,
+    )
+
+
+def _verified_definition_source_basis(correspondence: Any, source_text: str) -> Dict[str, Any] | None:
+    """Read exact byte scope only after the actual owner replay succeeded."""
+    from ipfs_datasets_py.logic.autoformal import legal_norm_scope_correspondence_v1 as correspondence_owner
+    from ipfs_datasets_py.logic.autoformal import legal_source_norm_scope_v1 as scope_owner
+    if not isinstance(correspondence, Mapping) or correspondence.get("schema") != correspondence_owner.SCHEMA:
+        return None
+    scope = correspondence.get("source_scope")
+    if not isinstance(scope, Mapping) or scope.get("schema") != scope_owner.SCHEMA:
+        return None
+    selection = scope.get("source_selector")
+    records = scope.get("source_records")
+    occurrence = records.get("source_occurrence") if isinstance(records, Mapping) else None
+    if (not isinstance(selection, Mapping) or not isinstance(occurrence, Mapping)
+            or not isinstance(source_text, str) or not source_text
+            or selection.get("text") != source_text or occurrence.get("span_text") != source_text):
+        return None
+    start, end = selection.get("utf8_byte_start"), selection.get("utf8_byte_end")
+    if (type(start) is not int or type(end) is not int or start < 0
+            or end - start != len(source_text.encode("utf-8"))
+            or (occurrence.get("start_utf8"), occurrence.get("end_utf8")) != (start, end)):
+        return None
+    pins = scope.get("input_pins")
+    selected = pins.get("selected_unit_ref") if isinstance(pins, Mapping) else None
+    if not isinstance(selected, Mapping):
+        return None
+    return {"schema": "definition-owner-current-source-basis/v1",
+        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        "source_bytes": len(source_text.encode("utf-8")), "selected_unit_ref": deepcopy(dict(selected)),
+        "source_scope_report_sha256": scope_owner.sampled_norm_scope_report_sha256(scope),
+        "exact_selected_bytes_verified": True, "source_semantics_verified": False}
+
+
+def _replay_scope(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from .definition_evidence import (
+        prepare_norm_scope_correspondence_v1,
+        validate_norm_scope_correspondence_v1,
+    )
+
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("expected_report_sha256", None)
+    kwargs.pop("supplied_receipt", None)
+    source_bound = False
+    prepared = prepare_norm_scope_correspondence_v1(*args, **kwargs)
+    if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
+        return _failed_family(_SOURCE_CORRESPONDENCE_OWNER, str(prepared.get("reason") or prepared.get("status") or "scope_correspondence_failed"), source_bound=source_bound)
+    report = prepared["result"]
+    from ipfs_datasets_py.logic.autoformal import legal_norm_scope_correspondence_v1 as scope_owner
+
+    receipt_sha = scope_owner.norm_scope_correspondence_sha256(report)
+    checked = validate_norm_scope_correspondence_v1(
+        report, *args, expected_report_sha256=receipt_sha, **kwargs,
+    )
+    genuine = (
+        checked.get("status") == "replayed"
+        and isinstance(checked.get("result"), Mapping)
+        and checked["result"] == report
+    )
+    basis = _verified_definition_source_basis(report, source_text) if genuine else None
+    source_bound = basis is not None
+    missing = _missing_population(report, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine and missing else
+        str(checked.get("reason") or "scope_correspondence_not_genuine")
+    )
+    record = _family_record(
+        owner=_SOURCE_CORRESPONDENCE_OWNER,
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+    )
+    record["source_basis"] = basis
+    return record
+
+
+def _replay_contextual(bundle: Mapping[str, Any], source_text: str, population: Sequence[str], *,
+                       verified_endpoint_bases: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+    from .definition_evidence import (
+        prepare_contextual_definition_review,
+        validate_contextual_definition_review,
+    )
+
+    binding_result = bundle.get("binding_result")
+    review_subject = bundle.get("review_subject")
+    raw_kwargs = dict(bundle.get("kwargs") or {})
+    kwargs = {key: raw_kwargs[key] for key in _CONTEXTUAL_REVIEW_FIELDS if key in raw_kwargs}
+    source_bound = False
+    prepared = prepare_contextual_definition_review(binding_result, review_subject, **kwargs)
+    if prepared.get("status") != "replayed" or not isinstance(prepared.get("result"), Mapping):
+        return _failed_family(
+            _CONTEXTUAL_REVIEW_OWNER,
+            str(prepared.get("reason") or prepared.get("status") or "contextual_review_failed"),
+            source_bound=source_bound,
+        )
+    report = prepared["result"]
+    from ipfs_datasets_py.logic.autoformal import legal_source_sampling_context_definition_review_v2 as review_owner
+
+    receipt_sha = review_owner.correspondence_sha256(report)
+    checked = validate_contextual_definition_review(
+        report,
+        binding_result,
+        review_subject,
+        expected_correspondence_sha256=receipt_sha,
+        **kwargs,
+    )
+    genuine = (
+        checked.get("status") == "replayed"
+        and isinstance(checked.get("result"), Mapping)
+        and checked["result"] == report
+    )
+    basis = (verified_endpoint_bases or {}).get(receipt_sha) if genuine else None
+    source_bound = (isinstance(basis, Mapping) and basis.get("source_text_sha256")
+        == hashlib.sha256(source_text.encode("utf-8")).hexdigest())
+    missing = _missing_population(report, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine and missing else
+        str(checked.get("reason") or "contextual_review_not_genuine")
+    )
+    record = _family_record(
+        owner=_CONTEXTUAL_REVIEW_OWNER,
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+    )
+    record["source_basis"] = deepcopy(basis) if source_bound else None
+    return record
+
+
+def _replay_applicability(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from ipfs_datasets_py.logic.autoformal import legal_norm_definition_applicability_v1 as applicability
+
+    operation = str(bundle.get("operation") or "declaration")
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("supplied_receipt", None)
+    kwargs.pop("expected_report_sha256", None)
+    source_bound = False
+    builders = {
+        "template": applicability.build_norm_definition_applicability_template_v1,
+        "declaration": applicability.build_norm_definition_applicability_declaration_v1,
+        "assessment": applicability.assess_norm_definition_applicability_v1,
+    }
+    builder = builders.get(operation)
+    if builder is None:
+        return _failed_family(_APPLICABILITY_OWNER, "applicability_operation_rejected", source_bound=source_bound)
+    try:
+        report = builder(*args, **kwargs)
+        regenerated = builder(*args, **kwargs)
+    except Exception as exc:
+        return _failed_family(_APPLICABILITY_OWNER, str(exc) or type(exc).__name__, source_bound=source_bound)
+    if not isinstance(report, Mapping) or not isinstance(regenerated, Mapping):
+        return _failed_family(_APPLICABILITY_OWNER, "applicability_report_invalid", source_bound=source_bound)
+    receipt_sha = applicability.norm_definition_applicability_sha256(report)
+    regenerated_sha = applicability.norm_definition_applicability_sha256(regenerated)
+    genuine = receipt_sha == regenerated_sha and _json_blob(report) == _json_blob(regenerated)
+    basis, endpoints = None, {}
+    if genuine:
+        from ipfs_datasets_py.logic.autoformal import legal_norm_interpretation_review_v1 as norm_owner
+        inputs = kwargs.get("companion_inputs")
+        preparation = inputs.get("norm_preparation") if isinstance(inputs, Mapping) else None
+        if (isinstance(preparation, Mapping) and norm_owner.norm_review_sha256(preparation)
+                == inputs.get("expected_norm_preparation_sha256")):
+            basis = _verified_definition_source_basis(preparation.get("correspondence"), source_text)
+            definitions = inputs.get("definitions")
+            if basis is not None and isinstance(definitions, list) and len(definitions) <= 128:
+                for endpoint in definitions:
+                    pin = endpoint.get("expected_correspondence_sha256") if isinstance(endpoint, Mapping) else None
+                    if isinstance(pin, str) and len(pin) == 64 and all(char in "0123456789abcdef" for char in pin):
+                        endpoints[pin] = deepcopy(basis)
+    source_bound = basis is not None
+    declared = operation == "declaration" and _selected_applicability(report)
+    unbound = not declared
+    missing = _missing_population(report, population)
+    reason = ""
+    if not genuine:
+        reason = "applicability_not_regenerated"
+    elif not source_bound:
+        reason = "source_unbound"
+    elif missing:
+        reason = "incomplete_declared_population"
+    elif unbound:
+        reason = "unbound_definition"
+    record = _family_record(
+        owner=_APPLICABILITY_OWNER,
+        genuine=genuine and source_bound and not missing and not unbound,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or ""),
+        reason=reason,
+        definition_unbound=unbound,
+    )
+    record["source_basis"] = basis
+    record["verified_contextual_endpoint_bases"] = endpoints
+    return record
+
+
+def _replay_correspondence_requests(bundle: Mapping[str, Any], source_text: str, population: Sequence[str]) -> Dict[str, Any]:
+    from ipfs_datasets_py.logic.autoformal import legal_source_correspondence_requests_v1 as requests_owner
+
+    args = list(bundle.get("args") or [])
+    kwargs = dict(bundle.get("kwargs") or {})
+    kwargs.pop("supplied_receipt", None)
+    source_bound = False
+    try:
+        report = requests_owner.prepare_source_correspondence_requests_v3(*args, **kwargs)
+        receipt_sha = requests_owner.source_correspondence_requests_v3_sha256(report)
+        regenerated = requests_owner.validate_source_correspondence_requests_v3(
+            report,
+            *args,
+            expected_report_sha256=receipt_sha,
+            **kwargs,
+        )
+    except Exception as exc:
+        return _failed_family(
+            _CORRESPONDENCE_REQUESTS_OWNER,
+            str(exc) or type(exc).__name__,
+            source_bound=source_bound,
+        )
+    genuine = isinstance(report, Mapping) and isinstance(regenerated, Mapping) and _json_blob(report) == _json_blob(regenerated)
+    missing = _missing_population(report if isinstance(report, Mapping) else None, population)
+    reason = "" if genuine and source_bound and not missing else (
+        "source_unbound" if genuine and not source_bound else
+        "incomplete_declared_population" if genuine else
+        "correspondence_requests_not_genuine"
+    )
+    return _family_record(
+        owner=_CORRESPONDENCE_REQUESTS_OWNER + ":prepare_source_correspondence_requests_v3",
+        genuine=genuine and source_bound and not missing,
+        source_bound=source_bound,
+        missing=missing,
+        receipt_sha256=receipt_sha if genuine else "",
+        schema=str(report.get("schema") or "") if isinstance(report, Mapping) else "",
+        reason=reason,
+    )
+
+
+def bind_current_definition_correspondence_owners(
+    source_text: str,
+    *,
+    request_id: str,
+    declared_populations: Mapping[str, Sequence[str]] | None = None,
+    scope_correspondence: Mapping[str, Any] | None = None,
+    correspondence_requests: Mapping[str, Any] | None = None,
+    applicability: Mapping[str, Any] | None = None,
+    contextual_review: Mapping[str, Any] | None = None,
+    supplied_receipt: Mapping[str, Any] | None = None,
+    training_metrics: Any = None,
+    graph_join: Any = None,
+) -> Dict[str, Any]:
+    """Bind current definition and correspondence owners to one exact legal source.
+
+    Receipts count only when the pinned owner regenerates them from the
+    forwarded populations. A caller-supplied receipt JSON, a training metric,
+    an incomplete graph join, or an unbound definition does not authorize law
+    or proof. Regenerated owner reports remain non-authority.
+    """
+
+    populations = dict(declared_populations or {})
+    limitations = [
+        "A regenerated owner receipt is not governing law.",
+        "A regenerated owner receipt is not executed proof.",
+        "Incomplete graph joins do not authorize law or proof.",
+        "Model training metrics do not authorize law or proof.",
+        "Unbound definitions do not authorize law or proof.",
+        "User-supplied receipt JSON is not a current owner receipt.",
+    ]
+    record: Dict[str, Any] = {
+        "schema": DEFINITION_CORRESPONDENCE_SCHEMA,
+        "operation": "bind_current_definition_correspondence_owners",
+        "request_id": str(request_id or ""),
+        "status": "failed",
+        "reason": "",
+        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest() if isinstance(source_text, str) else "",
+        "owners": {},
+        "authorizes_law": False,
+        "authorizes_proof": False,
+        "executed_proof": False,
+        "governing_legal_authority": False,
+        "proof": False,
+        "supplied_receipt_ignored": supplied_receipt is not None,
+        "training_metrics_authorize_law": False,
+        "training_metrics_authorize_proof": False,
+        "training_metrics_present": training_metrics is not None,
+        "graph_join_authorizes_law": False,
+        "graph_join_authorizes_proof": False,
+        "graph_join_present": graph_join is not None,
+        "incomplete_graph_join": False,
+        "definition_unbound": True,
+        "limitations": limitations,
+    }
+    if not isinstance(source_text, str) or not source_text.strip():
+        record["reason"] = "legal_source_required"
+        return record
+    if not isinstance(request_id, str) or not request_id.strip():
+        record["reason"] = "request_id_required"
+        return record
+    normalized: Dict[str, List[str]] = {}
+    for family in _REQUIRED_CORRESPONDENCE_FAMILIES:
+        required = populations.get(family)
+        if not isinstance(required, (list, tuple)) or not required or any(
+            not isinstance(item, str) or not item.strip() for item in required
+        ):
+            record["reason"] = "incomplete_declared_population"
+            record["owners"][family] = _failed_family("", "incomplete_declared_population")
+            return record
+        normalized[family] = [str(item) for item in required]
+    if graph_join is not None:
+        covered: set[str] = set()
+        if isinstance(graph_join, Mapping) and isinstance(graph_join.get("population_ids"), list):
+            covered = {item for item in graph_join["population_ids"] if isinstance(item, str)}
+        needed = {item for ids in normalized.values() for item in ids}
+        record["incomplete_graph_join"] = graph_join.get("complete") is not True if isinstance(graph_join, Mapping) else True
+        if not needed <= covered or record["incomplete_graph_join"]:
+            record["incomplete_graph_join"] = True
+    bundles = {
+        "source_correspondence": scope_correspondence,
+        "definition_applicability": applicability,
+        "contextual_review": contextual_review,
+    }
+    if any(not isinstance(bundle, Mapping) or not bundle for bundle in bundles.values()):
+        record["status"] = "incomplete_graph_join" if record["incomplete_graph_join"] and not any(bundles.values()) else "incomplete"
+        record["reason"] = "owner_populations_required" if any(bundles.values()) else (
+            "incomplete_graph_join" if record["incomplete_graph_join"] else "owner_populations_required"
+        )
+        if training_metrics is not None and not any(isinstance(bundle, Mapping) and bundle for bundle in bundles.values()):
+            record["status"] = "rejected"
+            record["reason"] = "training_metrics_are_not_authority"
+        if supplied_receipt is not None and not any(isinstance(bundle, Mapping) and bundle for bundle in bundles.values()):
+            record["status"] = "rejected"
+            record["reason"] = "supplied_receipt_ignored"
+        return record
+    try:
+        record["owners"]["source_correspondence"] = _replay_scope(
+            scope_correspondence, source_text, normalized["source_correspondence"],
+        )
+        record["owners"]["definition_applicability"] = _replay_applicability(
+            applicability, source_text, normalized["definition_applicability"],
+        )
+        record["owners"]["contextual_review"] = _replay_contextual(
+            contextual_review, source_text, normalized["contextual_review"],
+            verified_endpoint_bases=record["owners"]["definition_applicability"].pop("verified_contextual_endpoint_bases", {}),
+        )
+        if isinstance(correspondence_requests, Mapping) and correspondence_requests:
+            requests_population = populations.get("source_correspondence_requests") or normalized["source_correspondence"]
+            record["owners"]["source_correspondence_requests"] = _replay_correspondence_requests(
+                correspondence_requests,
+                source_text,
+                [str(item) for item in requests_population],
+            )
+    except Exception as exc:
+        record["status"] = "unavailable"
+        record["reason"] = str(exc) or type(exc).__name__
+        return record
+    families = [record["owners"][name] for name in _REQUIRED_CORRESPONDENCE_FAMILIES]
+    requests_family = record["owners"].get("source_correspondence_requests")
+    if requests_family is not None and requests_family.get("genuine_current_owner_receipt") is not True:
+        record["status"] = "rejected"
+        record["reason"] = str(requests_family.get("reason") or "correspondence_requests_rejected")
+        record["definition_unbound"] = True
+        return record
+    if any(family.get("reason") == "unbound_definition" for family in families):
+        record["status"] = "unbound_definition"
+        record["reason"] = "unbound_definition"
+        record["definition_unbound"] = True
+        return record
+    record["definition_unbound"] = any(family.get("definition_unbound") is True for family in families)
+    if all(family.get("genuine_current_owner_receipt") is True for family in families) and not record["definition_unbound"]:
+        record["status"] = "bound"
+        record["reason"] = ""
+    elif any(family.get("reason") == "source_unbound" for family in families):
+        record["status"] = "source_unbound"
+        record["reason"] = "source_unbound"
+    elif any(family.get("reason") == "incomplete_declared_population" for family in families):
+        record["status"] = "incomplete_declared_population"
+        record["reason"] = "incomplete_declared_population"
+    else:
+        record["status"] = "rejected"
+        record["reason"] = next((str(family.get("reason") or "") for family in families if family.get("reason")), "owner_rejected")
+    if record["incomplete_graph_join"]:
+        record["graph_join_authorizes_law"] = False
+        record["graph_join_authorizes_proof"] = False
+    return record
 
 
 def reset_bound_proof_obligation_cache() -> None:
@@ -5271,6 +6578,47 @@ def _obligation_shell(
     return body
 
 
+def _definition_binding_identity(binding: Mapping[str, Any] | None) -> str:
+    if not isinstance(binding, Mapping) or not binding:
+        return ""
+    identities = binding.get("identities")
+    if isinstance(identities, Mapping) and identities:
+        return _stable_payload_digest(dict(identities))
+    retained = binding.get("retained") if isinstance(binding.get("retained"), Mapping) else {}
+    pins = retained.get("source_pins") if isinstance(retained, Mapping) else {}
+    payload = {
+        "requirement_id": binding.get("requirement_id"),
+        "definition": (binding.get("definition_scope") or {}).get("identities") if isinstance(binding.get("definition_scope"), Mapping) else None,
+        "source_pins": pins,
+    }
+    if not any(payload.values()):
+        return ""
+    return _stable_payload_digest(payload)
+
+
+def _assumption_binding_identity(inventory: Mapping[str, Any], binding: Mapping[str, Any] | None) -> str:
+    rows = [
+        {"premise_id": item.get("premise_id"), "revision": item.get("revision"), "text_sha256": item.get("text_sha256")}
+        for item in (inventory or {}).get("assumptions") or []
+        if isinstance(item, Mapping)
+    ]
+    retained = binding.get("retained") if isinstance(binding, Mapping) and isinstance(binding.get("retained"), Mapping) else {}
+    extra = retained.get("assumptions") if isinstance(retained, Mapping) else None
+    if extra:
+        rows.append({"retained_assumptions": extra})
+    if not rows:
+        return ""
+    return _stable_payload_digest(rows)
+
+
+def _adverse_treatment_identity(treatment: Any) -> str:
+    if treatment is None or treatment == "" or treatment == {} or treatment == []:
+        return ""
+    if isinstance(treatment, str):
+        return treatment
+    return _stable_payload_digest(treatment)
+
+
 def _store_obligation_receipt(receipt: Mapping[str, Any], *, cache_key: str = "") -> Dict[str, Any]:
     stored = deepcopy(dict(receipt))
     receipt_id = str(stored.get("receipt_id") or "")
@@ -5300,6 +6648,9 @@ def generate_bound_legal_ir_proof_obligations(
     structural_validation: Mapping[str, Any] | None = None,
     source_text: str | None = None,
     use_cache: bool = True,
+    requirement_id: str = "",
+    definition_binding: Mapping[str, Any] | None = None,
+    adverse_treatment: Any = None,
 ) -> Dict[str, Any]:
     """Generate native Legal IR obligations and bind them to premise identity.
 
@@ -5358,6 +6709,11 @@ def generate_bound_legal_ir_proof_obligations(
         ],
         "assumption_ids": [item.get("premise_id") for item in inventory["assumptions"]],
         "assumption_labels": [item.get("label") for item in inventory["assumptions"]],
+        "requirement_id": str(requirement_id or (definition_binding or {}).get("requirement_id") or ""),
+        "definition_identity": _definition_binding_identity(definition_binding),
+        "assumption_identity": _assumption_binding_identity(inventory, definition_binding),
+        "adverse_treatment_identity": _adverse_treatment_identity(adverse_treatment if adverse_treatment is not None else (definition_binding or {}).get("adverse_treatment")),
+        "source_identity": document_hash,
         "checker_version": PROOF_OBLIGATION_CHECKER_VERSION,
         "policy_version": PROOF_OBLIGATION_POLICY_VERSION,
         "native_backend": PROOF_OBLIGATION_BACKEND_IDENTITY,
@@ -6181,18 +7537,21 @@ def _classify_route(*, native_status: str, native_trust: str, native_reason: str
     elif native_status == "cancelled":
         outcome = "cancelled"
     elif native_status in {"unsupported_translation", "unsupported", "theorem_failed"}:
-        outcome = "refuted" if native_status == "theorem_failed" and negative_artifact_verified else "unsupported"
+        outcome = "disproved" if native_status == "theorem_failed" and negative_artifact_verified else "unsupported"
     elif native_status == "proved" and native_trust == "kernel" and goal_bound_kernel and not structural_proved:
         outcome = "proved"
+    elif native_status in {"disproved", "refuted"} and negative_artifact_verified:
+        outcome = "disproved"
     elif native_status in {"error", "unavailable"}:
         outcome = "unavailable"
     else:
         outcome = "unknown"
-    return {"outcome": outcome, "substantive_trust_satisfied": outcome == "proved",
+    return {"outcome": outcome, "disproved": outcome == "disproved",
+        "substantive_trust_satisfied": outcome == "proved",
         "structural_route_proved": structural_proved, "structural_proof_is_substantive": False,
         "similarity_score_ignored": similarity_score is not None, "model_assertion_ignored": model_assertion is not None,
         "consistency_is_entailment": False, "unsat_proves_arbitrary_claim": False,
-        "theorem_failed_is_counterexample": outcome == "refuted", "native_status": native_status,
+        "theorem_failed_is_counterexample": outcome == "disproved", "native_status": native_status,
         "native_trust": native_trust, "native_reason": native_reason}
 
 
@@ -6251,6 +7610,16 @@ def route_bound_legal_ir_proof(
     expected_obligation_version: str = "",
     premise_version: str = "",
     expected_premise_version: str = "",
+    requirement_id: str = "",
+    expected_requirement_id: str = "",
+    definition_identity: str = "",
+    expected_definition_identity: str = "",
+    assumption_identity: str = "",
+    expected_assumption_identity: str = "",
+    adverse_treatment_identity: str = "",
+    expected_adverse_treatment_identity: str = "",
+    source_identity: str = "",
+    expected_source_identity: str = "",
 ) -> Dict[str, Any]:
     """Own the actual native router within one request deadline.
 
@@ -6279,11 +7648,25 @@ def route_bound_legal_ir_proof(
         "expected_obligation_version": str(expected_obligation_version or obligation_version or ""),
         "premise_version": str(premise_version or ""),
         "expected_premise_version": str(expected_premise_version or premise_version or ""),
+        "requirement_id": str(requirement_id or ""),
+        "expected_requirement_id": str(expected_requirement_id or requirement_id or ""),
+        "definition_identity": str(definition_identity or ""),
+        "expected_definition_identity": str(expected_definition_identity or definition_identity or ""),
+        "assumption_identity": str(assumption_identity or ""),
+        "expected_assumption_identity": str(expected_assumption_identity or assumption_identity or ""),
+        "adverse_treatment_identity": str(adverse_treatment_identity or ""),
+        "expected_adverse_treatment_identity": str(expected_adverse_treatment_identity or adverse_treatment_identity or ""),
+        "source_identity": str(source_identity or ""),
+        "expected_source_identity": str(expected_source_identity or source_identity or ""),
         "policy_version": PROOF_ROUTING_POLICY_VERSION,
         "premises": _premise_identity(premise_inventory),
     }
     versions_match = all(versions[key] == versions["expected_" + key]
-                         for key in ("execution_identity", "obligation_version", "premise_version"))
+                         for key in (
+                             "execution_identity", "obligation_version", "premise_version",
+                             "requirement_id", "definition_identity", "assumption_identity",
+                             "adverse_treatment_identity", "source_identity",
+                         ))
     missing = _missing_fact_values(premise_inventory)
     common = {
         "missing_facts": missing, "backend_available": False, "attempts": [], "process": None,
@@ -6463,6 +7846,11 @@ def proof_cache_identity(
             "source_version": str(source.get("source_version") or source.get("legal_context_version") or ""),
             "legal_context_version": str(source.get("legal_context_version") or ""),
             "law_as_of": str(source.get("law_as_of") or source.get("applicable_law_date") or ""),
+            "requirement_id": str(source.get("requirement_id") or ""),
+            "definition_identity": str(source.get("definition_identity") or ""),
+            "assumption_identity": str(source.get("assumption_identity") or ""),
+            "adverse_treatment_identity": str(source.get("adverse_treatment_identity") or _adverse_treatment_identity(source.get("adverse_treatment"))),
+            "source_identity": str(source.get("source_identity") or source.get("source_hash") or ""),
             "rules": rules,
         },
         "compiler": {
@@ -6540,6 +7928,13 @@ def _current_routing_origin(result: Mapping[str, Any], identity: Mapping[str, An
     inventory = components['legal_source'].get('premise_inventory')
     if isinstance(inventory, Mapping) and versions.get('premises') != _premise_identity(inventory):
         return False
+    source = components['legal_source']
+    for key in ('requirement_id', 'definition_identity', 'assumption_identity', 'adverse_treatment_identity', 'source_identity'):
+        expected = str(source.get(key) or '')
+        if not expected:
+            continue
+        if versions.get(key) != expected or versions.get('expected_' + key) != expected:
+            return False
     return True
 
 
@@ -6667,8 +8062,580 @@ def replay_satisfied_element_proof(
         record.update(status='uncertain', reason='superseded_rule')
     # Retry transient absence/errors; preserve a stable actual negative/structural
     # observation only while source/premise/compiler/policy inputs remain current.
-    cacheable = produced_map.get('outcome') in {'unknown', 'unsupported', 'refuted'}
+    cacheable = produced_map.get('outcome') in {'unknown', 'unsupported', 'refuted', 'disproved'}
     return _publish_element_evaluation(record, current, cache=cacheable)
+
+
+def connect_definition_handoff_proof(
+    requirement: Mapping[str, Any],
+    handoff: Mapping[str, Any] | None = None,
+    *,
+    provider: Any = None,
+) -> Dict[str, Any]:
+    """Bind current definition-handoff identities to obligation and route owners.
+
+    A solver selector, generated Lean packet, or review packet is recorded and
+    is not a proved result. The requirement proof field changes only when an
+    issued evaluation is verified and satisfied against the same identities.
+    Factual assertion stays separate from legal sufficiency.
+    """
+
+    requirement_map = dict(requirement or {})
+    bound = dict(handoff or {})
+    retained = bound.get("retained") if isinstance(bound.get("retained"), Mapping) else {}
+    assumptions = list(retained.get("assumptions") or requirement_map.get("assumptions") or [])
+    requirement_id = str(bound.get("requirement_id") or requirement_map.get("requirement_id") or "")
+    source_text = requirement_map.get("admitted_legal_text")
+    if not isinstance(source_text, str):
+        source_text = str(bound.get("admitted_legal_text") or "")
+    treatment = bound.get("adverse_treatment", requirement_map.get("adverse_treatment"))
+    obligations = generate_bound_legal_ir_proof_obligations(
+        None,
+        claim_id=str(requirement_map.get("claim_id") or ""),
+        element_id=str(requirement_map.get("element_id") or requirement_id),
+        assumptions=assumptions,
+        asserted_facts=requirement_map.get("asserted_facts") if isinstance(requirement_map.get("asserted_facts"), list) else [],
+        selected_legal_rules=requirement_map.get("selected_legal_rules") if isinstance(requirement_map.get("selected_legal_rules"), list) else [],
+        source_text=source_text,
+        requirement_id=requirement_id,
+        definition_binding=bound,
+        adverse_treatment=treatment,
+        use_cache=False,
+    )
+    versions = obligations.get("versions") if isinstance(obligations.get("versions"), Mapping) else {}
+    inventory = obligations.get("premise_inventory") if isinstance(obligations.get("premise_inventory"), Mapping) else {}
+    identity = proof_cache_identity(
+        claim_id=str(requirement_map.get("claim_id") or ""),
+        element_id=str(requirement_map.get("element_id") or requirement_id),
+        factual_revisions=versions.get("fact_revisions") or [],
+        legal_source={
+            "source_id": str(requirement_map.get("source_id") or ""),
+            "source_version": str(versions.get("legal_context_version") or ""),
+            "requirement_id": str(versions.get("requirement_id") or ""),
+            "definition_identity": str(versions.get("definition_identity") or ""),
+            "assumption_identity": str(versions.get("assumption_identity") or ""),
+            "adverse_treatment_identity": str(versions.get("adverse_treatment_identity") or ""),
+            "source_identity": str(versions.get("source_identity") or ""),
+            "premise_inventory": inventory,
+        },
+        compiler={"execution_identity": str(versions.get("execution_identity") or "")},
+    )
+    packet_outcome = _nonproof_packet_outcome(bound)
+
+    def _route():
+        if provider is not None:
+            return provider()
+        return route_bound_legal_ir_proof(
+            premise_inventory=inventory,
+            goal_statement=source_text,
+            execution_identity=str(versions.get("execution_identity") or ""),
+            expected_execution_identity=str(versions.get("execution_identity") or ""),
+            requirement_id=str(versions.get("requirement_id") or ""),
+            expected_requirement_id=str(versions.get("requirement_id") or ""),
+            definition_identity=str(versions.get("definition_identity") or ""),
+            expected_definition_identity=str(versions.get("definition_identity") or ""),
+            assumption_identity=str(versions.get("assumption_identity") or ""),
+            expected_assumption_identity=str(versions.get("assumption_identity") or ""),
+            adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+            expected_adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+            source_identity=str(versions.get("source_identity") or ""),
+            expected_source_identity=str(versions.get("source_identity") or ""),
+            premise_version=str(inventory.get("digest") or ""),
+            expected_premise_version=str(inventory.get("digest") or ""),
+        )
+
+    evaluation = replay_satisfied_element_proof(identity, provider=_route)
+    routed = evaluation.get("result") if isinstance(evaluation.get("result"), Mapping) else {}
+    outcome = str(routed.get("outcome") or evaluation.get("status") or "unknown")
+    if packet_outcome:
+        outcome = packet_outcome
+    verified = verify_element_proof_evaluation(evaluation)
+    proof_supported = bool(verified.get("verified") and verified.get("satisfied") and outcome == "proved")
+    original_proof = requirement_map.get("proof")
+    return {
+        "schema": "definition-handoff-proof-binding/v1",
+        "requirement_id": requirement_id,
+        "admitted_legal_text": source_text,
+        "admitted_legal_text_changed": False,
+        "proof": original_proof if proof_supported else original_proof,
+        "proof_field_supported": proof_supported,
+        "proof_satisfied": proof_supported,
+        "proof_changed": False,
+        "factual_assertion": {
+            "asserted": bool(requirement_map.get("asserted_facts")),
+            "satisfies_element": False,
+        },
+        "legal_sufficiency": {
+            "outcome": outcome,
+            "satisfied": proof_supported,
+        },
+        "outcome": outcome,
+        "outcome_distinctions": list(PROOF_ROUTING_OUTCOMES),
+        "solver_is_proof": False,
+        "generated_lean_is_proof": False,
+        "review_packet_is_proof": False,
+        "legal_ir_proof_obligations": obligations,
+        "legal_ir_proof_routing": dict(routed) if routed else {"outcome": outcome, "substantive_trust_satisfied": False},
+        "proof_cache_identity": identity.get("cache_identity"),
+        "evaluation": evaluation,
+        "versions": dict(versions),
+    }
+
+
+def _nonproof_packet_outcome(handoff: Mapping[str, Any]) -> str:
+    """Solver, Lean, and review packets stay diagnostic. They are not proved."""
+
+    lean = handoff.get("conditional_lean")
+    review = handoff.get("review")
+    solver = handoff.get("solver") or handoff.get("declared_prover_result")
+    packets = [item for item in (lean, review, solver) if isinstance(item, Mapping) and item]
+    if not packets:
+        return ""
+    for packet in packets:
+        status = str(packet.get("status") or packet.get("outcome") or "").lower()
+        if status in {"timeout", "cancelled", "unavailable", "disproved", "unknown"}:
+            return status
+    return "unknown"
+
+
+def gate_qualified_model_candidate(
+    requirement: Mapping[str, Any] | None = None,
+    candidate: Mapping[str, Any] | None = None,
+    **identity: Any,
+) -> Dict[str, Any]:
+    """Admit a qualified model record only as a candidate.
+
+    Predicate preparation and numerical qualification stay engineering evidence.
+    The returned record cannot select governing law, satisfy a definition review,
+    or prove an element. Missing and incompatible owners stay unavailable or
+    ineligible. This gate does not train, restore, download, or fit a model.
+    """
+
+    from .definition_evidence import describe_qualified_model_candidate
+
+    requirement_map = dict(requirement or {})
+    if candidate is None:
+        described = describe_qualified_model_candidate(**identity)
+    else:
+        described = describe_qualified_model_candidate(**identity) if identity else None
+        supplied = dict(candidate)
+        if described is None:
+            described = supplied
+        else:
+            described = dict(described)
+            described["supplied_candidate"] = {
+                "status": supplied.get("status"),
+                "selects_governing_law": False,
+                "satisfies_definition_review": False,
+                "proves_element": False,
+            }
+            if supplied.get("status") in {"unavailable", "ineligible"}:
+                described["status"] = supplied.get("status")
+                described["reason"] = supplied.get("reason") or described.get("reason")
+    status = described.get("status")
+    if status not in {"unavailable", "ineligible", "candidate"}:
+        status = "ineligible"
+        described = dict(described)
+        described["status"] = status
+        described["reason"] = "unrecognized_candidate_status"
+    admitted_text = requirement_map.get("admitted_legal_text")
+    return {
+        "schema": "qualified-model-candidate-gate/v1",
+        "status": status,
+        "reason": described.get("reason"),
+        "role": "candidate" if status == "candidate" else "not_admitted",
+        "eligible": status == "candidate",
+        "eligible_as_authority": False,
+        "legally_eligible": False,
+        "selects_governing_law": False,
+        "satisfies_definition_review": False,
+        "proves_element": False,
+        "governing_definition": None,
+        "definition_review_satisfied": False,
+        "element_proved": False,
+        "numerical_qualification_is_authority": False,
+        "training_preparation_is_authority": False,
+        "engineering_evidence": bool(described.get("engineering_evidence")),
+        "live_owner_verified": False,
+        "model_executed": False,
+        "training_executed": False,
+        "skipped": False,
+        "admitted_legal_text": admitted_text,
+        "admitted_legal_text_changed": False,
+        "proof": requirement_map.get("proof"),
+        "proof_changed": False,
+        "proof_satisfied": False,
+        "candidate": described,
+    }
+
+
+def _binding_token(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    token = value.strip()
+    if not token or len(token) > 256 or any(ord(char) < 32 for char in token):
+        return ""
+    return token
+
+
+def _current_binding_drift(payload: Mapping[str, Any], source_text: str) -> str:
+    """Return a drift code when the request is not the current binding."""
+
+    source_hash = payload.get("source_hash")
+    if source_hash is not None and source_hash != sha256_utf8(source_text):
+        return "source_drift"
+    for supplied_key, current_key in (
+        ("source_version", "current_source_version"),
+        ("definition_identity", "current_definition_identity"),
+    ):
+        if current_key in payload and payload.get(supplied_key) != payload.get(current_key):
+            return "stale_binding"
+        if current_key in payload and not _binding_token(payload.get(current_key)):
+            return "stale_binding"
+    current_premises = payload.get("current_premises")
+    premises = payload.get("premises")
+    if current_premises is None and premises is None:
+        return ""
+    if not isinstance(premises, list) or (current_premises is not None and not isinstance(current_premises, list)):
+        return "premise_malformed"
+    current_by_id = {}
+    for item in current_premises or []:
+        if not isinstance(item, Mapping):
+            return "premise_malformed"
+        premise_id = _binding_token(item.get("premise_id"))
+        revision = _binding_token(str(item.get("revision") or "")) if item.get("revision") is not None else ""
+        digest = item.get("text_sha256")
+        if not premise_id or (digest is not None and (not isinstance(digest, str) or len(digest) != 64)):
+            return "premise_malformed"
+        current_by_id[premise_id] = {"revision": str(item.get("revision") or ""), "text_sha256": digest}
+    seen = set()
+    for item in premises:
+        if not isinstance(item, Mapping):
+            return "premise_malformed"
+        premise_id = _binding_token(item.get("premise_id"))
+        text = item.get("text")
+        if not premise_id or not isinstance(text, str) or not text.strip() or premise_id in seen:
+            return "premise_malformed"
+        seen.add(premise_id)
+        digest = sha256_utf8(text)
+        if item.get("text_sha256") not in (None, digest):
+            return "premise_drift"
+        current = current_by_id.get(premise_id) if current_premises is not None else None
+        if current_premises is not None and current is None:
+            return "premise_drift"
+        if current is not None:
+            if str(item.get("revision") or "") != current["revision"]:
+                return "premise_drift"
+            if current["text_sha256"] not in (None, digest):
+                return "premise_drift"
+    if current_premises is not None and set(current_by_id) != seen:
+        return "premise_drift"
+    return ""
+
+
+def _nonproof_observations(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Record caller artifacts that cannot mint proof or legal sufficiency."""
+
+    formula = payload.get("parsed_formula")
+    graph = payload.get("structural_graph")
+    classifier = payload.get("classifier_score")
+    training = payload.get("training_metric")
+    packet = payload.get("fake_producer")
+    return {
+        "parsed_formula": {
+            "present": formula not in (None, "", {}, []),
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        },
+        "structural_graph_packet": {
+            "present": isinstance(graph, Mapping),
+            "caller_status": graph.get("status") if isinstance(graph, Mapping) else None,
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        },
+        "classifier_score": {
+            "present": classifier is not None,
+            "value_ignored": True,
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        },
+        "training_metric": {
+            "present": training is not None,
+            "value_ignored": True,
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        },
+        "fake_producer": {
+            "present": isinstance(packet, Mapping),
+            "caller_outcome": packet.get("outcome") if isinstance(packet, Mapping) else None,
+            "rejected": isinstance(packet, Mapping),
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        },
+    }
+
+
+def _neurosymbolic_parse_surface(formula: str) -> Dict[str, Any]:
+    """Call the pinned neurosymbolic parser. A parse is not an executed proof."""
+
+    try:
+        from ipfs_datasets_py.logic.integration.symbolic.neurosymbolic_api import (
+            NeurosymbolicReasoner,
+        )
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "execution": "unexecuted",
+            "reason": type(exc).__name__,
+            "producer": "ipfs_datasets_py.logic.integration.symbolic.neurosymbolic_api.NeurosymbolicReasoner",
+            "parsed": False,
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        }
+    try:
+        reasoner = NeurosymbolicReasoner(use_cec=False, use_modal=False, use_nl=False)
+        parsed = reasoner.parse(formula, format="tdfol") if formula else None
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "execution": "unexecuted",
+            "reason": type(exc).__name__,
+            "producer": "NeurosymbolicReasoner.parse",
+            "parsed": False,
+            "executed_proof": False,
+            "legal_sufficiency": False,
+        }
+    return {
+        "status": "parsed" if parsed is not None else "unparsed",
+        "execution": "parsed_not_proved",
+        "reason": "",
+        "producer": "NeurosymbolicReasoner.parse",
+        "parsed": parsed is not None,
+        "formula_type": type(parsed).__name__ if parsed is not None else "",
+        "executed_proof": False,
+        "legal_sufficiency": False,
+    }
+
+
+def _proof_from_live_route(routed: Mapping[str, Any]) -> bool:
+    receipt_id = str(routed.get("routing_receipt_id") or "")
+    origin = _BOUND_ROUTING_RECEIPT_ORIGINS.get(receipt_id)
+    if not isinstance(origin, Mapping):
+        return False
+    return (
+        origin.get("outcome") == "proved"
+        and origin.get("substantive_trust_satisfied") is True
+        and routed.get("outcome") == "proved"
+        and routed.get("substantive_trust_satisfied") is True
+    )
+
+
+def ground_bound_formal_analysis(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Run current-bound formal producers and keep non-proof artifacts non-proof.
+
+    Canonical compilation, obligation generation, and ``route_bound_legal_ir_proof``
+    are the proof producers. FOL conversion and neurosymbolic parsing are recorded
+    as parsed IR. A caller formula, graph packet, classifier score, training
+    metric, or fabricated producer packet cannot become executed proof or legal
+    sufficiency. A missing producer stays unavailable and unexecuted.
+    """
+
+    if not isinstance(payload, Mapping):
+        return {
+            "status": "refused",
+            "code": "malformed_input",
+            "execution": "unexecuted",
+            "executed_proof": False,
+            "legal_sufficiency": False,
+            "producer_invoked": False,
+        }
+    source_text = payload.get("source_text")
+    if not isinstance(source_text, str) or not source_text.strip():
+        return {
+            "status": "refused",
+            "code": "missing_source_text",
+            "execution": "unexecuted",
+            "executed_proof": False,
+            "legal_sufficiency": False,
+            "producer_invoked": False,
+            "nonproof": _nonproof_observations(payload),
+        }
+    source_text = source_text.strip()
+    source_version = _binding_token(payload.get("source_version")) or _binding_token(payload.get("current_source_version"))
+    definition_identity = _binding_token(payload.get("definition_identity")) or _binding_token(payload.get("current_definition_identity"))
+    if not source_version or not definition_identity:
+        return {
+            "status": "refused",
+            "code": "missing_binding",
+            "execution": "unexecuted",
+            "executed_proof": False,
+            "legal_sufficiency": False,
+            "producer_invoked": False,
+            "nonproof": _nonproof_observations(payload),
+        }
+    drift = _current_binding_drift(payload, source_text)
+    if drift:
+        return {
+            "status": "unexecuted",
+            "code": drift,
+            "execution": "unexecuted",
+            "executed_proof": False,
+            "legal_sufficiency": False,
+            "producer_invoked": False,
+            "source_version": source_version,
+            "definition_identity": definition_identity,
+            "nonproof": _nonproof_observations(payload),
+        }
+
+    requirement_id = _binding_token(payload.get("requirement_id")) or "requirement-unspecified"
+    citation = _binding_token(payload.get("citation")) or "synthetic-authority"
+    premises = [dict(item) for item in payload.get("premises") or [] if isinstance(item, Mapping)]
+    for premise in premises:
+        premise["text_sha256"] = sha256_utf8(str(premise.get("text") or ""))
+    vocabulary = payload.get("vocabulary") if isinstance(payload.get("vocabulary"), Mapping) else {}
+    vocabulary = {
+        "actors": tuple(vocabulary.get("actors") or ("Employer", "Employee")),
+        "actions": tuple(vocabulary.get("actions") or ("retaliate", "oppose")),
+        "objects": tuple(vocabulary.get("objects") or ("practice",)),
+        "qualifiers": tuple(vocabulary.get("qualifiers") or ()),
+    }
+    nonproof = _nonproof_observations(payload)
+    formula_text = payload.get("parsed_formula")
+    if not isinstance(formula_text, str) or not formula_text.strip():
+        formula_text = "forall x. Employer(x) -> Obligation(x)"
+    neurosymbolic = _neurosymbolic_parse_surface(formula_text.strip())
+    fol = text_to_fol(source_text)
+    fol_view = {
+        "status": fol.get("status"),
+        "converter": fol.get("converter"),
+        "predicate_count": len(fol.get("predicates") or []),
+        "logic_path": (fol.get("metadata") or {}).get("logic_path") if isinstance(fol.get("metadata"), Mapping) else fol.get("logic_path"),
+        "executed_proof": False,
+        "legal_sufficiency": False,
+        "producer": "text_to_fol",
+    }
+    identities = canonical_compiler_identities()
+    if identities is None:
+        return {
+            "status": "unavailable",
+            "code": "missing_producer",
+            "execution": "unexecuted",
+            "executed_proof": False,
+            "legal_sufficiency": False,
+            "producer_invoked": False,
+            "source_version": source_version,
+            "definition_identity": definition_identity,
+            "requirement_id": requirement_id,
+            "fol": fol_view,
+            "neurosymbolic": neurosymbolic,
+            "canonical": {"status": "unavailable", "executed_proof": False, "legal_sufficiency": False},
+            "obligations": {"status": "unexecuted", "executed_proof": False},
+            "route": {"outcome": "unavailable", "executed_proof": False, "producer_invoked": False},
+            "nonproof": nonproof,
+        }
+    compiled = compile_canonical_legal_ir(
+        source_text,
+        request_id=requirement_id,
+        vocabulary=vocabulary,
+        legal_context={"citation": citation, "authority_version": source_version},
+        factual_premises=premises,
+        admitted_law={
+            "source_text": source_text,
+            "source_sha256": sha256_utf8(source_text),
+            "authority_version": source_version,
+            "definition_identity": definition_identity,
+            "citation": citation,
+        },
+    )
+    canonical_view = {
+        "status": compiled.get("status"),
+        "reason": compiled.get("reason"),
+        "entails_claim": compiled.get("entails_claim") is True,
+        "entails_applicability": compiled.get("entails_applicability") is True,
+        "executed_proof": False,
+        "legal_sufficiency": False,
+        "producer": "compile_canonical_legal_ir",
+    }
+    obligations = generate_bound_legal_ir_proof_obligations(
+        None,
+        canonical_receipt=compiled if isinstance(compiled, Mapping) else None,
+        source_text=source_text,
+        asserted_facts=premises,
+        requirement_id=requirement_id,
+        definition_binding={
+            "requirement_id": requirement_id,
+            "definition_identity": definition_identity,
+            "source_version": source_version,
+        },
+        legal_context_version=source_version,
+        max_obligations=4,
+    )
+    obligation_view = {
+        "status": obligations.get("status"),
+        "support": obligations.get("support"),
+        "execution_identity": (obligations.get("versions") or {}).get("execution_identity") if isinstance(obligations.get("versions"), Mapping) else "",
+        "obligation_count": obligations.get("obligation_count") or 0,
+        "structural_validation_is_entailment": obligations.get("structural_validation_is_entailment") is True,
+        "executed_proof": False,
+        "legal_sufficiency": False,
+        "producer": "generate_bound_legal_ir_proof_obligations",
+    }
+    versions = obligations.get("versions") if isinstance(obligations.get("versions"), Mapping) else {}
+    routed = route_bound_legal_ir_proof(
+        goal_statement=source_text,
+        premise_inventory=obligations.get("premise_inventory") if isinstance(obligations.get("premise_inventory"), Mapping) else None,
+        execution_identity=str(versions.get("execution_identity") or ""),
+        expected_execution_identity=str(versions.get("execution_identity") or ""),
+        requirement_id=requirement_id,
+        expected_requirement_id=requirement_id,
+        definition_identity=str(versions.get("definition_identity") or definition_identity),
+        expected_definition_identity=str(versions.get("definition_identity") or definition_identity),
+        assumption_identity=str(versions.get("assumption_identity") or ""),
+        expected_assumption_identity=str(versions.get("assumption_identity") or ""),
+        adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+        expected_adverse_treatment_identity=str(versions.get("adverse_treatment_identity") or ""),
+        source_identity=str(versions.get("source_identity") or sha256_utf8(source_text)),
+        expected_source_identity=str(versions.get("source_identity") or sha256_utf8(source_text)),
+        premise_version=str((obligations.get("premise_inventory") or {}).get("digest") or "") if isinstance(obligations.get("premise_inventory"), Mapping) else "",
+        expected_premise_version=str((obligations.get("premise_inventory") or {}).get("digest") or "") if isinstance(obligations.get("premise_inventory"), Mapping) else "",
+        total_timeout_seconds=2.0,
+        similarity_score=payload.get("classifier_score"),
+        model_assertion=payload.get("fake_producer"),
+    )
+    executed_proof = _proof_from_live_route(routed)
+    route_view = {
+        "outcome": routed.get("outcome"),
+        "reason": routed.get("reason"),
+        "substantive_trust_satisfied": routed.get("substantive_trust_satisfied") is True,
+        "structural_proof_is_substantive": routed.get("structural_proof_is_substantive") is True,
+        "structural_route_proved": routed.get("structural_route_proved") is True,
+        "similarity_score_ignored": routed.get("similarity_score_ignored") is True,
+        "model_assertion_ignored": routed.get("model_assertion_ignored") is True,
+        "routing_receipt_id": routed.get("routing_receipt_id"),
+        "attempt_count": len(routed.get("attempts") or []),
+        "executed_proof": executed_proof,
+        "legal_sufficiency": False,
+        "producer": "route_bound_legal_ir_proof",
+        "producer_invoked": True,
+    }
+    return {
+        "status": "grounded",
+        "code": "producer_result",
+        "execution": str(routed.get("outcome") or "unknown"),
+        "executed_proof": executed_proof,
+        "legal_sufficiency": False,
+        "producer_invoked": True,
+        "source_version": source_version,
+        "definition_identity": definition_identity,
+        "requirement_id": requirement_id,
+        "source_hash": sha256_utf8(source_text),
+        "fol": fol_view,
+        "neurosymbolic": neurosymbolic,
+        "canonical": canonical_view,
+        "obligations": obligation_view,
+        "route": route_view,
+        "nonproof": nonproof,
+    }
 
 
 def legacy_procedural_template_attributes() -> Dict[str, Any]:
@@ -6717,6 +8684,7 @@ __all__ = [
     "_COMPLAINT_PREDICATE_TEMPLATES",
     "SOURCE_BOUND_RULE_CONTRACT",
     "extract_source_bound_rule_candidates",
+    "prepare_acquired_authority_record",
     "evaluate_temporal_requirement_applicability",
     "is_applicable_legal_requirement",
     "requirement_treatment_support",
@@ -6732,6 +8700,11 @@ __all__ = [
     "inspect_canonical_formalization_receipt",
     "reset_canonical_formalization_cache",
     "verify_canonical_formalization_receipt",
+    "attach_canonical_legal_ir_source_obligations",
+    "bind_current_definition_correspondence_owners",
+    "DEFINITION_CORRESPONDENCE_SCHEMA",
+    "CANONICAL_IR_ATTACHMENT_SCHEMA",
+    "TYPED_SOURCE_OBLIGATION_KINDS",
     "route_bound_legal_ir_proof",
     "PROOF_ROUTING_SCHEMA",
     "PROOF_ROUTING_OUTCOMES",
@@ -6742,4 +8715,7 @@ __all__ = [
     "lookup_satisfied_element_proof",
     "verify_element_proof_evaluation",
     "replay_satisfied_element_proof",
+    "connect_definition_handoff_proof",
+    "gate_qualified_model_candidate",
+    "ground_bound_formal_analysis",
 ]

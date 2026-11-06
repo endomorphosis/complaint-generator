@@ -1247,7 +1247,8 @@ class DependencyGraph:
     
     @classmethod
     def from_dict(cls, data: dict) -> 'DependencyGraph':
-        """Deserialize from dictionary."""
+        """Deserialize without changing the caller's versioned projection."""
+        data = deepcopy(data)
         graph = cls()
         graph.metadata = data['metadata']
         
@@ -3024,6 +3025,69 @@ class DependencyGraphBuilder:
         logger.info(f"Built dependency graph: {graph.summary()}")
         return graph
 
+    def build_grounded_hook_graph(
+        self,
+        claims: List[Dict[str, Any]],
+        legal_requirements: Optional[Dict[str, Any]] = None,
+        *,
+        model_text: str = "",
+        taxonomy_names: Optional[List[str]] = None,
+        legal_context: Optional[Dict[str, Any]] = None,
+    ) -> DependencyGraph:
+        """Build a graph whose legal nodes come only from verified source entries.
+
+        Model prose and default claim-taxonomy names are recorded as unresolved.
+        They do not become legal elements. Factual clarification nodes stay
+        labeled as complainant facts.
+        """
+        from integrations.ipfs_datasets.legal import adapt_sourced_legal_requirements
+
+        supplied = legal_requirements if isinstance(legal_requirements, dict) else {}
+        adapted = adapt_sourced_legal_requirements(supplied, legal_context=legal_context)
+        blocked = {str(model_text).strip()} if str(model_text or "").strip() else set()
+        blocked.update(str(name).strip() for name in (taxonomy_names or []) if str(name).strip())
+        for claim_type, entries in list(adapted.items()):
+            rewritten = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    rewritten.append(entry)
+                    continue
+                name = str(entry.get("name") or "").strip()
+                description = str(entry.get("description") or "").strip()
+                if (
+                    name in blocked
+                    or description in blocked
+                    or entry.get("legacy_template") is True
+                    or entry.get("template_kind") == "claim_keyword_template"
+                ):
+                    entry = dict(entry)
+                    entry["intake_requirement_status"] = "unresolved"
+                    entry["proof_status"] = "not_authoritative"
+                    entry["derivation_status"] = "unresolved"
+                    entry["unresolved_reason"] = "model_or_taxonomy_text_is_not_law"
+                    entry["law_derived"] = False
+                rewritten.append(entry)
+            adapted[claim_type] = rewritten
+        graph = self.build_from_claims(claims, adapted, require_verified_legal_sources=True)
+        factual = []
+        legal = []
+        for node in graph.nodes.values():
+            kind = str((node.attributes or {}).get("record_kind") or node.node_type.value)
+            bucket = factual if node.node_type == NodeType.FACT or (node.attributes or {}).get("about_complainant") else legal
+            bucket.append({
+                "id": node.id,
+                "name": node.name,
+                "node_type": node.node_type.value,
+                "record_kind": kind,
+                "law_derived": bool((node.attributes or {}).get("law_derived")),
+            })
+        graph.metadata["factual_nodes"] = factual
+        graph.metadata["legal_nodes"] = legal
+        graph.metadata["model_text_created_law"] = False
+        graph.metadata["default_taxonomy_created_law"] = False
+        graph.metadata["factual_legal_separated"] = True
+        return graph
+
     def _mark_factual_clarifications(self, graph: DependencyGraph) -> None:
         """Label complainant clarification nodes so they stay distinct from legal requirements."""
         for node in graph.get_nodes_by_type(NodeType.FACT):
@@ -3230,6 +3294,7 @@ class DependencyGraphBuilder:
                 "satisfaction_state": "unsatisfied",
             },
         )
+        self._recompute_support_proof_and_question_targets(req_node)
         graph.add_node(req_node)
         graph.add_dependency(Dependency(
             id=self._get_dependency_id(),
@@ -3347,6 +3412,99 @@ class DependencyGraphBuilder:
         return {"affected_node_ids": affected + added, "added_node_ids": added,
                 "preserved_node_ids": [key for key in graph.nodes if key not in set(affected + added)]}
 
+    def apply_derived_dependency_requirements(self, graph: DependencyGraph, derivation: Dict[str, Any]) -> Dict[str, Any]:
+        """Install SDK-derived requirements and visible unresolved research.
+
+        Earlier nodes from this derivation are replaced. Fact support is stored
+        on the requirement and does not change its rule text. Other graph
+        nodes stay in place.
+        """
+        if not isinstance(derivation, dict):
+            raise ValueError("derivation_invalid")
+        task_id = "CIMP-UX-26"
+        removed = []
+        for node in list(graph.nodes.values()):
+            attributes = node.attributes if isinstance(node.attributes, dict) else {}
+            if attributes.get("derivation_task") == task_id:
+                removed.append(node.id)
+                graph.nodes.pop(node.id, None)
+        if removed:
+            removed_ids = set(removed)
+            graph.dependencies = {key: edge for key, edge in graph.dependencies.items()
+                                  if edge.source_id not in removed_ids and edge.target_id not in removed_ids}
+        claims = graph.get_nodes_by_type(NodeType.CLAIM)
+        installed = []
+        for requirement in derivation.get("requirements") or []:
+            if not isinstance(requirement, dict) or requirement.get("rule_text") != requirement.get("description"):
+                continue
+            node = self._add_legal_requirement_node(graph, claims[0] if claims else DependencyNode(
+                id="case", node_type=NodeType.CLAIM, name="case", attributes={"claim_type": "unspecified"}), requirement)
+            if not claims:
+                graph.dependencies = {key: edge for key, edge in graph.dependencies.items() if edge.target_id != "case"}
+                graph.nodes.pop("case", None)
+            node.attributes["derivation_task"] = task_id
+            node.attributes["derivation_lineage"] = deepcopy(requirement.get("derivation_lineage") or {})
+            node.attributes["fact_support"] = list(requirement.get("fact_support") or [])
+            node.attributes["support_state"] = requirement.get("support_state") or "unsupported"
+            node.attributes["effective_date"] = requirement.get("effective_date") or ""
+            node.attributes["authority_version"] = requirement.get("authority_version") or ""
+            node.attributes["jurisdiction"] = requirement.get("jurisdiction") or ""
+            node.attributes["admitted_law"] = True
+            node.attributes["proof"] = False
+            node.description = str(requirement.get("rule_text") or "")
+            node.satisfied = False
+            installed.append(node.id)
+            for fact in node.attributes["fact_support"]:
+                fact_node = next((item for item in graph.nodes.values()
+                                  if item.node_type == NodeType.FACT and fact.get("fact_id") in {item.id, item.name}), None)
+                if fact_node is None:
+                    continue
+                graph.add_dependency(Dependency(
+                    id=self._get_dependency_id(), source_id=fact_node.id, target_id=node.id,
+                    dependency_type=DependencyType.SUPPORTS, required=False,
+                ))
+        unresolved_ids = []
+        for item in derivation.get("unresolved_research") or []:
+            if not isinstance(item, dict):
+                continue
+            reason = str(item.get("reason") or "unresolved")
+            node = DependencyNode(
+                id=self._get_namespaced_node_id("legal_requirement", {"gap": "unresolved_research", "reason": reason,
+                    "passage_id": str(item.get("passage_id") or ""), "task": task_id}),
+                node_type=NodeType.REQUIREMENT,
+                name="Unresolved legal research",
+                description="Admitted authority did not yield a current requirement. No generic element was substituted.",
+                satisfied=False,
+                attributes={
+                    "record_kind": "unresolved_research",
+                    "dependency_class": "unresolved_research",
+                    "derivation_task": task_id,
+                    "unresolved_reason": reason,
+                    "visible": True,
+                    "law_derived": False,
+                    "admitted_law": False,
+                    "proof": False,
+                    "review_reasons": list(item.get("review_reasons") or []),
+                    "passage_id": str(item.get("passage_id") or ""),
+                    "passage_ids": list(item.get("passage_ids") or []),
+                },
+            )
+            graph.add_node(node)
+            unresolved_ids.append(node.id)
+            for claim in claims:
+                graph.add_dependency(Dependency(
+                    id=self._get_dependency_id(), source_id=node.id, target_id=claim.id,
+                    dependency_type=DependencyType.REQUIRES, required=True,
+                ))
+        graph.metadata["derived_dependency_requirements"] = {
+            "task_id": task_id,
+            "status": derivation.get("status"),
+            "requirement_ids": installed,
+            "unresolved_ids": unresolved_ids,
+            "hardcoded_elements_used": False,
+        }
+        return graph.metadata["derived_dependency_requirements"]
+
     def _refresh_legal_source_gaps(self, graph, claims=None):
         gap_ids = {node.id for node in graph.nodes.values()
                    if node.attributes.get("dependency_class") == _LEGAL_SOURCE_GAP_CLASS}
@@ -3375,14 +3533,35 @@ class DependencyGraphBuilder:
         rule_ids = {str(item) for item in (payload.get("rule_ids") or []) if str(item).strip()}
         jurisdiction_changed = bool(payload.get("jurisdiction_changed"))
         date_changed = bool(payload.get("date_changed") or payload.get("date_roles"))
+        forum_changed = bool(payload.get("forum_changed"))
+        applicability_changed = bool(payload.get("applicability_changed"))
+        context_changed = bool(payload.get("context_changed"))
+        version_changed = bool(payload.get("version_changed") or payload.get("authority_version_changed"))
+        treatment_changed = bool(payload.get("treatment_changed") or payload.get("adverse_treatment_changed"))
+        definition_changed = bool(payload.get("definition_changed"))
+        source_outage = bool(payload.get("source_outage"))
         fact_change = bool(payload.get("fact_change") or fact_ids or clarification_keys)
         updated_requirements = payload.get("updated_requirements") if isinstance(payload.get("updated_requirements"), dict) else {}
+        user_facts = {
+            node.id: (node.name, node.description, bool(node.satisfied), deepcopy(node.attributes))
+            for node in graph.nodes.values()
+            if node.node_type == NodeType.FACT or (isinstance(node.attributes, dict) and node.attributes.get("about_complainant") is True and node.attributes.get("dependency_class") != _LEGALLY_SOURCED_CLASS)
+        }
 
         affected_ids = []
         preserved_ids = []
         invalidated = []
         for node in list(graph.nodes.values()):
-            if self._dependency_change_affects(node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change):
+            if self._dependency_change_affects(
+                node, clarification_keys, fact_ids, rule_ids, jurisdiction_changed, date_changed, fact_change,
+                version_changed=version_changed, treatment_changed=treatment_changed,
+                source_outage=source_outage, definition_changed=definition_changed,
+                definition_identity=payload.get("definition_identity"),
+                premise_identity=payload.get("premise_identity"),
+                adverse_treatment_identity=payload.get("adverse_treatment_identity"),
+                forum_changed=forum_changed, applicability_changed=applicability_changed,
+                context_changed=context_changed,
+            ):
                 affected_ids.append(node.id)
             else:
                 preserved_ids.append(node.id)
@@ -3442,6 +3621,31 @@ class DependencyGraphBuilder:
                 invalidated.append(node_id)
             node.attributes["satisfaction_revision"] = int(node.attributes.get("satisfaction_revision") or 0) + 1
             node.attributes["dependency_recomputed"] = True
+            if (version_changed or treatment_changed or source_outage or definition_changed
+                    or context_changed or forum_changed or applicability_changed):
+                node.attributes["legal_support_invalidated"] = True
+                node.attributes["support_eligible"] = False
+                if source_outage:
+                    node.attributes["invalidation_reason"] = "source_outage"
+                    node.attributes["source_available"] = False
+                elif version_changed:
+                    node.attributes["invalidation_reason"] = "authority_version_changed"
+                elif definition_changed:
+                    node.attributes["invalidation_reason"] = "definition_changed"
+                elif treatment_changed:
+                    node.attributes["invalidation_reason"] = "treatment_changed"
+                elif jurisdiction_changed:
+                    node.attributes["invalidation_reason"] = "jurisdiction_changed"
+                elif date_changed:
+                    node.attributes["invalidation_reason"] = "date_changed"
+                elif forum_changed:
+                    node.attributes["invalidation_reason"] = "forum_changed"
+                elif applicability_changed:
+                    node.attributes["invalidation_reason"] = "applicability_changed"
+                elif context_changed:
+                    node.attributes["invalidation_reason"] = "legal_context_changed"
+            if node.attributes.get("dependency_class") == _LEGALLY_SOURCED_CLASS:
+                self._recompute_support_proof_and_question_targets(node)
             if node.attributes.get("proof_cache_identity"):
                 node.attributes["rejected_proof_cache_identity"] = node.attributes.get("proof_cache_identity")
                 node.attributes["proof_cache_reusable"] = False
@@ -3485,12 +3689,42 @@ class DependencyGraphBuilder:
             "replaced_rule_ids": replaced_rule_ids,
             "jurisdiction_changed": jurisdiction_changed,
             "date_changed": date_changed,
+            "forum_changed": forum_changed,
+            "applicability_changed": applicability_changed,
+            "context_changed": context_changed,
             "fact_change": fact_change,
             "fact_ids": sorted(fact_ids),
             "factual_revision": payload.get("factual_revision"),
+            "version_changed": version_changed,
+            "treatment_changed": treatment_changed,
+            "definition_changed": definition_changed,
+            "source_outage": source_outage,
+            "user_facts_modified": False,
+            "graph_replaced": False,
+            "empty_success": False,
         }
+        if (version_changed or treatment_changed or source_outage or definition_changed) and not chronology_issue:
+            for node_id, (name, description, satisfied, attributes) in user_facts.items():
+                node = graph.nodes.get(node_id)
+                if node is None:
+                    report["user_facts_modified"] = True
+                    continue
+                if node.name != name or node.description != description or bool(node.satisfied) != satisfied or node.attributes != attributes:
+                    node.name = name
+                    node.description = description
+                    node.satisfied = satisfied
+                    node.attributes = attributes
+                if node_id in report["affected_node_ids"]:
+                    report["affected_node_ids"] = [item for item in report["affected_node_ids"] if item != node_id]
+                    report["invalidated_node_ids"] = [item for item in report["invalidated_node_ids"] if item != node_id]
+                    if node_id not in report["preserved_node_ids"]:
+                        report["preserved_node_ids"].append(node_id)
         if graph.metadata.get("legal_requirement_mode") == "verified_sources":
             self._refresh_legal_source_gaps(graph)
+        if source_outage:
+            graph.metadata["source_outage"] = True
+            graph.metadata["empty_success"] = False
+            graph.metadata["admission_status"] = "unavailable"
         graph.metadata["last_dependency_refresh"] = {
             "affected_count": len(affected_ids),
             "preserved_count": len(report["preserved_node_ids"]),
@@ -3508,6 +3742,16 @@ class DependencyGraphBuilder:
         jurisdiction_changed: bool,
         date_changed: bool,
         fact_change: bool,
+        version_changed: bool = False,
+        treatment_changed: bool = False,
+        source_outage: bool = False,
+        definition_changed: bool = False,
+        definition_identity: Any = None,
+        premise_identity: Any = None,
+        adverse_treatment_identity: Any = None,
+        forum_changed: bool = False,
+        applicability_changed: bool = False,
+        context_changed: bool = False,
     ) -> bool:
         attributes = node.attributes if isinstance(node.attributes, dict) else {}
         dependency_class = attributes.get("dependency_class")
@@ -3528,9 +3772,58 @@ class DependencyGraphBuilder:
             return True
         if fact_ids and node_facts & fact_ids:
             return True
-        if jurisdiction_changed or date_changed:
+        if (jurisdiction_changed or date_changed or context_changed or forum_changed or applicability_changed
+                or version_changed or treatment_changed or source_outage or definition_changed):
+            return True
+        if definition_identity is not None and attributes.get("definition_identity") not in (None, definition_identity):
+            return True
+        if premise_identity is not None and attributes.get("premise_identity") not in (None, premise_identity):
+            return True
+        if adverse_treatment_identity is not None and attributes.get("adverse_treatment_identity") not in (None, adverse_treatment_identity):
             return True
         return False
+
+    @staticmethod
+    def _recompute_support_proof_and_question_targets(node: DependencyNode) -> None:
+        """Mint new support, proof, and question identities for one affected requirement."""
+        import hashlib
+
+        attributes = node.attributes if isinstance(node.attributes, dict) else {}
+        scope = attributes.get("dependency_scope") if isinstance(attributes.get("dependency_scope"), dict) else {}
+        basis = json.dumps({
+            "authority_id": attributes.get("authority_id"),
+            "authority_version": attributes.get("authority_version"),
+            "jurisdiction": scope.get("jurisdiction") or attributes.get("jurisdiction"),
+            "reason": attributes.get("invalidation_reason"),
+            "rule_id": scope.get("rule_id") or attributes.get("rule_id"),
+            "satisfaction_revision": attributes.get("satisfaction_revision"),
+            "source_hash": attributes.get("source_hash"),
+        }, sort_keys=True, default=str)
+        digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()
+        previous_support = str(attributes.get("support_identity") or "")
+        if previous_support and previous_support != digest:
+            attributes["rejected_support_identity"] = previous_support
+        attributes["support_identity"] = digest
+        previous_proof = str(attributes.get("proof_identity") or attributes.get("proof_cache_identity") or "")
+        if previous_proof:
+            attributes["rejected_proof_identity"] = previous_proof
+        attributes["proof_identity"] = ""
+        attributes["proof_cache_reusable"] = False
+        targets = attributes.get("inquiry_targets")
+        if isinstance(targets, list):
+            for inquiry in targets:
+                if not isinstance(inquiry, dict):
+                    continue
+                inquiry["status"] = "reopened"
+                inquiry["target_revision"] = digest[:16]
+                inquiry["invalidation_reason"] = attributes.get("invalidation_reason") or "dependency_refresh"
+        previous_target = str(attributes.get("question_target_id") or "")
+        new_target = "qt_" + digest[:24]
+        if previous_target and previous_target != new_target:
+            attributes["rejected_question_target_id"] = previous_target
+        attributes["question_target_id"] = new_target
+        attributes["question_target_revision"] = digest[:16]
+        node.attributes = attributes
 
     def _replace_changed_rules(
         self,
@@ -3709,6 +4002,337 @@ class DependencyGraphBuilder:
         graph._update_metadata()
         return graph
     
+    def invalidate_factual_dependents(
+        self,
+        graph: DependencyGraph,
+        fact_id: str,
+        *,
+        reason: str,
+        event_id: str = "",
+    ) -> Dict[str, Any]:
+        """Drop proof caches and satisfaction only where this fact is a support input.
+
+        Legal requirement text, source identity, and unrelated node ids stay.
+        Contradiction edges remain. Affected inquiry targets are reopened.
+        """
+        if not isinstance(graph, DependencyGraph) or not fact_id:
+            return {"invalidated_node_ids": [], "reopened_inquiry_ids": [], "preserved_node_ids": []}
+        invalidated = []
+        reopened = []
+        for node in graph.nodes.values():
+            attributes = node.attributes if isinstance(node.attributes, dict) else {}
+            if not self._node_depends_on_fact(node, fact_id):
+                continue
+            if node.id == fact_id:
+                continue
+            preserved_text = {
+                "name": node.name,
+                "description": node.description,
+                "rule_id": attributes.get("rule_id"),
+                "authority_id": attributes.get("authority_id"),
+                "source_hash": attributes.get("source_hash"),
+                "source_span": deepcopy(attributes.get("source_span")) if isinstance(attributes.get("source_span"), dict) else attributes.get("source_span"),
+                "provenance": deepcopy(attributes.get("provenance")) if isinstance(attributes.get("provenance"), dict) else attributes.get("provenance"),
+            }
+            if node.satisfied or attributes.get("satisfaction_state") == "satisfied" or attributes.get("proof_cache_identity") or isinstance(attributes.get("proof_cache"), dict):
+                attributes["invalidated_satisfaction"] = {
+                    "satisfied": bool(node.satisfied),
+                    "confidence": node.confidence,
+                    "satisfaction_state": attributes.get("satisfaction_state"),
+                    "proof_cache_identity": attributes.get("proof_cache_identity"),
+                }
+                node.satisfied = False
+                attributes["satisfaction_state"] = "invalidated"
+                attributes["stale_satisfaction"] = True
+            if attributes.get("proof_cache_identity"):
+                attributes["rejected_proof_cache_identity"] = attributes.get("proof_cache_identity")
+            attributes["proof_cache_reusable"] = False
+            if isinstance(attributes.get("proof_cache"), dict):
+                attributes["proof_cache"] = dict(attributes["proof_cache"])
+                attributes["proof_cache"]["reusable"] = False
+                attributes["proof_cache"]["satisfied"] = False
+                attributes["proof_cache"]["invalidation_reason"] = reason
+                attributes["proof_cache"]["invalidated_entity_id"] = fact_id
+            attributes["invalidation_reason"] = reason
+            attributes["invalidated_entity_id"] = fact_id
+            for inquiry in attributes.get("inquiry_targets") or []:
+                if not isinstance(inquiry, dict):
+                    continue
+                target = str(inquiry.get("entity_id") or inquiry.get("fact_id") or "")
+                if target != fact_id:
+                    continue
+                inquiry["status"] = "reopened"
+                inquiry["invalidation_reason"] = reason
+                inquiry["event_id"] = event_id
+                reopened.append(inquiry.get("inquiry_id"))
+            node.name = preserved_text["name"]
+            node.description = preserved_text["description"]
+            attributes["rule_id"] = preserved_text["rule_id"]
+            attributes["authority_id"] = preserved_text["authority_id"]
+            attributes["source_hash"] = preserved_text["source_hash"]
+            attributes["source_span"] = preserved_text["source_span"]
+            attributes["provenance"] = preserved_text["provenance"]
+            node.attributes = attributes
+            invalidated.append(node.id)
+        for dependency in graph.dependencies.values():
+            if dependency.dependency_type == DependencyType.CONTRADICTS:
+                continue
+            if dependency.dependency_type != DependencyType.SUPPORTS:
+                continue
+            if fact_id not in {dependency.source_id, dependency.target_id}:
+                continue
+            graph.metadata.setdefault("invalidated_support_refs", [])
+            ref = {
+                "dependency_id": dependency.id,
+                "source_id": dependency.source_id,
+                "target_id": dependency.target_id,
+                "fact_id": fact_id,
+                "reason": reason,
+                "event_id": event_id,
+            }
+            if ref not in graph.metadata["invalidated_support_refs"]:
+                graph.metadata["invalidated_support_refs"].append(ref)
+        graph._update_metadata()
+        preserved = [node_id for node_id in graph.nodes if node_id not in set(invalidated)]
+        return {
+            "invalidated_node_ids": invalidated,
+            "reopened_inquiry_ids": reopened,
+            "preserved_node_ids": preserved,
+        }
+
+    @staticmethod
+    def _node_depends_on_fact(node: DependencyNode, fact_id: str) -> bool:
+        attributes = node.attributes if isinstance(node.attributes, dict) else {}
+        scope = attributes.get("dependency_scope") if isinstance(attributes.get("dependency_scope"), dict) else {}
+        listed = {str(item) for item in (scope.get("fact_ids") or []) if str(item).strip()}
+        listed.update(str(item) for item in (attributes.get("source_fact_ids") or []) if str(item).strip())
+        listed.update(str(item) for item in (attributes.get("support_fact_ids") or []) if str(item).strip())
+        if attributes.get("support_fact_id"):
+            listed.add(str(attributes.get("support_fact_id")))
+        cache = attributes.get("proof_cache") if isinstance(attributes.get("proof_cache"), dict) else {}
+        listed.update(str(item) for item in (cache.get("fact_ids") or []) if str(item).strip())
+        if cache.get("fact_id"):
+            listed.add(str(cache.get("fact_id")))
+        for inquiry in attributes.get("inquiry_targets") or []:
+            if isinstance(inquiry, dict) and str(inquiry.get("fact_id") or inquiry.get("entity_id") or "") == fact_id:
+                listed.add(fact_id)
+        return fact_id in listed
+
+    def apply_retrieval_nomination(
+        self,
+        graph: DependencyGraph,
+        payload: Dict[str, Any],
+        *,
+        claim_id: str = "",
+        requirement_id: str = "",
+        source_span: Optional[Dict[str, Any]] = None,
+        allegation_id: str = "",
+    ) -> Dict[str, Any]:
+        """Admit retrieval output as a nomination until exact binding is rechecked.
+
+        A bound nomination may support a factual allegation. It does not rewrite
+        or satisfy the governing legal requirement.
+        """
+        from mediator.integrations.graph_tools import GraphRetrievalAugmentor
+
+        if not isinstance(graph, DependencyGraph):
+            return {"admitted": False, "reason": "dependency_graph_unavailable", "bound_support": False}
+        augmentor = GraphRetrievalAugmentor()
+        if claim_id or requirement_id or source_span is not None:
+            checked = augmentor.recheck_support_binding(
+                payload,
+                claim_id=claim_id,
+                requirement_id=requirement_id,
+                source_span=source_span,
+            )
+        else:
+            checked = dict(payload)
+            checked["bound_support"] = False
+            checked["support_status"] = checked.get("support_status") or "candidate_nomination"
+            checked["satisfied_legal_requirement"] = False
+        legal = graph.nodes.get(requirement_id) if requirement_id else None
+        legal_before = None
+        if legal is not None:
+            legal_before = {
+                "id": legal.id,
+                "name": legal.name,
+                "description": legal.description,
+                "satisfied": legal.satisfied,
+                "rule_id": (legal.attributes or {}).get("rule_id"),
+                "authority_id": (legal.attributes or {}).get("authority_id"),
+                "source_hash": (legal.attributes or {}).get("source_hash"),
+                "source_span": deepcopy((legal.attributes or {}).get("source_span")),
+                "provenance": deepcopy((legal.attributes or {}).get("provenance")),
+            }
+        record_id = str(checked.get("id") or "").strip()
+        if record_id and graph.get_node(record_id) is None:
+            graph.add_node(DependencyNode(
+                id=record_id,
+                node_type=NodeType.EVIDENCE,
+                name=str(checked.get("name") or "Evidence"),
+                description=str(checked.get("description") or ""),
+                satisfied=False,
+                confidence=float(checked.get("retrieval_confidence", checked.get("confidence", 0.0)) or 0.0),
+                attributes={
+                    "support_status": checked.get("support_status"),
+                    "binding_status": checked.get("binding_status"),
+                    "bound_support": bool(checked.get("bound_support")),
+                    "retrieval_confidence": checked.get("retrieval_confidence", checked.get("confidence")),
+                    "confidence_role": "retrieval_candidate",
+                    "satisfied_legal_requirement": False,
+                    "supports_claims": list(checked.get("supports_claims") or []),
+                    "source_type": checked.get("source_type"),
+                },
+            ))
+        if checked.get("bound_support") and allegation_id and allegation_id in graph.nodes and record_id in graph.nodes:
+            dependency_id = f"supports:{record_id}:{allegation_id}"
+            if dependency_id not in graph.dependencies:
+                graph.add_dependency(Dependency(
+                    id=dependency_id,
+                    source_id=record_id,
+                    target_id=allegation_id,
+                    dependency_type=DependencyType.SUPPORTS,
+                    required=False,
+                    strength=0.0,
+                ))
+            allegation = graph.nodes[allegation_id]
+            allegation_attributes = dict(allegation.attributes or {})
+            refs = list(allegation_attributes.get("evidence_support_refs") or [])
+            if record_id not in refs:
+                refs.append(record_id)
+            allegation_attributes["evidence_support_refs"] = refs
+            allegation.attributes = allegation_attributes
+        if legal is not None and legal_before is not None:
+            legal.id = legal_before["id"]
+            legal.name = legal_before["name"]
+            legal.description = legal_before["description"]
+            legal.satisfied = False if not legal_before["satisfied"] else legal_before["satisfied"]
+            attributes = dict(legal.attributes or {})
+            attributes["rule_id"] = legal_before["rule_id"]
+            attributes["authority_id"] = legal_before["authority_id"]
+            attributes["source_hash"] = legal_before["source_hash"]
+            attributes["source_span"] = legal_before["source_span"]
+            attributes["provenance"] = legal_before["provenance"]
+            attributes["satisfied_by_retrieval"] = False
+            legal.attributes = attributes
+        graph._update_metadata()
+        return {
+            "admitted": bool(checked.get("bound_support")),
+            "bound_support": bool(checked.get("bound_support")),
+            "support_status": checked.get("support_status"),
+            "binding_status": checked.get("binding_status"),
+            "binding_reason": checked.get("binding_reason"),
+            "satisfied_legal_requirement": False,
+            "retrieval_confidence": checked.get("retrieval_confidence", checked.get("confidence")),
+            "legal_requirement": legal_before,
+        }
+
+    def support_factual_allegation(
+        self,
+        graph: DependencyGraph,
+        *,
+        evidence_id: str,
+        allegation_id: str,
+        legal_requirement_id: str,
+    ) -> Dict[str, Any]:
+        """Let evidence support an allegation without editing the legal requirement."""
+        evidence = graph.nodes.get(evidence_id)
+        allegation = graph.nodes.get(allegation_id)
+        legal = graph.nodes.get(legal_requirement_id)
+        if evidence is None or allegation is None or legal is None:
+            return {"supported": False, "reason": "endpoint_unavailable"}
+        before = {
+            "id": legal.id,
+            "name": legal.name,
+            "description": legal.description,
+            "rule_id": (legal.attributes or {}).get("rule_id"),
+            "authority_id": (legal.attributes or {}).get("authority_id"),
+            "source_hash": (legal.attributes or {}).get("source_hash"),
+            "source_span": deepcopy((legal.attributes or {}).get("source_span")),
+            "provenance": deepcopy((legal.attributes or {}).get("provenance")),
+            "satisfied": bool(legal.satisfied),
+        }
+        dependency_id = f"supports:{evidence_id}:{allegation_id}"
+        if dependency_id not in graph.dependencies:
+            graph.add_dependency(Dependency(
+                id=dependency_id,
+                source_id=evidence_id,
+                target_id=allegation_id,
+                dependency_type=DependencyType.SUPPORTS,
+                required=False,
+                strength=1.0,
+            ))
+        attributes = dict(allegation.attributes or {})
+        refs = list(attributes.get("evidence_support_refs") or [])
+        if evidence_id not in refs:
+            refs.append(evidence_id)
+        attributes["evidence_support_refs"] = refs
+        attributes["epistemic_class"] = attributes.get("epistemic_class") or "allegation"
+        allegation.attributes = attributes
+        legal.name = before["name"]
+        legal.description = before["description"]
+        legal.satisfied = before["satisfied"]
+        legal_attributes = dict(legal.attributes or {})
+        legal_attributes["rule_id"] = before["rule_id"]
+        legal_attributes["authority_id"] = before["authority_id"]
+        legal_attributes["source_hash"] = before["source_hash"]
+        legal_attributes["source_span"] = before["source_span"]
+        legal_attributes["provenance"] = before["provenance"]
+        legal.attributes = legal_attributes
+        graph._update_metadata()
+        return {"supported": True, "legal_requirement": before, "allegation_id": allegation_id}
+
+    def record_visible_contradiction(
+        self,
+        graph: DependencyGraph,
+        *,
+        left_fact_id: str,
+        right_fact_id: str,
+        legal_requirement_id: str,
+    ) -> Dict[str, Any]:
+        """Keep both facts visible. Neither contradiction becomes a satisfied legal requirement."""
+        left = graph.nodes.get(left_fact_id)
+        right = graph.nodes.get(right_fact_id)
+        legal = graph.nodes.get(legal_requirement_id)
+        if left is None or right is None or legal is None:
+            return {"visible": False, "reason": "endpoint_unavailable"}
+        before = {
+            "id": legal.id,
+            "name": legal.name,
+            "description": legal.description,
+            "rule_id": (legal.attributes or {}).get("rule_id"),
+            "source_hash": (legal.attributes or {}).get("source_hash"),
+            "provenance": deepcopy((legal.attributes or {}).get("provenance")),
+        }
+        dependency_id = f"contradicts:{left_fact_id}:{right_fact_id}"
+        if dependency_id not in graph.dependencies:
+            graph.add_dependency(Dependency(
+                id=dependency_id,
+                source_id=left_fact_id,
+                target_id=right_fact_id,
+                dependency_type=DependencyType.CONTRADICTS,
+                required=False,
+                strength=1.0,
+            ))
+        legal.satisfied = False
+        attributes = dict(legal.attributes or {})
+        attributes["satisfaction_state"] = "unsatisfied"
+        attributes["satisfied_by_contradiction"] = False
+        attributes["rule_id"] = before["rule_id"]
+        attributes["source_hash"] = before["source_hash"]
+        attributes["provenance"] = before["provenance"]
+        legal.attributes = attributes
+        legal.name = before["name"]
+        legal.description = before["description"]
+        graph._update_metadata()
+        return {
+            "visible": left_fact_id in graph.nodes and right_fact_id in graph.nodes,
+            "legal_requirement_satisfied": bool(legal.satisfied),
+            "dependency_id": dependency_id,
+            "legal_text": legal.name,
+            "legal_source_hash": attributes.get("source_hash"),
+        }
+
     def add_evidence_to_graph(self, graph: DependencyGraph, 
                              evidence_data: Dict[str, Any],
                              supports_claim_id: str) -> str:
@@ -3723,17 +4347,27 @@ class DependencyGraphBuilder:
         Returns:
             The ID of the created evidence node
         """
+        nomination = str(evidence_data.get("support_status") or "") == "candidate_nomination" or evidence_data.get("binding_status") == "unbound"
         evidence_node = DependencyNode(
             id=self._get_node_id(),
             node_type=NodeType.EVIDENCE,
             name=evidence_data.get('name', 'Unnamed Evidence'),
             description=evidence_data.get('description', ''),
-            satisfied=True,  # Evidence is inherently satisfied once provided
+            satisfied=not nomination,
             confidence=evidence_data.get('confidence', 0.8),
             attributes=evidence_data.get('attributes', {})
         )
+        if nomination:
+            evidence_node.attributes = dict(evidence_node.attributes or {})
+            evidence_node.attributes["support_status"] = "candidate_nomination"
+            evidence_node.attributes["satisfied_legal_requirement"] = False
+            evidence_node.satisfied = False
         graph.add_node(evidence_node)
-        
+
+        if nomination and not evidence_data.get("bound_support"):
+            graph._update_metadata()
+            return evidence_node.id
+
         # Create support relationship
         dep = Dependency(
             id=self._get_dependency_id(),

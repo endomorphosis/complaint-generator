@@ -11,8 +11,11 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 from typing import Any, Mapping, Sequence
+
+from .campaign import DEFAULT_ARTIFACTS, campaign_artifacts
 
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
@@ -51,6 +54,7 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         raise ValueError("spec must be an object")
     _text(spec.get("schema_version"), "schema_version")
     _text(spec.get("title"), "title")
+    campaign_artifacts(spec)
     if spec.get("provider") != _PROVIDER or spec["provider"].get("allow_fallback") is not False:
         raise ValueError("provider must use grok-4.7 through llm_router with fallback disabled")
     if not isinstance(spec.get("execution_policy"), dict) or not spec["execution_policy"]:
@@ -144,6 +148,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
     """Build canonical contracts with behavior-test evidence, without executing it."""
 
     spec = validate_spec(dict(spec))
+    artifacts = campaign_artifacts(spec)
     from integrations.ipfs_datasets.loader import ensure_import_paths
 
     ensure_import_paths("ipfs_accelerate_py.agent_supervisor")
@@ -179,7 +184,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
             goal_id=goal["id"], owner_actor_id=_ACTOR_ID,
             satisfaction_formula_id=formula.formula_id,
             evidence_requirement_ids=tuple(f"test.{task['id']}" for task in spec["tasks"] if task["goal_id"] == goal["id"]),
-            source_ids=(SPEC_RELATIVE,), metadata={"title": goal["title"]},
+            source_ids=(artifacts.spec_relative,), metadata={"title": goal["title"]},
         ))
         for subgoal in goal["subgoals"]:
             formula = subgoal_satisfied(subgoal["id"])
@@ -205,7 +210,7 @@ def build_improvement_work_plan(spec: Mapping[str, Any]) -> Any:
     ) for task in spec["tasks"])
     return FormalWorkPlan(
         vocabulary_profile_id="supervisor-reviewed", vocabulary_version=LOGIC_VOCABULARY_VERSION,
-        source_ids=("complaint-generator", SPEC_RELATIVE), repository_tree_id="",
+        source_ids=("complaint-generator", artifacts.spec_relative), repository_tree_id="",
         trace_bound=1,
         actors=(Actor(actor_id=_ACTOR_ID, kind=ActorKind.AGENT, principal_id="complaint-generator",
                       capabilities=("implementation", "behavioral_validation"), metadata={"provider": dict(_PROVIDER)}),),
@@ -249,12 +254,12 @@ _CONTRACT_METADATA = (
 )
 
 
-def _parsed_projection(text: str, root: Path) -> dict[str, Any]:
+def _parsed_projection(text: str, root: Path, *, board_relative: str = BOARD_RELATIVE) -> dict[str, Any]:
     """Parse with the production board path so semantic identities stay path-bound."""
 
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_text
 
-    parsed = parse_task_text(text, path=root / BOARD_RELATIVE, task_header_prefix=_TASK_HEADER_PREFIX)
+    parsed = parse_task_text(text, path=root / board_relative, task_header_prefix=_TASK_HEADER_PREFIX)
     tasks: dict[str, Any] = {}
     for task in parsed:
         if task.task_id in tasks:
@@ -288,7 +293,9 @@ def _projection_drift(existing: Any, expected: Any) -> list[str]:
 
 def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], plan_id: str, root: Path) -> None:
     expected_text = _render_board(spec, plan_id)
-    existing, expected = _parsed_projection(existing_text, root), _parsed_projection(expected_text, root)
+    relative = campaign_artifacts(spec).board_relative
+    existing, expected = (_parsed_projection(existing_text, root, board_relative=relative),
+                          _parsed_projection(expected_text, root, board_relative=relative))
     planned = {task["id"] for task in spec["tasks"]}
     if set(existing) != planned or set(expected) != planned:
         raise ValueError("existing task board differs from this plan; preserve it and migrate explicitly")
@@ -305,7 +312,7 @@ def _require_matching_projection(existing_text: str, spec: Mapping[str, Any], pl
 
 def _require_emitted_projection(text: str, spec: Mapping[str, Any], root: Path) -> None:
     """Validate the actual native projection before publishing a new board."""
-    tasks = _parsed_projection(text, root)
+    tasks = _parsed_projection(text, root, board_relative=campaign_artifacts(spec).board_relative)
     if set(tasks) != {item["id"] for item in spec["tasks"]}:
         raise ValueError("rendered native projection differs from the specification")
     for item in spec["tasks"]:
@@ -346,7 +353,49 @@ def _atomic_create(path: Path, content: str) -> bool:
 
 
 def _atomic_write(path: Path, content: str) -> None:
+    """Publish changed bytes without replacing an unchanged protected file.
+
+    Only a stable, canonical, owned document can take the no-write path.
+    Other leaf types retain atomic replacement without opening their target.
+    """
+    path = Path(path).absolute()
+    if path.parent.resolve(strict=False) != path.parent:
+        raise ValueError("plan artifact parent traverses an alias")
     path.parent.mkdir(parents=True, exist_ok=True)
+    expected = content.encode("utf-8")
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        before = None
+    if (before is not None and stat.S_ISREG(before.st_mode)
+            and before.st_uid == os.getuid() and before.st_nlink == 1
+            and stat.S_IMODE(before.st_mode) in {0o600, 0o640, 0o644, 0o660, 0o664}
+            and before.st_size == len(expected)
+            and path.resolve(strict=True) == path
+            and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_NONBLOCK")):
+        fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+                  "st_size", "st_mtime_ns", "st_ctime_ns")
+
+        def identity(value):
+            return tuple(getattr(value, field) for field in fields)
+
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_NOATIME", 0))
+        try:
+            if identity(os.fstat(fd)) != identity(before):
+                raise ValueError("plan artifact changed while opening")
+            data = bytearray()
+            while len(data) <= len(expected):
+                chunk = os.read(fd, min(1024 * 1024, len(expected) + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            if (identity(os.fstat(fd)) != identity(before) or identity(path.lstat()) != identity(before)
+                    or path.resolve(strict=True) != path):
+                raise ValueError("plan artifact changed while comparing")
+            if data == expected:
+                return
+        finally:
+            os.close(fd)
     fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -369,6 +418,8 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     spec_path = Path(spec_path).resolve()
     root = Path(repo_root).resolve()
     spec = load_spec(spec_path)
+    artifacts = campaign_artifacts(spec)
+    artifacts.validate_source(root, spec_path)
     plan = build_improvement_work_plan(spec)
     from ipfs_accelerate_py.agent_supervisor.planning.formal_planning_contracts import FormalWorkPlan
     from ipfs_accelerate_py.agent_supervisor.planning.formal_plan_validator import FormalPlanValidator
@@ -380,7 +431,7 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
     validation = FormalPlanValidator().validate(restored)
     rendered = _render_board(spec, plan.plan_id)
     _require_emitted_projection(rendered, spec, root)
-    plan_path, board_path = root / PLAN_RELATIVE, root / BOARD_RELATIVE
+    plan_path, board_path = root / artifacts.plan_relative, root / artifacts.board_relative
     marker = f"<!-- plan_id: {plan.plan_id} -->"
     board_preserved = board_path.exists()
     if not board_preserved:
@@ -396,8 +447,8 @@ def generate(spec_path: Path | str, repo_root: Path | str) -> dict[str, Any]:
         # parse before any artifact write so a drifted active board is neither
         # rewritten nor given an ingestion receipt.
         _require_matching_projection(existing, spec, plan.plan_id, root)
-    # The board is not touched at all when it already exists, so a concurrent
-    # daemon can keep changing its statuses without a compiler overwrite race.
+    # Keep both existing board state and identical formal-plan identity intact;
+    # Native crash fences observe inode/mode/timestamps as well as content.
     _atomic_write(plan_path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     receipt = {
         "schema_version": "complaint-generator/improvement-plan-ingestion@1",
@@ -442,6 +493,46 @@ def canonical_model_policy() -> dict[str, Any]:
 
     return {"router": _PROVIDER["router"], "provider": _PROVIDER["provider"],
             "model": _PROVIDER["model"], "allow_fallback": False}
+
+
+def source_generation(spec: Mapping[str, Any]) -> str:
+    """Identity of the exact specification bytes a campaign observation may bind."""
+
+    spec = validate_spec(dict(spec))
+    return hashlib.sha256(json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def campaign_observation_binding(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind a separate campaign to its plan, source generation, and historical intake paths.
+
+    Compilation does not execute validation, start a provider, or rewrite the
+    completed intake artifacts. Those paths stay a historical baseline.
+    """
+
+    spec = validate_spec(dict(spec))
+    artifacts = campaign_artifacts(spec)
+    plan = build_improvement_work_plan(spec)
+    generation = plan.metadata["spec_sha256"]
+    if generation != source_generation(spec):
+        raise ValueError("campaign source generation differs from its specification")
+    return {
+        "plan_id": plan.plan_id,
+        "source_generation": generation,
+        "board_namespace": artifacts.board_namespace,
+        "spec_relative": artifacts.spec_relative,
+        "plan_relative": artifacts.plan_relative,
+        "board_relative": artifacts.board_relative,
+        "distinct_from_historical_intake": artifacts != DEFAULT_ARTIFACTS,
+        "historical_baseline": {
+            "spec_relative": SPEC_RELATIVE,
+            "plan_relative": PLAN_RELATIVE,
+            "board_relative": BOARD_RELATIVE,
+            "immutable": True,
+            "completion_authority": False,
+        },
+        "provider": canonical_model_policy(),
+        "completion_authority": False,
+    }
 
 
 _PRIVATE_BINDING_ROOTS = frozenset({"data", "output", "statefiles", "exports", ".complaint_workspace", "secrets", "evidence", "uploads", "attachments", "private", "sessions"})
@@ -796,8 +887,12 @@ def _host_evidence_reason(observation, task):
         expected = measured["observation_binding"]
         if any(observation.get(key) != value for key, value in expected.items()):
             return "measured_case_identity_mismatch"
-        from .improvement_runner import _source_freeze
-        if _source_freeze(Path(measured["workspace_path"]), measured["output_paths"]) != measured["source_after"]:
+        from .improvement_runner import _source_freeze, _task_freeze_inputs, _task_outputs
+        inputs = measured.get("freeze_inputs", measured["output_paths"])
+        if (measured["output_paths"] != _task_outputs(task)
+                or inputs != _task_freeze_inputs(task, context=observation["host_task_contract"].get("context"))):
+            return "task_contract_changed"
+        if _source_freeze(Path(measured["workspace_path"]), inputs) != measured["source_after"]:
             return "stale_source_hash"
         if observation["host_task_contract"]["task"] != dict(task):
             return "task_contract_changed"

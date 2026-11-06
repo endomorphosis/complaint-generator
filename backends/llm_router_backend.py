@@ -16,6 +16,7 @@ from integrations.ipfs_accelerate.routers import (
     PINNED_GROK_CANARY_PROMPT,
     PINNED_GROK_MODEL,
     PINNED_GROK_PROVIDER,
+    pinned_grok47_adapter_binding,
     unpinned_grok_route_reason,
     load_observed_llm_symbols,
 )
@@ -309,6 +310,24 @@ class LLMRouterBackend:
         with self._stats_lock:
             self._retry_stats['calls_total'] += 1
 
+        if "inference_purpose" in kwargs:
+            purpose = kwargs.pop("inference_purpose")
+            from mediator.hook_runtime import is_local_only_purpose
+            # Purpose labels dispatch only through run_declared_purpose.
+            # A direct call must not contact the provider.
+            local = is_local_only_purpose(purpose)
+            self._record(
+                status="local_only" if local else "unavailable",
+                error_code="" if local else "use_declared_hook_boundary",
+                route_observation="not_dispatched",
+            )
+            return json.dumps({
+                "model_dispatched": False,
+                "status": "local_only" if local else "unavailable",
+                "purpose": purpose if type(purpose) is str else "",
+                "provider_invoked": False,
+            })
+
         supplied = kwargs.get("intake_request_id") or kwargs.get("request_id")
         if type(supplied) is str and re.fullmatch(r"[0-9a-f]{32}", supplied):
             self._request_id = supplied
@@ -428,6 +447,88 @@ class LLMRouterBackend:
             raise last_error
         raise Exception(f'llm_router_error: {str(last_error)}')
 
+    def run_declared_purpose(self, context, purpose_id, inputs, **kwargs):
+        """Dispatch a declared hook purpose without treating a fake transport as live Grok."""
+
+        from mediator.hook_runtime import dispatch_declared_hook_purpose
+
+        result = dispatch_declared_hook_purpose(context, purpose_id, inputs, **kwargs)
+        identity = result.get("identity") if isinstance(result.get("identity"), dict) else {}
+        requested = identity.get("requested") if isinstance(identity.get("requested"), dict) else {}
+        selected = identity.get("selected") if isinstance(identity.get("selected"), dict) else {}
+        observed = identity.get("observed") if isinstance(identity.get("observed"), dict) else {}
+        receipt = self._receipt(
+            status="configured" if not result.get("model_dispatched") else "unavailable",
+            error_code="" if result.get("status") in {"available", "local_only"} else str(result.get("code") or ""),
+            selected_provider=str(selected.get("provider") or ""),
+            selected_model=str(selected.get("model") or ""),
+            route_observation="not_dispatched" if not result.get("synthetic_transport_invoked") else "synthetic",
+            provider_supported_identity=False,
+            request_id="",
+        )
+        receipt["requested_provider"] = str(requested.get("provider") or receipt["requested_provider"])
+        receipt["requested_model"] = str(requested.get("model") or receipt["requested_model"])
+        receipt["observed_provider"] = str(observed.get("provider") or "")
+        receipt["observed_model"] = str(observed.get("model") or "")
+        receipt["observed_build"] = str(observed.get("build") or "")
+        receipt["live_model_identity_verified"] = False
+        receipt["live_build_identity_verified"] = False
+        receipt["transport_kind"] = "synthetic" if result.get("synthetic_transport_invoked") or identity else receipt.get("transport_kind", "")
+        if identity:
+            receipt["live_model_identity_verified"] = bool(identity.get("live_model_identity_verified"))
+            receipt["live_build_identity_verified"] = bool(identity.get("live_build_identity_verified"))
+            receipt["transport_kind"] = str(identity.get("transport_kind") or "synthetic")
+        self.task_receipts.append(receipt)
+        self.task_receipts[:] = self.task_receipts[-32:]
+        result["backend_receipt"] = {
+            "requested_provider": receipt["requested_provider"],
+            "requested_model": receipt["requested_model"],
+            "selected_provider": receipt["selected_provider"],
+            "selected_model": receipt["selected_model"],
+            "observed_provider": receipt["observed_provider"],
+            "observed_model": receipt["observed_model"],
+            "observed_build": receipt["observed_build"],
+            "live_model_identity_verified": receipt["live_model_identity_verified"],
+            "live_build_identity_verified": receipt["live_build_identity_verified"],
+            "provider_supported_identity": False,
+            "transport_kind": receipt["transport_kind"],
+        }
+        return result
+
+    def run_observed_hook_purpose(self, context, purpose_id, inputs, **kwargs):
+        """Observed hook dispatch. Fallbacks and injected transports are not used.
+
+        The qualified Native constructor and this backend's cancel event stay
+        the resource owners. A failure receipt is recorded and returned so the
+        caller can keep the pending case revision.
+        """
+
+        from mediator.hook_runtime import dispatch_observed_hook_purpose
+
+        kwargs.pop("model_transport", None)
+        kwargs.pop("allow_local_fallback", None)
+        kwargs.pop("allow_cross_provider_fallback", None)
+        kwargs.setdefault("cancel_event", self._cancel_event)
+        if self.timeout_seconds is not None:
+            kwargs.setdefault("timeout", min(float(self.timeout_seconds), 60.0))
+        result = dispatch_observed_hook_purpose(context, purpose_id, inputs, **kwargs)
+        receipt = result.get("receipt") if isinstance(result.get("receipt"), dict) else {}
+        safe = {key: receipt.get(key) for key in (
+            "kind", "purpose_id", "status", "code", "request_id", "pending_revision",
+            "pending_revision_recoverable", "case_revision_mutated", "accepted",
+            "session_retained", "tools_allowed", "tools_invoked", "allow_local_fallback",
+            "allow_cross_provider_fallback", "prompt_logged", "live_canary",
+            "live_model_identity_verified", "live_build_identity_verified", "transport_kind",
+            "observed_provider", "observed_model", "observed_build",
+        )}
+        safe["router"] = INFERENCE_OWNER
+        safe["provider_supported_identity"] = False
+        self.task_receipts.append(safe)
+        self.task_receipts[:] = self.task_receipts[-32:]
+        self.session_retained = True
+        result["backend_receipt"] = dict(safe)
+        return result
+
     def run_synthetic_live_canary(self, *, transport=None, confirm_live=False):
         """Use the existing bounded public-token API once; injected evidence is synthetic."""
         if type(confirm_live) is not bool:
@@ -495,7 +596,8 @@ class LLMRouterBackend:
             self._fail("privacy_denied", route_observation="refused")
         self._raise_if_cancelled()
         generate, result_type, observation_type = load_observed_llm_symbols()
-        if not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type):
+        if (not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type)
+                or pinned_grok47_adapter_binding(generate) is None):
             self._fail("route_unverified", route_observation="unverified")
         request_id = self._request_id
         remaining = deadline - time.monotonic() if deadline is not None else 60.0

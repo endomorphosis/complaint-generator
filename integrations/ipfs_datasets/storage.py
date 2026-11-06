@@ -398,6 +398,11 @@ def _select_declared_operation(registry: Any, action: str) -> str | None:
 def _is_local_byte_operation(backend: Any, action: str) -> bool:
     if isinstance(backend, LocalCacheIPFSBackend):
         return True
+    # This concrete Host adapter executes the actual Kit local filesystem owner.
+    # Caller flags and a live_provider label do not classify arbitrary backends.
+    from integrations.private_storage import KitLocalCiphertextBackend
+    if type(backend) is KitLocalCiphertextBackend:
+        return True
     if _is_service_router(backend):
         operation_id = _select_declared_operation(backend.registry, action)
         return bool(operation_id and operation_id.startswith("storage.local-durable."))
@@ -1072,6 +1077,13 @@ def pin_cid(cid: str, *, backend: Any = None, backend_name: str | None = None) -
     )
 
 
+PUBLIC_LEGAL_CONTENT_ORIGINS = frozenset({
+    "authority_full_text",
+    "authority_reference_fallback",
+})
+PUBLIC_LEGAL_CORPUS_FAMILIES = frozenset({"legal_authority"})
+
+
 AUTOMATIC_PRIVATE_ARTIFACT_KINDS = frozenset({
     "session",
     "answers",
@@ -1426,6 +1438,40 @@ def store_automatic_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any
     return store_private_artifact(*args, **kwargs)
 
 
+def store_public_legal_corpus(
+    data: bytes,
+    *,
+    content_origin: str,
+    corpus_family: str = "legal_authority",
+    backend: Any = None,
+    backend_name: str | None = None,
+    pin_content: bool = True,
+) -> dict[str, Any]:
+    """Store an explicitly public legal corpus without the private artifact owner.
+
+    The caller must name a public legal origin and corpus. Private complaint
+    bytes are not accepted on this path, and a failed store does not invent a
+    content identifier.
+    """
+
+    if content_origin not in PUBLIC_LEGAL_CONTENT_ORIGINS or corpus_family not in PUBLIC_LEGAL_CORPUS_FAMILIES:
+        raise ValueError("public legal corpus must be explicitly classified")
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("public legal corpus must be bytes")
+    stored = store_bytes(
+        bytes(data),
+        pin_content=pin_content,
+        backend=backend,
+        backend_name=backend_name,
+    )
+    receipt = dict(stored)
+    receipt["classification"] = "public_legal_corpus"
+    receipt["private_artifact"] = False
+    receipt["content_origin"] = content_origin
+    receipt["corpus_family"] = corpus_family
+    return receipt
+
+
 def retrieve_private_artifact(*args: Any, **kwargs: Any) -> dict[str, Any]:
     """Read ciphertext from the public backend and open it for the expected binding."""
 
@@ -1492,6 +1538,170 @@ def count_verified_ciphertext_replicas(observations: Sequence[Mapping[str, Any]]
     from integrations.private_storage import count_verified_ciphertext_replicas as _count
 
     return _count(observations)
+
+
+def _unavailable_kit_durability(reason: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "reason": reason,
+        "schema": "",
+        "durable": False,
+        "success": False,
+        "acknowledged_data": False,
+        "counts_as_replica": False,
+        "network_durable": False,
+        "local_fsync_is_network_durability": False,
+        "live_qualification": False,
+    }
+
+
+def _kit_snapshot_durability_record(*, revision: str) -> dict[str, Any]:
+    """Attach one existing Kit durability receipt for the local snapshot fsync.
+
+    The receipt records the file and directory fsync this process just
+    finished. It does not claim a WAL segment, a network replica, or a live
+    provider qualification.
+    """
+
+    try:
+        from integrations.private_storage import _prefer_vendored_kit
+
+        _prefer_vendored_kit()
+        from ipfs_kit_py.core.vfs.host_contracts import DurabilityMode, HostErrno
+        from ipfs_kit_py.kernel_vfs.durability import (
+            DurabilityCallbackKind,
+            DurabilityDisposition,
+            DurabilityReceipt,
+        )
+    except Exception:
+        return _unavailable_kit_durability("kit_durability_unavailable")
+    try:
+        receipt = DurabilityReceipt(
+            receipt_id="interview-snapshot-fsync-" + revision,
+            callback=DurabilityCallbackKind.FSYNC,
+            disposition=DurabilityDisposition.SUCCESS,
+            success=True,
+            durable=True,
+            durability_mode=DurabilityMode.WAL_AND_BACKEND,
+            acknowledged_data=True,
+            observed_effect=True,
+            backend_file_fsync=True,
+            backend_parent_directory_fsync=True,
+            wal_file_fsync=False,
+            wal_parent_directory_fsync=False,
+            fsync_receipt_id="interview-snapshot-directory-fsync-" + revision,
+            path="",
+            path_ref="interview-snapshot/" + revision,
+            errno=HostErrno.OK,
+            detail={
+                "wal_segment": False,
+                "network_replica": False,
+                "counts_as_replica": False,
+                "boundaries": ["snapshot_file", "snapshot_directory"],
+            },
+        )
+    except Exception:
+        return _unavailable_kit_durability("kit_durability_rejected")
+    record = receipt.to_record()
+    record["path"] = ""
+    record["status"] = "available"
+    record["counts_as_replica"] = False
+    record["network_durable"] = False
+    record["local_fsync_is_network_durability"] = False
+    record["live_qualification"] = False
+    return record
+
+
+def _read_kit_durability(dir_fd: int) -> dict[str, Any]:
+    try:
+        raw = _interview_read(dir_fd, "kit-durability.json")
+    except FileNotFoundError:
+        return _unavailable_kit_durability("missing")
+    except (OSError, InterviewSnapshotError):
+        return _unavailable_kit_durability("unreadable")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _unavailable_kit_durability("corrupt")
+    if not isinstance(payload, dict):
+        return _unavailable_kit_durability("corrupt")
+    payload["counts_as_replica"] = False
+    payload["network_durable"] = False
+    payload["local_fsync_is_network_durability"] = False
+    payload["live_qualification"] = False
+    payload.pop("path", None)
+    return payload
+
+
+def _write_kit_durability(dir_fd: int, revision: str, complaint_text: str) -> dict[str, Any]:
+    record = _kit_snapshot_durability_record(revision=revision)
+    encoded = json.dumps(record, sort_keys=True).encode("utf-8")
+    if complaint_text and complaint_text.encode("utf-8") in encoded:
+        record = _unavailable_kit_durability("redacted")
+        encoded = json.dumps(record, sort_keys=True).encode("utf-8")
+    try:
+        _interview_write_exclusive(dir_fd, "kit-durability.json", encoded)
+        os.fsync(dir_fd)
+    except (OSError, InterviewSnapshotError):
+        return _unavailable_kit_durability("sidecar_unwritable")
+    return record
+
+
+def label_ciphertext_replica_observations(
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    case_id: str,
+    key_id: str,
+    version: str,
+) -> dict[str, Any]:
+    """Count only authenticated readback bound to the current object, key, case, and version.
+
+    Acknowledgements, local CIDs, and unbound rows stay visible and uncounted.
+    Fixture providers stay labeled and can count only after that same readback.
+    """
+
+    prepared: list[dict[str, Any]] = []
+    labels: list[dict[str, Any]] = []
+    for row in observations:
+        if not isinstance(row, Mapping):
+            continue
+        provider_id = str(row.get("provider_id") or row.get("provider") or "")
+        object_name = str(row.get("name") or row.get("object") or "")
+        row_version = str(row.get("version") or "")
+        row_case = str(row.get("case_id") or case_id)
+        row_key = str(row.get("key_id") or key_id)
+        acknowledgement = bool(row.get("acknowledgement") or row.get("acknowledgement_only"))
+        local_cid = bool(row.get("local_cid") or row.get("cid"))
+        fixture = bool(row.get("fixture_provider") or row.get("provider_class") == "fixture")
+        bound = bool(object_name) and row_case == case_id and row_key == key_id and row_version == version
+        readback = (
+            row.get("readback") is True
+            or (row.get("counted") is True and row.get("digest_match") is True and row.get("version_match") is True)
+        )
+        authenticated = bound and readback and not acknowledgement and not local_cid
+        prepared.append({
+            "provider_id": provider_id,
+            "state": "verified" if authenticated else str(row.get("state") or "unbound"),
+            "digest_match": authenticated and row.get("digest_match") is True,
+            "version_match": authenticated and row.get("version_match") is True,
+        })
+        labels.append({
+            "provider_id": provider_id,
+            "object": object_name,
+            "case_id": row_case,
+            "key_id": row_key,
+            "version": row_version,
+            "acknowledgement": acknowledgement,
+            "local_cid": local_cid,
+            "fixture_provider": fixture,
+            "authenticated_readback": authenticated,
+            "counted": authenticated and row.get("digest_match") is True and row.get("version_match") is True,
+        })
+    summary = count_verified_ciphertext_replicas(prepared)
+    summary["labels"] = labels
+    summary["live_durability"] = False
+    summary["fixture_providers_labeled"] = all("fixture_provider" in item for item in labels)
+    return summary
 
 
 UPSTREAM_REPLICA_FIXTURES = (
@@ -1581,6 +1791,21 @@ def upstream_replica_fixture_qualification() -> dict[str, Any]:
 
 INTERVIEW_SNAPSHOT_SCHEMA = "interview-snapshot-v1"
 INTERVIEW_HEAD_SCHEMA = "interview-snapshot-head-v1"
+GROUNDED_SNAPSHOT_SCHEMA = "grounded-snapshot-bindings-v1"
+_GROUNDING_GRAPH_STATUSES = frozenset({"bound", "unknown", "unavailable"})
+_GROUNDING_IR_STATUSES = frozenset({"unavailable", "not_compiled", "conditional", "failed", "unknown"})
+_GROUNDING_PROOF_STATUSES = frozenset({
+    "unavailable", "not_run", "failed", "proved", "unknown", "unresolved", "not_proof", "not_authoritative",
+})
+_GROUNDING_STOP_ACTIONS = frozenset({"await_user", "review", "stop", "unavailable", "resume", "unknown"})
+_GROUNDING_PUBLIC_LAW = frozenset({"external_unverified", "external_missing", "external_present", "unavailable"})
+_GROUNDING_EPHEMERAL = frozenset({"ephemeral", "unavailable", "rebuildable"})
+_COLD_READ = {
+    "narrative_reextracted": False,
+    "hooks_replayed": False,
+    "model_calls": 0,
+    "bindings_from": "committed_snapshot",
+}
 UNENCRYPTED_INTERVIEW_NAME = "unencrypted-interview-snapshot.json"
 _INTERVIEW_PROTECTIONS = frozenset({"user_chosen_encrypted", "user_chosen_plaintext"})
 _INTERVIEW_PART_KINDS = (
@@ -1620,6 +1845,266 @@ class InterviewSnapshotError(RuntimeError):
         self.public_status = public_status
 
 
+def _grounding_token(value: Any, limit: int) -> str:
+    text = value if isinstance(value, str) else ""
+    if not text or len(text) > limit or re.fullmatch(r"[A-Za-z0-9_.:@/-]+", text) is None:
+        return ""
+    return text
+
+
+def _grounding_hash(value: Any) -> str:
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return ""
+
+
+def _graph_binding(record: Any, role: str) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    revision = _grounding_token(
+        source.get("revision") or source.get("graph_revision") or source.get("artifact_revision"),
+        120,
+    )
+    status = source.get("status") if source.get("status") in _GROUNDING_GRAPH_STATUSES else ""
+    if not revision:
+        revision = "unknown"
+        status = "unavailable" if status == "unavailable" else "unknown"
+    elif status not in {"bound", "unavailable"}:
+        status = "bound"
+    if status == "unknown":
+        revision = "unknown"
+    return {
+        "role": role,
+        "status": status,
+        "revision": revision,
+        "artifact_kind": _grounding_token(source.get("artifact_kind"), 80),
+        "artifact_revision": _grounding_token(source.get("artifact_revision"), 120),
+        "ciphertext_storage_id": _grounding_token(source.get("ciphertext_storage_id"), 128),
+        "graph_id": _grounding_token(source.get("graph_id"), 120),
+        "content_hash": _grounding_hash(source.get("content_hash")),
+    }
+
+
+def _source_reference_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:64]:
+        if not isinstance(item, Mapping):
+            continue
+        source_id = _grounding_token(item.get("source_id") or item.get("authority_id"), 120)
+        content_hash = _grounding_hash(item.get("content_hash") or item.get("sha256"))
+        if not source_id and not content_hash:
+            continue
+        span_start = item.get("span_start") if type(item.get("span_start")) is int else None
+        span_end = item.get("span_end") if type(item.get("span_end")) is int else None
+        rows.append({
+            "status": "bound" if source_id and content_hash else "reference_only",
+            "source_id": source_id,
+            "source_version": _grounding_token(item.get("source_version") or item.get("version"), 80),
+            "content_hash": content_hash,
+            "span_start": span_start,
+            "span_end": span_end,
+            "role": _grounding_token(item.get("role"), 64) or "unknown",
+        })
+    rows.sort(key=lambda row: (row["source_id"], row["content_hash"], row["role"]))
+    return rows
+
+
+def _proof_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:64]:
+        if not isinstance(item, Mapping):
+            continue
+        status = item.get("status") or item.get("proof_status") or "unknown"
+        if status not in _GROUNDING_PROOF_STATUSES:
+            status = "unknown"
+        rows.append({
+            "target_id": _grounding_token(item.get("target_id") or item.get("effect_id"), 120),
+            "status": status,
+            "receipt_ref": _grounding_token(item.get("receipt_ref") or item.get("transaction_id"), 80),
+        })
+    return rows
+
+
+def _hook_receipt_rows(records: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        return rows
+    for item in list(records)[:32]:
+        if not isinstance(item, Mapping):
+            continue
+        operation = _grounding_token(item.get("operation") or item.get("purpose"), 64)
+        request_id = _grounding_token(item.get("request_id"), 64)
+        if not operation and not request_id:
+            continue
+        label = item.get("invocation_label") if item.get("invocation_label") in {"real", "fake"} else "fake"
+        rows.append({
+            "operation": operation,
+            "purpose": _grounding_token(item.get("purpose"), 64),
+            "request_id": request_id,
+            "status": _grounding_token(item.get("status"), 64) or "unknown",
+            "accepted_graph_revision": _grounding_token(item.get("accepted_graph_revision"), 120),
+            "invocation_label": label,
+            "live_model_identity_verified": item.get("live_model_identity_verified") is True and label == "real",
+            "prompt_logged": False,
+            "provider_replayed": False,
+        })
+    return rows
+
+
+def _pending_binding(record: Any) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    inquiry_id = _grounding_token(source.get("inquiry_id"), 80)
+    status = _grounding_token(
+        source.get("inquiry_status") or source.get("status") or source.get("grounding_status"),
+        64,
+    ) or "unknown"
+    if status == "bound":
+        status = _grounding_token(source.get("grounding_status"), 64) or "unknown"
+    revision = source.get("revision")
+    if type(revision) is not int or revision < 0 or revision > 10_000_000:
+        revision_text = _grounding_token(revision, 40) or "unknown"
+    else:
+        revision_text = str(revision)
+    if not inquiry_id and status == "unknown":
+        binding_status = "unknown"
+    elif inquiry_id:
+        binding_status = "bound"
+    else:
+        binding_status = "unknown"
+    return {
+        "status": binding_status,
+        "inquiry_status": status,
+        "inquiry_id": inquiry_id,
+        "revision": revision_text,
+        "objective_id": _grounding_token(source.get("objective_id"), 120),
+        "target_id": _grounding_token(source.get("target_id"), 120),
+        "target_revision": _grounding_token(source.get("target_revision"), 120),
+        "source_references_status": _grounding_token(source.get("source_references_status"), 64) or "unknown",
+        "grounding_status": _grounding_token(source.get("grounding_status"), 64) or "unknown",
+    }
+
+
+def _stop_policy_binding(record: Any, outcome_reason: str) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    reasons = {
+        "unknown", "awaiting_user", "user_pause", "eof", "cancelled", "interrupted", "paused",
+        "needs_answer", "saturated", "deferred_unknown", "provider_unavailable", "limit_reached",
+    }
+    reason = source.get("reason") if source.get("reason") in reasons else outcome_reason
+    if reason not in reasons:
+        reason = "unknown"
+    action = source.get("action") if source.get("action") in _GROUNDING_STOP_ACTIONS else "unknown"
+    awaiting = reason == "awaiting_user" or action == "await_user"
+    if action == "unknown" and awaiting:
+        action = "await_user"
+    stalled = source.get("worker_stalled") is True and not awaiting
+    return {
+        "schema": "interview-stop-policy-v1",
+        "reason": reason,
+        "action": action,
+        "awaiting_user": awaiting,
+        "worker_stalled": stalled,
+        "legal_sufficiency": source.get("legal_sufficiency") is True,
+    }
+
+
+def _external_dependency_binding(record: Any) -> dict[str, Any]:
+    source = record if isinstance(record, Mapping) else {}
+    public = source.get("public_law") if isinstance(source.get("public_law"), Mapping) else {}
+    ephemeral = source.get("ephemeral_index") if isinstance(source.get("ephemeral_index"), Mapping) else {}
+    public_status = public.get("status") if public.get("status") in _GROUNDING_PUBLIC_LAW else "external_unverified"
+    ephemeral_status = ephemeral.get("status") if ephemeral.get("status") in _GROUNDING_EPHEMERAL else "ephemeral"
+    return {
+        "schema": "grounded-external-dependencies-v1",
+        "public_law": {
+            "dependency": "external",
+            "copied_into_snapshot": False,
+            "status": public_status,
+        },
+        "ephemeral_index": {
+            "dependency": "ephemeral",
+            "durable": False,
+            "status": ephemeral_status,
+        },
+        "remote_replicas": {
+            "existence_claimed": False,
+            "status": "not_asserted",
+            "snapshot_is_replica_proof": False,
+        },
+    }
+
+
+def canonical_grounded_bindings(
+    *,
+    factual_graph: Any = None,
+    legal_graph: Any = None,
+    source_references: Any = None,
+    conditional_ir: Any = None,
+    proof_statuses: Any = None,
+    hook_receipts: Any = None,
+    pending_inquiry: Any = None,
+    stop_policy: Any = None,
+    external_dependencies: Any = None,
+    outcome_reason: str = "unknown",
+    recorded: bool = True,
+) -> dict[str, Any]:
+    """Bind current owners. This does not extract narrative or replay hooks."""
+
+    ir_source = conditional_ir if isinstance(conditional_ir, Mapping) else {}
+    ir_status = ir_source.get("status") if ir_source.get("status") in _GROUNDING_IR_STATUSES else "unknown"
+    return {
+        "schema": GROUNDED_SNAPSHOT_SCHEMA,
+        "recorded": bool(recorded),
+        "factual_graph": _graph_binding(factual_graph, "factual"),
+        "legal_graph": _graph_binding(legal_graph, "legal"),
+        "source_references": _source_reference_rows(source_references),
+        "conditional_ir": {
+            "status": ir_status,
+            "receipt_ref": _grounding_token(ir_source.get("receipt_ref"), 80),
+        },
+        "proof_statuses": _proof_rows(proof_statuses),
+        "hook_receipts": _hook_receipt_rows(hook_receipts),
+        "pending_inquiry": _pending_binding(pending_inquiry),
+        "stop_policy": _stop_policy_binding(stop_policy, outcome_reason),
+        "external_dependencies": _external_dependency_binding(external_dependencies),
+        "replay": dict(_COLD_READ),
+    }
+
+
+def _apply_grounding(document: dict[str, Any]) -> dict[str, Any]:
+    existing = document.get("grounding") if isinstance(document.get("grounding"), Mapping) else None
+    if existing is None:
+        grounding = canonical_grounded_bindings(
+            pending_inquiry=document.get("pending_inquiry"),
+            stop_policy={"reason": document.get("outcome_reason")},
+            outcome_reason=str(document.get("outcome_reason") or "unknown"),
+            recorded=False,
+        )
+    else:
+        grounding = canonical_grounded_bindings(
+            factual_graph=existing.get("factual_graph"),
+            legal_graph=existing.get("legal_graph"),
+            source_references=existing.get("source_references"),
+            conditional_ir=existing.get("conditional_ir"),
+            proof_statuses=existing.get("proof_statuses"),
+            hook_receipts=existing.get("hook_receipts"),
+            pending_inquiry=existing.get("pending_inquiry") or document.get("pending_inquiry"),
+            stop_policy=existing.get("stop_policy"),
+            external_dependencies=existing.get("external_dependencies"),
+            outcome_reason=str(document.get("outcome_reason") or "unknown"),
+            recorded=existing.get("recorded") is not False,
+        )
+    document["grounding"] = grounding
+    revisions = dict(document.get("revisions") or {})
+    revisions["factual_graph_revision"] = grounding["factual_graph"]["revision"]
+    revisions["legal_graph_revision"] = grounding["legal_graph"]["revision"]
+    document["revisions"] = revisions
+    return document
+
+
 def assemble_interview_snapshot(
     *,
     session_id: str,
@@ -1637,6 +2122,7 @@ def assemble_interview_snapshot(
     durability_payload: Mapping[str, Any],
     revisions: Mapping[str, Any],
     snapshot_id: str | None = None,
+    grounding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one complete snapshot. Missing sections stay explicit, not omitted."""
 
@@ -1665,6 +2151,19 @@ def assemble_interview_snapshot(
         "durability_payload": dict(durability_payload) if isinstance(durability_payload, Mapping) else {"status": "unknown"},
         "explicit_dispositions": {"unknown": "recorded", "deferred": "recorded"},
     }
+    if isinstance(grounding, Mapping):
+        document["grounding"] = {
+            "factual_graph": grounding.get("factual_graph"),
+            "legal_graph": grounding.get("legal_graph"),
+            "source_references": grounding.get("source_references"),
+            "conditional_ir": grounding.get("conditional_ir"),
+            "proof_statuses": grounding.get("proof_statuses"),
+            "hook_receipts": grounding.get("hook_receipts"),
+            "pending_inquiry": grounding.get("pending_inquiry") or document["pending_inquiry"],
+            "stop_policy": grounding.get("stop_policy") or {"reason": document["outcome_reason"]},
+            "external_dependencies": grounding.get("external_dependencies"),
+            "recorded": True,
+        }
     return validate_interview_snapshot(document)
 
 
@@ -1697,7 +2196,19 @@ def validate_interview_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         raise InterviewSnapshotError("complaint text must be a string", code="snapshot_invalid")
     if not isinstance(document.get("transcript"), list):
         raise InterviewSnapshotError("transcript must be a list", code="snapshot_invalid")
-    copied = json.loads(json.dumps(document, sort_keys=True))
+    copied = json.loads(json.dumps(dict(document), sort_keys=True))
+    copied = _apply_grounding(copied)
+    grounding = copied.get("grounding")
+    if not isinstance(grounding, dict) or grounding.get("schema") != GROUNDED_SNAPSHOT_SCHEMA:
+        raise InterviewSnapshotError("grounded bindings are required", code="snapshot_invalid")
+    dependencies = grounding.get("external_dependencies") or {}
+    replicas = dependencies.get("remote_replicas") if isinstance(dependencies, Mapping) else {}
+    if not isinstance(replicas, Mapping) or replicas.get("existence_claimed") is not False:
+        raise InterviewSnapshotError("snapshot must not claim remote replicas", code="snapshot_invalid")
+    if dependencies.get("public_law", {}).get("copied_into_snapshot") is not False:
+        raise InterviewSnapshotError("public law stays an external dependency", code="snapshot_invalid")
+    if dependencies.get("ephemeral_index", {}).get("durable") is not False:
+        raise InterviewSnapshotError("ephemeral indexes are not durable snapshot contents", code="snapshot_invalid")
     return copied
 
 
@@ -1939,6 +2450,7 @@ def persist_interview_snapshot(
     migrate_plaintext: bool = False,
     fail_before_head: bool = False,
     writer: Callable[[bytes], None] | None = None,
+    before_head: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Commit one interview snapshot with private atomic files.
 
@@ -2039,6 +2551,22 @@ def persist_interview_snapshot(
             relative = "revisions/plain-" + revision_label + "-" + uuid.uuid4().hex + ".json"
             _interview_write_exclusive(root_fd, relative, blob_body)
             part_names = {kind: relative for kind in _INTERVIEW_PART_KINDS}
+        expected_digest = hashlib.sha256(blob_body).hexdigest()
+        if before_head is not None:
+            before_head(root_fd, part_names["interview-snapshot"])
+            try:
+                checked = _interview_read(root_fd, part_names["interview-snapshot"])
+            except (OSError, InterviewSnapshotError) as exc:
+                raise InterviewSnapshotError(
+                    "candidate snapshot is corrupt; the previous head stands",
+                    code="corrupt_candidate",
+                ) from exc
+            if hashlib.sha256(checked).hexdigest() != expected_digest:
+                raise InterviewSnapshotError(
+                    "candidate snapshot is corrupt; the previous head stands",
+                    code="corrupt_candidate",
+                )
+            blob_body = checked
         if fail_before_head:
             raise InterviewSnapshotError(
                 "durability head was not committed; the previous revision stands",
@@ -2061,6 +2589,9 @@ def persist_interview_snapshot(
             "history": history,
             "status": "committed",
             "migrated_plaintext": bool(legacy is not None and migrate_plaintext),
+            "remote_replicas_claimed": False,
+            "snapshot_is_replica_proof": False,
+            "grounding_schema": GROUNDED_SNAPSHOT_SCHEMA,
         }
         encoded_head = json.dumps(new_head, sort_keys=True).encode("utf-8")
         if document["complaint_text"] and document["complaint_text"] in encoded_head.decode("utf-8"):
@@ -2073,7 +2604,8 @@ def persist_interview_snapshot(
             document, status="available", operation_id="interview_snapshot_commit", protection=protection,
             case_scope=(tenant_id, case_id, principal_id),
         )
-        return {"snapshot": document, "receipt": receipt, "head": new_head}
+        kit_durability = _write_kit_durability(root_fd, next_revision, document.get("complaint_text") or "")
+        return {"snapshot": document, "receipt": receipt, "head": new_head, "kit_durability": kit_durability}
     finally:
         if lock_fd >= 0:
             try:
@@ -2147,7 +2679,13 @@ def load_interview_snapshot(
                 payload, status="available", operation_id="interview_snapshot_load", protection=protection,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": False}
+            return {
+                "snapshot": payload,
+                "receipt": receipt,
+                "recovered": False,
+                "cold_read": dict(_COLD_READ),
+                "kit_durability": _read_kit_durability(root_fd),
+            }
         if head.get("protection") == "user_chosen_encrypted" and protection != "user_chosen_encrypted":
             raise InterviewSnapshotError(
                 "Encrypted interview snapshots do not fall back to plaintext.",
@@ -2201,7 +2739,13 @@ def load_interview_snapshot(
                 recovered_from=str(head.get("revision") or "") if recovered else None,
                 case_scope=(tenant_id, case_id, principal_id),
             )
-            return {"snapshot": payload, "receipt": receipt, "recovered": recovered}
+            return {
+                "snapshot": payload,
+                "receipt": receipt,
+                "recovered": recovered,
+                "cold_read": dict(_COLD_READ),
+                "kit_durability": _read_kit_durability(root_fd),
+            }
         if auth_failed:
             raise InterviewSnapshotError("private snapshot authentication failed", code="authentication_failed")
         raise InterviewSnapshotError("no valid interview revision remains", code="corrupt_snapshot")
@@ -2574,7 +3118,10 @@ __all__ = [
     "store_bytes",
     "store_private_artifact",
     "store_automatic_private_artifact",
+    "store_public_legal_corpus",
     "AUTOMATIC_PRIVATE_ARTIFACT_KINDS",
+    "PUBLIC_LEGAL_CONTENT_ORIGINS",
+    "PUBLIC_LEGAL_CORPUS_FAMILIES",
     "retrieve_bytes",
     "retrieve_private_artifact",
     "pin_cid",
@@ -2587,6 +3134,7 @@ __all__ = [
     "restore_encrypted_replicas",
     "restore_encrypted_workspace",
     "count_verified_ciphertext_replicas",
+    "label_ciphertext_replica_observations",
     "upstream_replica_fixture_qualification",
     "upstream_replication_fixture_qualification",
     "UPSTREAM_REPLICA_FIXTURES",
@@ -2606,6 +3154,8 @@ __all__ = [
     "optional_size_padding",
     "INTERVIEW_SNAPSHOT_SCHEMA",
     "InterviewSnapshotError",
+    "GROUNDED_SNAPSHOT_SCHEMA",
+    "canonical_grounded_bindings",
     "assemble_interview_snapshot",
     "validate_interview_snapshot",
     "interview_snapshot_receipt",

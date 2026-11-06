@@ -22,6 +22,7 @@ IMAGE = 'sha256:' + 'a' * 64
 CONTAINER = 'b' * 64
 OTHER_CONTAINER = 'c' * 64
 _REAL_PROCESS_IDENTITY = runner.process_identity
+_REAL_HISTORICAL_PROCESS_INVENTORY = shutdown._complete_process_inventory
 
 # The one real-process control launches only this private inert wrapper and its
 # one fixed worker. The wrapper uses the actual public native identity writer
@@ -492,7 +493,8 @@ def test_stopped_legacy_launch_can_choose_new_root_without_changing_old_epoch_hi
     assert campaign.workspace.is_dir()
 
 
-def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heartbeat(campaign, monkeypatch):
+@pytest.mark.parametrize("independent_campaign", [False, True])
+def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heartbeat(campaign, monkeypatch, independent_campaign):
     """One real sealed daemon/fence; reused or unknown custody stays refused."""
     import ctypes
     from dataclasses import replace
@@ -502,6 +504,23 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
 
     monkeypatch.setattr(runner, 'process_identity', _REAL_PROCESS_IDENTITY)
     root, state, repo = campaign.state.parent, campaign.state, campaign.repo
+    if independent_campaign:
+        from integrations.ipfs_accelerate.improvement_plan import build_improvement_work_plan, load_spec
+        relative = 'docs/task_boards/synthetic_shutdown_campaign.json'
+        material = json.loads(campaign.spec.read_text())
+        material['campaign'] = {'spec_relative': relative,
+            'plan_relative': 'docs/task_boards/synthetic_shutdown_plan.json',
+            'board_relative': 'docs/task_boards/synthetic_shutdown_board.md',
+            'board_namespace': 'synthetic-independent-shutdown'}
+        campaign.spec = repo / relative
+        campaign.spec.write_text(json.dumps(material))
+        campaign.record['spec_path'] = str(campaign.spec)
+        campaign.record['board_path'] = str(repo / material['campaign']['board_relative'])
+        campaign.record['plan_id'] = build_improvement_work_plan(load_spec(campaign.spec)).plan_id
+        index = campaign.record['argv'].index('--spec')
+        campaign.record['argv'][index + 1] = str(campaign.spec)
+        campaign.record['identity']['argv'] = campaign.record['argv'][:]
+        runner._atomic_json(state / 'launcher.json', campaign.record)
     for name in ('scripts', 'integrations/ipfs_accelerate'):
         (repo / name).mkdir(parents=True, exist_ok=True)
     repo.chmod(0o700)
@@ -509,18 +528,22 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
     wrapper = repo / 'scripts/run_complaint_improvement_supervisor.py'
     worker.write_text(SEALED_ORPHAN_WORKER); worker.chmod(0o600)
     wrapper.write_text(SEALED_ORPHAN_WRAPPER); wrapper.chmod(0o600)
-    command = [sys.executable, str(worker), '--interval', '10.0',
-        '--todo-path', campaign.record['board_path'], '--state-dir', str(state),
-        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
-        '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
-        '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
-        '--validation-max-workers', '1', '--merge-target-branch', campaign.record['merge_target'],
-        '--merge-queue-dir', str(state / 'merge-queue'), '--implement',
-        '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
-        '--worktree-root', str(state / 'worktrees'),
-        '--worktree-submodule-path', 'external/ipfs_datasets_py',
-        '--worktree-submodule-path', 'external/ipfs_kit_py',
-        '--task-shard-count', '1', '--task-shard-index', '0']
+    # Compare with the real Native producer, not a hand-written command or
+    # a permissive fake identity/guard. No run/start/provider API is invoked.
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as producer
+    from integrations.ipfs_accelerate.campaign import campaign_artifacts
+    from integrations.ipfs_accelerate.improvement_plan import load_spec
+    artifacts = campaign_artifacts(load_spec(campaign.spec))
+    monkeypatch.setenv('IPFS_ACCELERATE_AGENT_ORCHESTRATION_DIR', str(state / 'control-plane'))
+    native_config = producer.supervisor_config_from_args(producer.parse_args(
+        runner.native_argv(Path(campaign.record['board_path']), state, campaign.record['merge_target'],
+            board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)),
+        repo_root=repo, daemon_script_path=worker)
+    owner = producer.PortalImplementationSupervisor(native_config)
+    command = owner._build_daemon_command()
+    del owner
+    assert tuple(command) == shutdown._managed_native_command(campaign.record,
+        shutdown._context(state, campaign.record))
     config = root / 'sealed-orphan-config.json'
     config.write_text(json.dumps({'repo': str(repo), 'record': campaign.record,
         'command': command, 'roots': [str(Path(__file__).resolve().parents[1]),
@@ -593,7 +616,22 @@ def test_native_fenced_orphan_session_allows_public_stop_without_rewriting_heart
             pid_path.write_text(f'{value.process_birth.pid}\n'); pid_path.chmod(0o600)
 
         kit_index = identity.command.index('external/ipfs_kit_py')
-        mutations = [
+        namespace_index = identity.command.index('--board-namespace') + 1
+        protected_mutations = []
+        if independent_campaign:
+            protected_index = identity.command.index('--implementation-protected-path')
+            protected_mutations = [
+                replace(identity, command=identity.command[:protected_index]
+                    + identity.command[protected_index + 2:], record_id=''),
+                replace(identity, command=identity.command[:protected_index + 1]
+                    + ('docs/task_boards/unrelated.json',)
+                    + identity.command[protected_index + 2:], record_id=''),
+                replace(identity, command=(*identity.command, '--implementation-protected-path',
+                    'docs/task_boards/unrelated.json'), record_id=''),
+            ]
+        mutations = [*protected_mutations,
+            replace(identity, command=identity.command[:namespace_index] + ('unrelated-namespace',)
+                + identity.command[namespace_index + 1:], record_id=''),
             replace(identity, command=identity.command[:kit_index - 1] + identity.command[kit_index + 1:], record_id=''),
             replace(identity, command=(*identity.command, '--worktree-submodule-path', 'external/unrelated'), record_id=''),
             replace(identity, owner_scope={**identity.owner_scope, 'state_dir': str(root / 'foreign')}, record_id=''),
@@ -1397,6 +1435,86 @@ def failed_preflight_campaign(missing_marker_campaign):
     return SimpleNamespace(**vars(fixture), preflight_heartbeat=heartbeat)
 
 
+def _budget_terminal_heartbeat(heartbeat):
+    return {**heartbeat, 'status': 'task_attempt_budget_exhausted', 'daemon_pid': None,
+        'active_worker_count': 0, 'active_worker_pids': [], 'worker_descendant_count': 0,
+        'last_recycle_reason': 'task_attempt_budget_exhausted', 'attempt_budget_terminal_pending': False,
+        'attempt_budget_terminal_guard': {'safe': True, 'generation_restart_authorized': False,
+            'operator_successor_required': True, 'task_completion_authority': False,
+            'local_implementation_in_progress': False, 'local_active_task_id': '',
+            'attempt_budget_consumed': False, 'provider_invocation_consumed': False},
+        'selection_blocker': {'reason': 'task_attempt_budget_exhausted', 'completion_authority': False,
+            'max_task_attempts': 3, 'operator_successor_required': True,
+            'limited_tasks': [{'task_id': 'CIMP-UX-11', 'attempt_count': 3},
+                {'task_id': 'CIMP-UX-24', 'attempt_count': 3}]}}
+
+
+def test_budget_exhausted_terminal_stop_closes_without_rearming_or_completing(missing_marker_campaign, docker):
+    fixture = missing_marker_campaign
+    heartbeat = _budget_terminal_heartbeat(fixture.heartbeat)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    before = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    result = runner.stop(fixture.state)
+    proof = result['container_shutdown']['process_closure']
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    assert proof['source'] == 'owned_attempt_budget_terminal_and_double_complete_proc_inventory'
+    assert proof['attempt_refunded'] is False and proof['completion_authority'] is False
+    assert result['container_shutdown']['attempt_refunded'] is False
+    assert result['container_shutdown']['completion_authority'] is False
+    assert not docker[0].effects
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == before
+
+
+def _control_plane_reload_heartbeat(heartbeat):
+    current = '0123456789abcdef0123456789abcdef01234567'
+    assert current != heartbeat['control_plane_source_revision']
+    return {**heartbeat, 'status': 'control_plane_reload_required', 'daemon_pid': None,
+        'daemon_pid_alive': False, 'active_worker_count': 0, 'active_worker_pids': [],
+        'last_recycle_reason': 'control_plane_source_changed', 'last_exit_code': 137,
+        'control_plane_update_pending': True, 'control_plane_reload_deferred': False,
+        'control_plane_reload_attempt_budget_consumed': False,
+        'control_plane_reload_provider_invocation_consumed': False,
+        'control_plane_current_source_revision': current,
+        'control_plane_current_source_id': 'baguqeerareloadcurrentsourceidmustdifferfromloadedrevision'}
+
+
+def test_control_plane_reload_exit_closes_without_rearming_or_completing(missing_marker_campaign, docker):
+    fixture = missing_marker_campaign
+    heartbeat = _control_plane_reload_heartbeat(fixture.heartbeat)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    before = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    result = runner.stop(fixture.state)
+    proof = result['container_shutdown']['process_closure']
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    assert proof['source'] == 'owned_control_plane_reload_and_double_complete_proc_inventory'
+    assert proof['attempt_refunded'] is False and proof['completion_authority'] is False
+    assert result['container_shutdown']['attempt_refunded'] is False
+    assert result['container_shutdown']['completion_authority'] is False
+    assert not docker[0].effects
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == before
+
+
+def test_control_plane_reload_without_a_source_change_stays_open(missing_marker_campaign, docker):
+    fixture = missing_marker_campaign
+    heartbeat = _control_plane_reload_heartbeat(fixture.heartbeat)
+    heartbeat['control_plane_current_source_revision'] = heartbeat['control_plane_source_revision']
+    heartbeat['control_plane_current_source_id'] = heartbeat['control_plane_source_id']
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert not docker[0].calls and not docker[0].effects
+
+
+def test_budget_exhausted_restart_authority_remains_unclosed(missing_marker_campaign, docker):
+    fixture = missing_marker_campaign
+    heartbeat = _budget_terminal_heartbeat(fixture.heartbeat)
+    heartbeat['attempt_budget_terminal_guard']['generation_restart_authorized'] = True
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert not docker[0].calls and not docker[0].effects
+
+
 def test_failed_preflight_public_stop_proves_closure_without_fabricating_a_child(failed_preflight_campaign, docker, monkeypatch):
     fixture = failed_preflight_campaign
     observations = []
@@ -1516,3 +1634,234 @@ def test_monitor_refuses_changed_source_before_stop(campaign, monkeypatch):
     monkeypatch.setattr(runner, "stop", lambda *_a, **_k: pytest.fail("changed source must not authorize stop"))
     result = monitor.watch_owned_launch(campaign.repo, campaign.spec, campaign.state, maximum_seconds=1)
     assert result["status"] == "monitor_source_changed"
+
+
+@pytest.fixture
+def completed_preflight_campaign(failed_preflight_campaign, monkeypatch):
+    """Author the terminal receipt through Native's actual receipt producer."""
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    fixture = failed_preflight_campaign
+    heartbeat = deepcopy(fixture.preflight_heartbeat)
+    heartbeat.update(status='agentic_maintenance_completed', last_agentic_maintenance_status='completed',
+        last_agentic_maintenance_phase='supervisor_check_event', updated_at=stamp(fixture.started + 2))
+    heartbeat['supervisor_maintenance'].update(phase='completed', timeout_seconds=900.0,
+        deadline_at=stamp(fixture.started + 901))
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    owner = native.ProcessBirthIdentity.from_dict(heartbeat['supervisor_process_birth'])
+    assert owner is not None
+    supervisor = object.__new__(native.PortalImplementationSupervisor)
+    supervisor.config = SimpleNamespace(repo_root=fixture.repo, state_dir=fixture.state,
+        state_path=fixture.state / 'complaint_intake_task_state.json', state_prefix='complaint_intake')
+    with monkeypatch.context() as scope:
+        scope.setattr(native, 'os', SimpleNamespace(getpid=lambda: owner.pid))
+        scope.setattr(native, 'read_process_birth', lambda pid: owner if pid == owner.pid else None)
+        native.PortalImplementationSupervisor._write_supervisor_maintenance_receipt(supervisor,
+            'supervisor_check_event', status='completed', started_at=stamp(fixture.started + 1),
+            updated_at=stamp(fixture.started + 2))
+    return SimpleNamespace(**{**vars(fixture), 'preflight_heartbeat': heartbeat},
+        maintenance_receipt=fixture.state / 'complaint_intake_supervisor_maintenance_receipt.json')
+
+
+def test_completed_preflight_public_stop_uses_real_native_receipt_and_preserves_history(
+        completed_preflight_campaign, docker, monkeypatch):
+    fixture = completed_preflight_campaign
+    observations = []
+    def census(cutoff):
+        observations.append(cutoff)
+        return []
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', census)
+    heartbeat = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    receipt = fixture.maintenance_receipt.read_bytes()
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    proof = result['container_shutdown']['process_closure']
+    assert proof['source'] == 'owned_completed_preflight_native_receipt_and_double_complete_proc_inventory'
+    assert proof['maintenance_receipt_sha256'] == hashlib.sha256(receipt).hexdigest()
+    assert proof['preflight_without_managed_daemon'] is True
+    assert proof['proc_census_complete'] is True and proof['observations'] == 2
+    assert proof['daemon_birth_ticks_claimed'] is False and proof['signals_sent'] is False
+    assert observations == [fixture.current_record['identity']['start_ticks']] * 2
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == heartbeat
+    assert fixture.maintenance_receipt.read_bytes() == receipt
+    assert not docker[0].effects
+
+
+@pytest.mark.parametrize('damage', ['missing', 'symlink', 'schema', 'repo', 'state_dir', 'state_path',
+    'state_prefix', 'pid', 'birth_pid', 'birth_ticks', 'birth_boot', 'phase', 'status', 'started',
+    'updated', 'completed', 'extra_field', 'deadline', 'timeout', 'managed_daemon', 'current_run', 'paid_start'])
+def test_completed_preflight_refuses_unbound_native_receipt_or_launched_work(
+        completed_preflight_campaign, docker, damage):
+    fixture = completed_preflight_campaign
+    path = fixture.maintenance_receipt
+    receipt = json.loads(path.read_text())
+    heartbeat = deepcopy(fixture.preflight_heartbeat)
+    if damage == 'missing':
+        path.unlink()
+    elif damage == 'symlink':
+        saved = path.with_suffix('.saved.json')
+        path.rename(saved)
+        path.symlink_to(saved)
+    elif damage == 'schema': receipt['schema'] = 'unrelated'
+    elif damage == 'repo': receipt['repo_root'] = str(fixture.repo.parent)
+    elif damage == 'state_dir': receipt['state_dir'] = str(fixture.state.parent)
+    elif damage == 'state_path': receipt['state_path'] = str(fixture.state / 'foreign.json')
+    elif damage == 'state_prefix': receipt['state_prefix'] = 'foreign'
+    elif damage == 'pid': receipt['supervisor_pid'] += 1
+    elif damage == 'birth_pid': receipt['process_birth']['pid'] += 1
+    elif damage == 'birth_ticks': receipt['process_birth']['start_time_ticks'] += 1
+    elif damage == 'birth_boot': receipt['process_birth']['boot_id'] = 'foreign'
+    elif damage == 'phase': receipt['phase'] = 'worktree_reconciliation'
+    elif damage == 'status': receipt['status'] = 'running'
+    elif damage == 'started': receipt['maintenance_started_at'] = stamp(fixture.started - 1)
+    elif damage == 'updated': receipt['updated_at'] = stamp(fixture.started + 3)
+    elif damage == 'completed': receipt['completed_at'] = stamp(fixture.started + 3)
+    elif damage == 'extra_field': receipt['positive_execution_authority'] = True
+    elif damage == 'deadline': heartbeat['supervisor_maintenance']['deadline_at'] = stamp(fixture.started + 902)
+    elif damage == 'timeout': heartbeat['supervisor_maintenance']['timeout_seconds'] = 901
+    elif damage == 'managed_daemon': heartbeat['daemon_pid'] = 1073741825
+    elif damage == 'current_run':
+        heartbeat['run_id'] = datetime.fromtimestamp(fixture.started, timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    else: (fixture.state / 'complaint_intake_events.jsonl').write_text(json.dumps(fixture.event) + '\n')
+    if damage not in {'missing', 'symlink'}:
+        runner._atomic_json(path, receipt)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert not docker[0].calls and not docker[0].effects
+
+
+@pytest.mark.parametrize('damage', ['receipt_race', 'second_census_session'])
+def test_completed_preflight_requires_stable_receipt_and_two_empty_fresh_censuses(
+        completed_preflight_campaign, docker, monkeypatch, damage):
+    fixture = completed_preflight_campaign
+    calls = []
+    def census(cutoff):
+        calls.append(cutoff)
+        if damage == 'receipt_race' and len(calls) == 1:
+            receipt = json.loads(fixture.maintenance_receipt.read_text())
+            receipt['process_birth']['start_time_ticks'] += 1
+            runner._atomic_json(fixture.maintenance_receipt, receipt)
+        if damage == 'second_census_session' and len(calls) == 2:
+            return [{'pid':1073741826, 'uid':os.getuid(), 'process_group':0,
+                'session':fixture.current_record['identity']['pid'], 'argv':['/usr/bin/python3'],
+                'cwd':str(fixture.repo.parent), 'start_ticks':123457}]
+        return []
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', census)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert not docker[0].calls and not docker[0].effects
+
+
+@pytest.fixture
+def historical_identity_preflight(completed_preflight_campaign, monkeypatch):
+    """Actual Native stale-PID repair preserves the previous sealed identity."""
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as producer
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    fixture = completed_preflight_campaign
+    observer = native.read_process_birth(os.getpid())
+    assert observer is not None and observer.start_time_ticks > 20
+    record = deepcopy(fixture.current_record)
+    record['identity']['start_ticks'] = observer.start_time_ticks - 5
+    heartbeat = deepcopy(fixture.preflight_heartbeat)
+    heartbeat['supervisor_process_birth']['start_time_ticks'] = record['identity']['start_ticks']
+    runner._atomic_json(fixture.state / 'launcher.json', record)
+    runner._atomic_json(fixture.state / 'complaint_intake_supervisor_status.json', heartbeat)
+    owner = native.ProcessBirthIdentity.from_dict(heartbeat['supervisor_process_birth'])
+    supervisor = object.__new__(producer.PortalImplementationSupervisor)
+    supervisor.config = producer.PortalSupervisorConfig(repo_root=fixture.repo, state_dir=fixture.state,
+        todo_path=Path(record['board_path']), state_path=fixture.state / 'complaint_intake_task_state.json',
+        strategy_path=fixture.state / 'complaint_intake_strategy.json', state_prefix='complaint_intake',
+        events_path=fixture.state / 'complaint_intake_supervisor_events.jsonl',
+        daemon_script_path=fixture.repo / 'integrations/ipfs_accelerate/improvement_runner.py',
+        worktree_root=Path(fixture.context['worktree_root']))
+    with monkeypatch.context() as scope:
+        scope.setattr(producer, 'os', SimpleNamespace(getpid=lambda: owner.pid))
+        scope.setattr(producer, 'read_process_birth', lambda pid: owner if pid == owner.pid else None)
+        producer.PortalImplementationSupervisor._write_supervisor_maintenance_receipt(supervisor,
+            'supervisor_check_event', status='completed', started_at=stamp(fixture.started + 1),
+            updated_at=stamp(fixture.started + 2))
+    context = shutdown._context(fixture.state, record)
+    old_birth = native.ProcessBirthIdentity(pid=1073741825, start_time_ticks=observer.start_time_ticks - 10,
+        boot_id=observer.boot_id, parent_pid=1073741823)
+    identity = native.SupervisedChildIdentity(process_birth=old_birth,
+        command=shutdown._managed_native_command(record, context),
+        owner_scope={'repo_root':str(fixture.repo), 'state_dir':str(fixture.state),
+            'state_prefix':runner.STATE_PREFIX, 'todo_path':record['board_path'],
+            'daemon_entrypoint':str(fixture.repo / 'integrations/ipfs_accelerate/improvement_runner.py')},
+        created_at=stamp(fixture.started - 1))
+    identity = native.SupervisedChildIdentity.from_dict(identity.to_dict())
+    pid_path = fixture.state / 'complaint_intake_managed_daemon.pid'
+    identity_path = pid_path.with_suffix('.identity.json')
+    pid_path.write_text(f'{old_birth.pid}\n');pid_path.chmod(0o600)
+    identity_path.write_text(json.dumps(identity.to_dict()));identity_path.chmod(0o600)
+    before = identity_path.read_bytes()
+    repaired = producer.PortalImplementationSupervisor.ensure_managed_daemon_pid_file(supervisor)
+    assert repaired['repaired'] is True and repaired['reason'] == 'stale_managed_pid'
+    assert not pid_path.exists() and identity_path.read_bytes() == before
+    monkeypatch.setattr(native, 'terminate_supervised_child', lambda *_a, **_k: pytest.fail('historical identity never grants signal authority'))
+    return SimpleNamespace(**{**vars(fixture), 'current_record':record, 'context':context,
+        'preflight_heartbeat':heartbeat}, identity=identity, identity_path=identity_path,
+        pid_path=pid_path, identity_bytes=before, native=native)
+
+
+def test_actual_native_pid_repair_historical_identity_allows_current_preflight_closure(
+        historical_identity_preflight, docker, monkeypatch):
+    fixture = historical_identity_preflight
+    # Invoke the actual complete inventory; other negative cases control only
+    # the observation boundary to inject concrete forbidden processes/races.
+    actual = _REAL_HISTORICAL_PROCESS_INVENTORY
+    observations = []
+    def inventory(cutoff):
+        observations.append(cutoff)
+        return actual(cutoff)
+    monkeypatch.setattr(shutdown, '_complete_process_inventory', inventory)
+    heartbeat = (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes()
+    before_receipt = fixture.maintenance_receipt.read_bytes()
+    fenced = shutdown.fence_owned_orphan_native_child(fixture.state, fixture.current_record)
+    assert fenced['status'] == 'historical_identity_already_closed' and fenced['fenced'] is False
+    assert fenced['current_launch_child_authority'] is False
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stopped' and result['signalled'] is False
+    proof = result['container_shutdown']['process_closure']
+    assert proof['observations'] == 2 and proof['proc_census_complete'] is True
+    assert proof['canonical_markers_absent'] is False and proof['canonical_pid_marker_absent'] is True
+    assert proof['canonical_identity_marker_absent'] is False and proof['historical_identity_preserved'] is True
+    assert proof['historical_native_identity']['current_launch_child_authority'] is False
+    assert proof['minimum_owned_start_ticks'] == fixture.identity.process_birth.start_time_ticks
+    assert len(observations) >= 2 and set(observations) == {fixture.identity.process_birth.start_time_ticks}
+    assert fixture.identity_path.read_bytes() == fixture.identity_bytes and not fixture.pid_path.exists()
+    assert (fixture.state / 'complaint_intake_supervisor_status.json').read_bytes() == heartbeat
+    assert fixture.maintenance_receipt.read_bytes() == before_receipt and not docker[0].effects
+
+
+@pytest.mark.parametrize('damage', ['scope', 'command', 'boot', 'current_birth', 'current_time',
+    'live_pid', 'reused_pid', 'unknown_liveness', 'changed_identity', 'escaped_old_group'])
+def test_historical_identity_never_bypasses_current_or_unknown_custody(
+        historical_identity_preflight, docker, monkeypatch, damage):
+    from dataclasses import replace
+    fixture = historical_identity_preflight
+    native, identity = fixture.native, fixture.identity
+    if damage == 'scope':identity=replace(identity,owner_scope={**identity.owner_scope,'todo_path':'/foreign'},record_id='')
+    elif damage == 'command':identity=replace(identity,command=(*identity.command,'--foreign-option'),record_id='')
+    elif damage == 'boot':identity=replace(identity,process_birth=replace(identity.process_birth,boot_id='foreign'),record_id='')
+    elif damage == 'current_birth':identity=replace(identity,process_birth=replace(identity.process_birth,start_time_ticks=fixture.current_record['identity']['start_ticks']+1),record_id='')
+    elif damage == 'current_time':identity=replace(identity,created_at=stamp(fixture.started+1),record_id='')
+    elif damage in {'live_pid','reused_pid'}:
+        now=native.read_process_birth(os.getpid())
+        birth=now if damage=='live_pid' else replace(identity.process_birth,pid=os.getpid())
+        identity=replace(identity,process_birth=birth,record_id='')
+    elif damage == 'unknown_liveness':
+        monkeypatch.setattr(native,'supervised_child_identity_liveness',lambda _identity:native.OwnerLiveness.UNKNOWN)
+    elif damage == 'changed_identity':
+        def changed(_cutoff):
+            fixture.identity_path.write_text(json.dumps(replace(identity,created_at=stamp(fixture.started-2),record_id='').to_dict()))
+            return []
+        monkeypatch.setattr(shutdown,'_complete_process_inventory',changed)
+    elif damage == 'escaped_old_group':
+        monkeypatch.setattr(shutdown,'_complete_process_inventory',lambda _cutoff:[{
+            'pid':1073741826,'uid':os.getuid()+1,'process_group':identity.process_birth.parent_pid,
+            'session':1073741826,'argv':(),'cwd':'/','prelaunch_scope_excluded':True}])
+    fixture.identity_path.write_text(json.dumps(identity.to_dict()));fixture.identity_path.chmod(0o600)
+    result = runner.stop(fixture.state)
+    assert result['status'] == 'stop_incomplete' and result['signalled'] is False
+    assert fixture.identity_path.exists() and not fixture.pid_path.exists() and not docker[0].effects

@@ -144,6 +144,8 @@ class Mediator:
 		self.denoiser = ComplaintDenoiser(mediator=self)
 		self.legal_graph_builder = LegalGraphBuilder(mediator=self)
 		self.neurosymbolic_matcher = NeurosymbolicMatcher(mediator=self)
+		self._legal_evidence_hook_contexts = {}
+		self._hook_outcome_receipts = []
 		self.workflow_actions = WorkflowActionService(
 			self,
 			recovery_action_builder=lambda *args, **kwargs: _build_document_grounding_recovery_action(
@@ -1742,6 +1744,10 @@ class Mediator:
 			'capped_reasons': list(interview.get('capped_reasons') or []),
 			'error': None,
 		}
+
+	def apply_factual_correction(self, **kwargs):
+		"""Public factual correction. Graph updates stay on process_denoising_answer."""
+		return self.workflow_actions.apply_factual_correction(**kwargs)
 
 	def analyze_complaint_legal_issues(self):
 		"""
@@ -13797,6 +13803,7 @@ class Mediator:
 
 	def resolve_intake_legal_selection(self, claims, intake_case_file):
 		"""Ask or resolve jurisdiction, relevant date, and claim candidates first."""
+		from copy import deepcopy
 		from complaint_phases.intake_case_file import refresh_explicit_legal_context
 		from integrations.ipfs_datasets.legal import intake_legal_selection
 
@@ -13805,7 +13812,28 @@ class Mediator:
 		candidates = list(case.get('candidate_claims') or [])
 		if not candidates:
 			candidates = list(claims or [])
+		# The GUI stores an explicit applicability decision beside the selected
+		# context. A later refresh/resume must not turn an unresolved decision
+		# back into governing-ready law merely by re-reading its jurisdiction.
+		# Older workflows without this field retain their established contract.
+		applicability = None
+		if 'legal_context_applicability' in case:
+			applicability = str(case.get('legal_context_applicability') or 'unknown')
+			if applicability != 'explicit':
+				applicability = 'disputed' if applicability == 'disputed' else 'unknown'
+				context = deepcopy(context)
+				context['candidate_jurisdiction'] = (
+					context.get('candidate_jurisdiction') or context.get('jurisdiction') or 'unknown')
+				context['candidate_forum'] = deepcopy(case.get('legal_context_forum'))
+				context['jurisdiction'] = 'unknown'
+				context['jurisdiction_explicit'] = False
+				context['jurisdiction_applicability'] = applicability
+				context['status'] = applicability
 		selection = intake_legal_selection(context, candidates)
+		if applicability is not None:
+			selection['context_applicability'] = applicability
+			if applicability != 'explicit':
+				selection['unresolved_reasons'].append('legal_context_applicability_' + applicability)
 		selection['legal_context'] = context
 		return selection
 
@@ -13857,6 +13885,45 @@ class Mediator:
 		context = refresh_explicit_legal_context(intake_case_file if isinstance(intake_case_file, dict) else {})
 		return list(context.get("questions") or [])
 
+	def build_legal_acquisition_request(
+		self,
+		intake_case_file,
+		claims=None,
+		requirements=None,
+		query_terms=None,
+		authority_families=None,
+		jurisdiction_default=None,
+		corpus_default=None,
+		storage_available=None,
+		max_results=5,
+		timeout_seconds=5.0,
+	):
+		"""Build a bounded acquisition request only after explicit legal selection.
+
+		Reuses intake selection and legal-context questions. Does not search,
+		guess a jurisdiction, or treat the case narrative as a citation query.
+		"""
+		from integrations.ipfs_datasets.legal import build_bounded_legal_acquisition_request
+
+		case = intake_case_file if isinstance(intake_case_file, dict) else {}
+		selection = self.resolve_intake_legal_selection(claims, case)
+		context = selection.get('legal_context') if isinstance(selection.get('legal_context'), dict) else {}
+		candidates = list(selection.get('claim_candidates') or [])
+		return build_bounded_legal_acquisition_request(
+			context,
+			candidates,
+			requirements=requirements,
+			query_terms=query_terms,
+			narrative=case.get('source_complaint_text') or '',
+			authority_families=authority_families,
+			jurisdiction_default=jurisdiction_default,
+			corpus_default=corpus_default,
+			max_results=max_results,
+			timeout_seconds=timeout_seconds,
+			storage_available=storage_available,
+			context_questions=self._legal_selection_questions(selection) + self.legal_context_questions(case),
+		)
+
 	@staticmethod
 	def _bounded_legal_source_record(record):
 		"""Bound locally loaded source records before copying or source promotion."""
@@ -13870,11 +13937,267 @@ class Mediator:
 		return (isinstance(record, dict) and len(record) <= 128
 			and DependencyGraphBuilder._bounded_source_record({key: value for key, value in record.items() if key in fields}))
 
-	def _collect_verified_legal_requirements(self, claims, intake_case_file):
+	def admit_acquired_authorities(self, acquisition, claims, intake_case_file, user_id=None):
+		"""Store acquired candidates, then admit only re-read source records.
+
+		Acquisition status stays on its own outcome. Legal dependency nodes are
+		added only after canonical storage and ``_collect_verified_legal_requirements``.
+		A missing legal source still leaves an unresolved dependency graph.
+		"""
+		from integrations.ipfs_datasets.logic import prepare_acquired_authority_record
+		from integrations.ipfs_datasets.legal import resolve_explicit_jurisdiction
+
+		payload = acquisition if isinstance(acquisition, dict) else {}
+		candidates = payload.get('candidates') if isinstance(payload.get('candidates'), list) else []
+		acquisition_outcome = {
+			'stage': 'acquisition',
+			'status': str(payload.get('status') or 'unavailable'),
+			'error_code': str(payload.get('error_code') or ''),
+			'candidate_count': len(candidates) if len(candidates) <= 128 else 128,
+			'remote_dispatched': bool(payload.get('remote_dispatched')),
+			'proof': False,
+			'worker_stalled': False,
+		}
+		selection = self.resolve_intake_legal_selection(claims, intake_case_file)
+		context = selection.get('legal_context') if isinstance(selection.get('legal_context'), dict) else {}
+		jurisdiction = resolve_explicit_jurisdiction(context.get('jurisdiction'))
+		date = context.get('applicable_law_date') if isinstance(context.get('applicable_law_date'), dict) else {}
+		query_date = date.get('precise_date') if date and not date.get('is_uncertain') else ''
+		claim_types = []
+		for item in list(claims or []):
+			if not isinstance(item, dict):
+				continue
+			claim_type = str(item.get('type') or item.get('claim_type') or '').strip()
+			if claim_type and claim_type not in claim_types:
+				claim_types.append(claim_type)
+		if not claim_types:
+			claim_types = ['unknown']
+		ready = bool(selection.get('ready_to_select')) and jurisdiction != 'unknown' and bool(query_date)
+		decisions = []
+		stored_ids = []
+		storage_unavailable = False
+		can_store = acquisition_outcome['status'] == 'candidates' and ready and len(candidates) <= 128
+		if can_store:
+			if user_id is None:
+				user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+			complaint_id = getattr(self.state, 'complaint_id', None)
+			for candidate in candidates:
+				prepared = prepare_acquired_authority_record(
+					candidate if isinstance(candidate, dict) else {},
+					jurisdiction=jurisdiction,
+					as_of_date=str(query_date),
+				)
+				decisions.append({
+					'status': prepared.get('status'),
+					'reason': prepared.get('reason'),
+					'hashes': dict(prepared.get('hashes') or {}),
+					'source_locator': prepared.get('source_locator') or '',
+					'authority_version': prepared.get('authority_version') or '',
+					'jurisdiction': prepared.get('jurisdiction') or '',
+					'effective_date': prepared.get('effective_date') or '',
+					'as_of_date': prepared.get('as_of_date') or '',
+				})
+				if prepared.get('status') != 'admitted':
+					continue
+				for claim_type in claim_types:
+					try:
+						stored = self.legal_authority_storage.store_acquired_authority(
+							prepared['record'],
+							user_id,
+							complaint_id=complaint_id,
+							claim_type=claim_type,
+						)
+					except Exception:
+						storage_unavailable = True
+						decisions.append({'status': 'unavailable', 'reason': 'storage_error'})
+						continue
+					if stored.get('status') != 'stored':
+						storage_unavailable = True
+						decisions.append({'status': stored.get('status') or 'unavailable', 'reason': stored.get('reason') or 'storage_unavailable'})
+						continue
+					stored_ids.append(stored.get('record_id'))
+		if storage_unavailable and not stored_ids:
+			admission_status = 'unavailable'
+			admission_reason = 'storage_unavailable'
+		elif acquisition_outcome['status'] == 'empty':
+			admission_status = 'empty'
+			admission_reason = 'no_legal_source'
+		elif acquisition_outcome['status'] != 'candidates':
+			admission_status = 'not_admitted'
+			admission_reason = acquisition_outcome['error_code'] or acquisition_outcome['status']
+		elif not ready:
+			admission_status = 'not_admitted'
+			admission_reason = 'legal_context_not_ready'
+		elif stored_ids and all(item.get('status') == 'admitted' for item in decisions if item.get('status') != 'stored'):
+			admission_status = 'admitted'
+			admission_reason = 'stored_source_record'
+		elif stored_ids:
+			admission_status = 'partial'
+			admission_reason = 'partial_source_records'
+		elif decisions:
+			admission_status = 'rejected'
+			admission_reason = str(decisions[0].get('reason') or 'rejected')
+		else:
+			admission_status = 'empty'
+			admission_reason = 'no_legal_source'
+		phase_case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file')
+		if not isinstance(phase_case, dict) or not phase_case:
+			if isinstance(intake_case_file, dict):
+				self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'intake_case_file', intake_case_file)
+		existing = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		kept_existing = existing is not None and getattr(existing, 'nodes', None) is not None
+		source_outage = (
+			acquisition_outcome['status'] in {'unavailable', 'timeout', 'error'}
+			or admission_status == 'unavailable'
+			or bool(getattr(self, '_pending_source_outage', False))
+		)
+		self._pending_source_outage = False
+		pending_change = getattr(self, '_pending_legal_dependency_change', None)
+		if isinstance(pending_change, dict) and pending_change.get('source_outage'):
+			source_outage = True
+		if kept_existing and source_outage:
+			# A later outage must not swap the inquiry graph for an empty success graph.
+			existing.metadata['legal_requirement_mode'] = existing.metadata.get('legal_requirement_mode') or 'verified_sources'
+			change = {
+				'source_outage': True,
+				'source_changed': True,
+				'admitted_acquisition': False,
+			}
+			pending = getattr(self, '_pending_legal_effect_receipt', None)
+			if isinstance(pending, dict):
+				change['effect_receipt'] = pending
+				self._pending_legal_effect_receipt = None
+			self.refresh_verified_legal_dependencies(change)
+			graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') or existing
+			grouped = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements') or {}
+		else:
+			if selection.get('ready_to_select'):
+				read_case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or intake_case_file
+				grouped = self._collect_verified_legal_requirements(claims, read_case)
+			else:
+				grouped = self._unresolved_requirements_for_selection(claims, selection)
+				self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', 'unresolved_context')
+			grouped = self.summary_judgment.adapt_requirements_for_dependency_graph(
+				grouped,
+				selection.get('legal_context'),
+			)
+			graph_claims = [item for item in (claims or []) if isinstance(item, dict)] or [
+				{'type': claim_types[0], 'name': claim_types[0]}
+			]
+			if kept_existing:
+				existing.metadata['legal_requirement_mode'] = 'verified_sources'
+				if isinstance(getattr(existing, 'metadata', None), dict):
+					existing.metadata['legal_context_jurisdiction'] = jurisdiction or 'unknown'
+					existing.metadata['legal_selection_status'] = selection.get('selection_status')
+					existing.metadata['acquisition_status'] = acquisition_outcome['status']
+					existing.metadata['admission_status'] = admission_status
+					existing.metadata['empty_success'] = False
+				self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements', grouped)
+				change = {
+					'source_changed': True,
+					'admitted_acquisition': admission_status == 'admitted',
+				}
+				if admission_status == 'unavailable' or acquisition_outcome['status'] in {'unavailable', 'timeout', 'error'}:
+					change['source_outage'] = True
+				pending = getattr(self, '_pending_legal_effect_receipt', None)
+				if isinstance(pending, dict):
+					change['effect_receipt'] = pending
+					self._pending_legal_effect_receipt = None
+				self.refresh_verified_legal_dependencies(change)
+				graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') or existing
+			else:
+				graph = self.dg_builder.build_from_claims(
+					graph_claims,
+					legal_requirements=grouped,
+					require_verified_legal_sources=True,
+				)
+				if isinstance(getattr(graph, 'metadata', None), dict):
+					graph.metadata['legal_context_jurisdiction'] = jurisdiction or 'unknown'
+					graph.metadata['legal_selection_status'] = selection.get('selection_status')
+					graph.metadata['acquisition_status'] = acquisition_outcome['status']
+					graph.metadata['admission_status'] = admission_status
+					graph.metadata['empty_success'] = False
+					graph.metadata['graph_replaced'] = False
+				self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'dependency_graph', graph)
+				self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'verified_legal_requirements', grouped)
+				pending = getattr(self, '_pending_legal_effect_receipt', None)
+				if isinstance(pending, dict):
+					self._pending_legal_effect_receipt = None
+					self.refresh_verified_legal_dependencies({
+						'admitted_acquisition': admission_status == 'admitted',
+						'source_changed': True,
+						'effect_receipt': pending,
+					})
+					graph = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph') or graph
+		admission_outcome = {
+			'stage': 'admission',
+			'status': admission_status,
+			'reason': admission_reason,
+			'stored_record_ids': list(stored_ids),
+			'decisions': decisions,
+			'proof': False,
+			'worker_stalled': False,
+		}
+		return {
+			'acquisition': acquisition_outcome,
+			'admission': admission_outcome,
+			'dependency_graph': graph,
+			'requirements': grouped,
+		}
+
+	def _reveal_stored_authority_record(self, record):
+		"""Re-read sealed authority fields before source admission.
+
+		A private derived-index token is not statute text or a version. Failed
+		reveal is an unreadable source, not an empty successful admission.
+		"""
+		if not isinstance(record, dict):
+			return record
+		storage = getattr(self, 'legal_authority_storage', None)
+		reader = getattr(storage, 'read_private_derived', None)
+
+		def reveal_value(value):
+			if isinstance(value, str) and value.startswith('cgidx:'):
+				if not callable(reader):
+					return value, False
+				opened = reader(value)
+				text = opened.get('text') if isinstance(opened, dict) and opened.get('status') == 'available' else ''
+				if not isinstance(text, str) or not text or text.startswith('cgidx:'):
+					return value, False
+				return text, True
+			if isinstance(value, dict):
+				revealed = {}
+				ok = True
+				for key, item in value.items():
+					item_value, item_ok = reveal_value(item)
+					revealed[key] = item_value
+					ok = ok and item_ok
+				return revealed, ok
+			if isinstance(value, list):
+				revealed = []
+				ok = True
+				for item in value:
+					item_value, item_ok = reveal_value(item)
+					revealed.append(item_value)
+					ok = ok and item_ok
+				return revealed, ok
+			return value, True
+
+		revealed, ok = reveal_value(record)
+		if not ok:
+			failed = dict(revealed) if isinstance(revealed, dict) else dict(record)
+			failed['content'] = ''
+			failed['source_unreadable'] = True
+			return failed
+		return revealed
+
+	def _collect_verified_legal_requirements(self, claims, intake_case_file, *, source_records=None):
 		"""Promote current locally owned authority text, never caller verification flags.
 
-		This reads stored/configured source records only. It does not start legal
-		search, embedding, or a remote corpus request.
+		This reads stored/configured source records only. A server-owned current
+		manifest can supply an exact claim-to-record source_records scope; no database union is
+		performed for that scope. None retains the legacy storage lookup.
+		It does not start legal search, embedding, or a remote corpus request.
 		"""
 		from copy import deepcopy
 		from complaint_phases.intake_claim_registry import normalize_claim_type
@@ -13890,16 +14213,31 @@ class Mediator:
 		date = context.get('applicable_law_date') or {}
 		query_date = date.get('precise_date') if isinstance(date, dict) and not date.get('is_uncertain') else ''
 		sources = []
-		available = jurisdiction != 'unknown' and bool(query_date)
+		available = (jurisdiction != 'unknown' and bool(query_date)
+			and ('legal_context_applicability' not in case or case['legal_context_applicability'] == 'explicit'))
 		if available:
 			try:
 				for claim_type in claim_types:
-					local = self.get_legal_authorities(claim_type=claim_type)
+					if source_records is None:
+						local = self.get_legal_authorities(claim_type=claim_type)
+					elif isinstance(source_records, dict):
+						local = [row for key, rows in source_records.items()
+							if normalize_claim_type(key) == normalize_claim_type(claim_type) for row in rows]
+					else:
+						# Flat local records require their own explicit claim join.
+						# Prepared acquisition records have no such field; the private
+						# owner instead supplies its authenticated claim->record scope.
+						local = [row for row in source_records if isinstance(row, dict)
+							and isinstance(row.get('claim_type'), str) and row['claim_type'].strip()
+							and normalize_claim_type(row.get('claim_type')) == normalize_claim_type(claim_type)]
 					if not isinstance(local, list) or len(local) > 128:
 						raise ValueError('source_record_bound')
 					for record in local:
 						if isinstance(record, dict):
-							sources.append((claim_type, record))
+							revealed = self._reveal_stored_authority_record(record)
+							if revealed.get('source_unreadable'):
+								raise ValueError('source_unreadable')
+							sources.append((claim_type, revealed))
 				if len(sources) > 128:
 					raise ValueError('source_record_bound')
 			except Exception:
@@ -14033,18 +14371,100 @@ class Mediator:
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'legal_source_status', ('available' if normalized else 'empty_or_unavailable') if available else 'unavailable')
 		return grouped
 
-	def refresh_verified_legal_dependencies(self, change):
+	def carry_admitted_source_legal_ir(
+		self,
+		admitted_law,
+		factual_premises,
+		request_id,
+		vocabulary=None,
+		unresolved_assumptions=None,
+		allow_explicit_partial=False,
+	):
+		"""Hand admitted law and separate factual premises to the canonical compiler.
+
+		Stage identities and unresolved assumptions are retained. A compilable
+		formula does not establish governing-law meaning and does not prove a claim.
+		"""
+		from complaint_phases.phase_manager import ComplaintPhase
+		from integrations.ipfs_datasets.logic import compile_canonical_legal_ir
+
+		if not isinstance(vocabulary, dict):
+			vocabulary = {'actors': (), 'actions': (), 'objects': (), 'qualifiers': ()}
+		premise_rows = factual_premises if isinstance(factual_premises, (list, tuple)) else factual_premises
+		user_facts = []
+		if isinstance(premise_rows, (list, tuple)):
+			for item in premise_rows:
+				if isinstance(item, dict) and isinstance(item.get('text'), str):
+					user_facts.append(item['text'])
+		payload = compile_canonical_legal_ir(
+			'',
+			request_id=str(request_id or ''),
+			vocabulary=vocabulary,
+			admitted_law=admitted_law,
+			factual_premises=premise_rows,
+			unresolved_assumptions=unresolved_assumptions,
+			user_facts=user_facts,
+			allow_explicit_partial=bool(allow_explicit_partial),
+		)
+		handoff = {
+			'operation': 'carry_admitted_source_legal_ir',
+			'status': payload.get('status'),
+			'reason': payload.get('reason') or '',
+			'receipt_id': payload.get('receipt_id'),
+			'retained_stage_identities': payload.get('retained_stage_identities'),
+			'unresolved_assumptions': list(payload.get('unresolved_assumptions') or []),
+			'factual_premises': list(payload.get('factual_premises') or []),
+			'source_text': payload.get('source_text'),
+			'source_character_length': payload.get('source_character_length'),
+			'source_byte_length': payload.get('source_byte_length'),
+			'span_unit': payload.get('span_unit') or 'character',
+			'stage_evidence': payload.get('stage_evidence'),
+			'establishes_governing_law_meaning': False,
+			'proves_claim': False,
+			'entails_claim': False,
+			'entails_applicability': False,
+			'fabricated_ir': False,
+			'worker_stalled': False,
+			'awaiting_user': False,
+		}
+		self.phase_manager.update_phase_data(
+			ComplaintPhase.INTAKE,
+			'canonical_legal_ir_handoff',
+			handoff,
+		)
+		return handoff
+
+	def refresh_verified_legal_dependencies(self, change, *, source_records=None):
 		"""Re-read local sources and reconcile admission before invalidating support."""
 		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
 		if dg is None:
-			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': []}
+			return {'affected_node_ids': [], 'preserved_node_ids': [], 'recomputed_dependencies': [],
+				'graph_replaced': False, 'empty_success': False, 'case_revision': None}
+		# A cold restored graph may outlive its builder. Reserve all existing
+		# native edge IDs before source reconciliation allocates new ones, so a
+		# new legal edge cannot overwrite an unrelated factual dependency.
+		if isinstance(self.dg_builder, DependencyGraphBuilder):
+			occupied = [int(key[4:]) for key in dg.dependencies
+				if isinstance(key, str) and key.startswith('dep_')
+				and key[4:].isdigit() and len(key[4:]) <= 32]
+			self.dg_builder.dependency_counter = max([self.dg_builder.dependency_counter, *occupied])
 		payload = dict(change) if isinstance(change, dict) else {}
+		prior_available = [
+			node.id for node in dg.nodes.values()
+			if isinstance(node.attributes, dict)
+			and node.attributes.get('dependency_class') == 'legally_sourced_requirement'
+			and node.attributes.get('source_available') is not False
+		]
 		if dg.metadata.get('legal_requirement_mode') != 'verified_sources':
-			return self.phase_manager.record_verified_dependency_refresh(
-				dg, self.dg_builder.refresh_affected_dependencies(dg, payload))
+			report = self.dg_builder.refresh_affected_dependencies(dg, payload)
+			return self._commit_legal_dependency_refresh(dg, report, payload)
 		claims = [{'type': node.attributes.get('claim_type'), 'name': node.name} for node in dg.get_nodes_by_type(NodeType.CLAIM)]
 		case = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
-		grouped = self._collect_verified_legal_requirements(claims, case)
+		grouped = self._collect_verified_legal_requirements(claims, case, source_records=source_records)
+		source_status = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'legal_source_status')
+		admitted_now = any(bool(items) for items in grouped.values()) if isinstance(grouped, dict) else False
+		if prior_available and not admitted_now and (payload.get('source_outage') or source_status == 'unavailable'):
+			payload['source_outage'] = True
 		# Reconciliation must use the same current-context adapter representation
 		# as initial construction; display/proof metadata is part of the node ID.
 		selection = self.resolve_intake_legal_selection(claims, case)
@@ -14059,7 +14479,39 @@ class Mediator:
 		report['affected_node_ids'] = list(dict.fromkeys(source_report['affected_node_ids'] + report['affected_node_ids']))
 		report['preserved_node_ids'] = [key for key in report['preserved_node_ids'] if key not in report['affected_node_ids']]
 		report['source_admission'] = source_report
-		return self.phase_manager.record_verified_dependency_refresh(dg, report)
+		report['source_admission_reread'] = True
+		report['graph_replaced'] = False
+		report['empty_success'] = False
+		if payload.get('source_outage'):
+			report['source_outage'] = True
+			dg.metadata['source_outage'] = True
+			dg.metadata['empty_success'] = False
+			dg.metadata['admission_status'] = 'unavailable'
+		return self._commit_legal_dependency_refresh(dg, report, payload)
+
+	def _commit_legal_dependency_refresh(self, graph, report, payload):
+		"""Record one case revision for this refresh, including a source/context effect receipt."""
+		receipt = payload.get('effect_receipt') if isinstance(payload.get('effect_receipt'), dict) else {}
+		nested = receipt.get('effect_receipt') if isinstance(receipt.get('effect_receipt'), dict) else {}
+		bound = nested or receipt
+		previous_effect = graph.metadata.get('legal_dependency_effect') if isinstance(graph.metadata.get('legal_dependency_effect'), dict) else {}
+		revision = int(graph.metadata.get('legal_dependency_case_revision') or 0) + 1
+		graph.metadata['legal_dependency_case_revision'] = revision
+		graph.metadata['legal_dependency_effect'] = {
+			'request_id': str(bound.get('request_id') or payload.get('request_id') or previous_effect.get('request_id') or ''),
+			'source_preimage': str(bound.get('source_preimage') or previous_effect.get('source_preimage') or ''),
+			'context_preimage': str(bound.get('context_preimage') or previous_effect.get('context_preimage') or ''),
+			'operation': str(bound.get('operation') or payload.get('operation') or previous_effect.get('operation') or 'refresh_verified_legal_dependencies'),
+			'proof': False,
+		}
+		graph.metadata['empty_success'] = False
+		committed = dict(report or {})
+		committed['case_revision'] = revision
+		committed['atomic_case_revision'] = True
+		committed['graph_replaced'] = False
+		committed['empty_success'] = False
+		committed['effect_request_id'] = graph.metadata['legal_dependency_effect']['request_id']
+		return self.phase_manager.record_verified_dependency_refresh(graph, committed)
 
 	def apply_explicit_legal_context(self, intake_case_file, **updates):
 		"""Store explicit legal context and invalidate dependent rule and proof state."""
@@ -14473,6 +14925,82 @@ class Mediator:
 		"""Retained compatibility refusal; use the source-bound canonical role hook."""
 		return {'applied':False, 'graph_changed':False, 'intake_complete':False,
 			'error_code':'binding_missing', 'successful_empty':False}
+
+	def bind_legal_evidence_hook_context(self, **fields):
+		"""Opt-in host context for a legal or evidence operation.
+
+		Legacy intake and hook callers do not pass through this method.
+		The returned receipt has opaque ids and hashes only.
+		"""
+		from .hook_runtime import HookContextError, bind_hook_execution_context
+		payload = dict(fields)
+		payload.setdefault('privacy_context', getattr(self, '_interview_privacy_context', None))
+		if 'session_revision' not in payload:
+			meta = getattr(self.workflow_actions, '_interview_meta', None) or {}
+			payload['session_revision'] = int(meta.get('session_revision') or 0) if isinstance(meta, dict) else 0
+		try:
+			context = bind_hook_execution_context(host=self, **payload)
+		except HookContextError as exc:
+			return {'bound': False, 'code': exc.code, 'receipt': None, 'provider_invoked': False}
+		self._legal_evidence_hook_contexts[context.operation_id] = context
+		return {'bound': True, 'code': 'context_bound', 'receipt': context.public_receipt(), 'provider_invoked': False}
+
+	def dispatch_legal_evidence_hook(self, operation_id, *, now, effect=None, **observed):
+		"""Validate the bound context. This seam does not dispatch an effect."""
+		from .hook_runtime import authorize_hook_execution
+		context = getattr(self, '_legal_evidence_hook_contexts', {}).get(operation_id)
+		privacy = observed.pop('privacy_context', getattr(self, '_interview_privacy_context', None))
+		decision = authorize_hook_execution(
+			context,
+			privacy_context=privacy,
+			now=now,
+			host=self,
+			effect=None,
+			**observed,
+		)
+		# A caller-supplied effect is ignored. Activation belongs to a later task.
+		decision['effect_dispatched'] = False
+		decision['provider_invoked'] = False
+		decision['ignored_effect'] = effect is not None
+		if decision.get('receipt') is not None:
+			self.log('legal_evidence_hook_context', operation_id=operation_id, code=decision['code'],
+				prompt_logged=False, response_logged=False)
+		return decision
+
+	def _remember_hook_outcome(self, trace):
+		"""Append one sanitized dispatcher trace and mirror it to the router log."""
+		from .hook_runtime import public_hook_outcome_log
+		if not isinstance(trace, dict):
+			return None
+		bucket = getattr(self, '_hook_outcome_receipts', None)
+		if not isinstance(bucket, list):
+			bucket = []
+			self._hook_outcome_receipts = bucket
+		bucket.append(trace)
+		del bucket[:-32]
+		fields = public_hook_outcome_log(trace)
+		self.log('legal_evidence_hook_outcome', **fields)
+		return fields
+
+	def record_bounded_hook_outcome(self, observation):
+		"""Record a host stage observation without dispatch, retry, or payload logs."""
+		from .hook_runtime import record_bounded_hook_outcome
+		trace = record_bounded_hook_outcome(observation if isinstance(observation, dict) else {})
+		self._remember_hook_outcome(trace)
+		return trace
+
+	def dispatch_registered_legal_evidence_hook(self, request, **kwargs):
+		"""Dispatch one registered operation and log its sanitized outcome trace.
+
+		The trace is the dispatcher result. Tool payloads and error text are not
+		written to the mediator log. This does not add a provider or a retry.
+		"""
+		from .hook_runtime import dispatch_registered_hook_operation
+		result = dispatch_registered_hook_operation(request, **kwargs)
+		trace = result.get('trace') if isinstance(result, dict) else None
+		if isinstance(trace, dict):
+			self._remember_hook_outcome(trace)
+		return result
 
 	def log(self, event_type, **data):
 		self.state.log.append({

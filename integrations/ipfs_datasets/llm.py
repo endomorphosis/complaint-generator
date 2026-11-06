@@ -27,6 +27,7 @@ from integrations.ipfs_accelerate.routers import (
 	load_llm_symbols,
 	load_observed_llm_symbols,
 	normalize_accelerate_provider,
+	pinned_grok47_adapter_binding,
 	pinned_grok47_canary_kwargs,
 	pinned_grok47_dispatch_kwargs,
 	development_campaign_authorizes_user_complaint_egress,
@@ -354,6 +355,139 @@ class IntakeContractError(ValueError):
 	def __init__(self, code: str = "malformed"):
 		self.code = code if code in {"malformed", "identity", "span"} else "malformed"
 		super().__init__(self.code)
+
+
+def pinned_hook_inference_route() -> Dict[str, Any]:
+	"""Pinned Grok route for declared hook purposes. Fallbacks stay off."""
+
+	pin = pinned_grok47_dispatch_kwargs()
+	if pin.get("provider") != PINNED_GROK_PROVIDER or pin.get("model_name") != PINNED_GROK_MODEL:
+		raise RuntimeError("unpinned_hook_route")
+	if pin.get("allow_local_fallback") is not False or pin.get("allow_cross_provider_fallback") is not False:
+		raise RuntimeError("hook_fallback_enabled")
+	return {
+		"inference_owner": INFERENCE_OWNER,
+		"router": INFERENCE_OWNER,
+		"provider": PINNED_GROK_PROVIDER,
+		"model": PINNED_GROK_MODEL,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+		"tools_allowed": False,
+		"may_mark_requirements_satisfied": False,
+	}
+
+
+def _route_identity_slot(slot: Any) -> Dict[str, str]:
+	source = slot if isinstance(slot, Mapping) else {}
+
+	def text(key: str) -> str:
+		value = source.get(key, "")
+		if type(value) is not str:
+			return ""
+		cleaned = value.strip()
+		if len(cleaned) > 128 or any(ord(char) < 32 for char in cleaned):
+			return ""
+		return cleaned
+
+	return {"router": text("router"), "provider": text("provider"), "model": text("model"), "build": text("build")}
+
+
+def route_identity_diagnostics(
+	*,
+	requested: Any,
+	selected: Any,
+	observed: Any,
+	transport_kind: str,
+	native_observation_bound: bool = False,
+	evidence_class: str = "",
+) -> Dict[str, Any]:
+	"""Keep requested, selected, and observed identity in separate slots.
+
+	A synthetic transport cannot verify a live model or build, even when the
+	payload copies the pinned names or claims native evidence.
+	"""
+
+	kind = transport_kind if type(transport_kind) is str else ""
+	requested_slot = _route_identity_slot(requested)
+	selected_slot = _route_identity_slot(selected)
+	observed_slot = _route_identity_slot(observed)
+	live_model = False
+	live_build = False
+	if kind == "native_observation" and native_observation_bound is True and evidence_class == "native_final_end_model_usage":
+		live_model = (
+			observed_slot["provider"] == PINNED_GROK_PROVIDER
+			and observed_slot["model"] == PINNED_GROK_MODEL
+			and observed_slot["router"] == INFERENCE_OWNER
+		)
+		live_build = live_model and observed_slot["build"] in {PINNED_GROK_MODEL, "grok-4.7-build"}
+	if kind == "synthetic" or kind != "native_observation":
+		live_model = False
+		live_build = False
+	return {
+		"requested": requested_slot,
+		"selected": selected_slot,
+		"observed": observed_slot,
+		"transport_kind": "synthetic" if kind == "synthetic" else (kind or "unspecified"),
+		"live_model_identity_verified": live_model,
+		"live_build_identity_verified": live_build,
+		"inference_owner": INFERENCE_OWNER,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+	}
+
+
+def _declared_purpose_short_circuit(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+	"""Local and undeclared purpose labels never enter the provider call."""
+
+	if "inference_purpose" not in kwargs:
+		return None
+	purpose = kwargs.pop("inference_purpose")
+	from mediator.hook_runtime import is_local_only_purpose, is_model_purpose
+
+	if is_local_only_purpose(purpose):
+		return {
+			"status": "local_only",
+			"text": "",
+			"dispatch": "none",
+			"model_dispatched": False,
+			"inference_purpose": purpose,
+			"live_canary": False,
+			"live_model_identity_verified": False,
+			"failure_kind": "",
+			"error": "",
+			"prompt_logged": False,
+			"provider_name": "",
+			"model_name": "",
+		}
+	if is_model_purpose(purpose):
+		return {
+			"status": "unavailable",
+			"text": "",
+			"dispatch": "none",
+			"model_dispatched": False,
+			"inference_purpose": purpose,
+			"live_canary": False,
+			"live_model_identity_verified": False,
+			"failure_kind": "use_declared_hook_boundary",
+			"error": "use_declared_hook_boundary",
+			"prompt_logged": False,
+			"provider_name": PINNED_GROK_PROVIDER,
+			"model_name": PINNED_GROK_MODEL,
+		}
+	return {
+		"status": "unavailable",
+		"text": "",
+		"dispatch": "none",
+		"model_dispatched": False,
+		"inference_purpose": str(purpose) if type(purpose) is str else "",
+		"live_canary": False,
+		"live_model_identity_verified": False,
+		"failure_kind": "undeclared_purpose",
+		"error": "undeclared_purpose",
+		"prompt_logged": False,
+		"provider_name": "",
+		"model_name": "",
+	}
 
 
 def intake_request_response_format() -> Dict[str, Any]:
@@ -1073,7 +1207,8 @@ def _generate_intake_with_metadata(prompt, *, provider, model_name, request_id, 
 		if cancel_event is not None and cancel_event.is_set():
 			return fail("cancelled")
 		generate, result_type, observation_type = load_observed_llm_symbols()
-		if not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type):
+		if (not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type)
+				or pinned_grok47_adapter_binding(generate) is None):
 			return fail("route_unverified")
 		provider_prompt = _intake_provider_prompt(prompt, request_id=request_id,
 			operation=operation, source_text=source_text, targets=targets)
@@ -1154,6 +1289,214 @@ def _generate_intake_with_metadata(prompt, *, provider, model_name, request_id, 
 		return fail(classify_router_failure(exc))
 
 
+class _HookObservationCancelled(BaseException):
+	"""Propagate through native capture so only the owned child is reaped."""
+
+
+_HOOK_REPORTED_MODELS = frozenset({PINNED_GROK_MODEL, "grok-4.7-build"})
+
+
+def _qualified_native_observation_types() -> Optional[tuple]:
+	"""The pinned Native classes. A test double is not this pair."""
+
+	try:
+		from ipfs_accelerate_py.cli_runtime.grok_invocation_observation import (
+			GrokInvocationObservation,
+			ObservedTextGeneration,
+		)
+	except Exception:
+		return None
+	if not isinstance(ObservedTextGeneration, type) or not isinstance(GrokInvocationObservation, type):
+		return None
+	return (ObservedTextGeneration, GrokInvocationObservation)
+
+
+def _hook_observation_bound(obs: Any, observation_type: type, request_id: str) -> bool:
+	try:
+		return bool(
+			type(obs) is observation_type
+			and obs.request_id == request_id
+			and type(obs.invocation_id) is str
+			and re.fullmatch(r"[0-9a-f]{32}", obs.invocation_id) is not None
+			and type(obs.native_dispatch_count) is int and obs.native_dispatch_count == 1
+			and obs.invocation_scope == "current_call"
+			and obs.schema == "native-grok-invocation-observation@1"
+			and obs.observation_only is True and obs.raw_provider_data_exported is False
+			and type(obs.process_returncode) is int and obs.process_returncode == 0
+			and obs.stream_complete is True and obs.wire_model_observed is True
+			and obs.evidence_class == "native_final_end_model_usage"
+		)
+	except Exception:
+		return False
+
+
+def generate_observed_hook_purpose(
+	*,
+	purpose_id: str,
+	inputs: Mapping[str, Any],
+	request_id: str,
+	timeout: float = 30.0,
+	cancel_event: Any = None,
+	progress_callback: Any = None,
+	max_output_bytes: int = 8192,
+) -> Dict[str, Any]:
+	"""Run one hook purpose through the loaded Native observation seam.
+
+	There is no plain-text fallback and no second provider. Tool execution
+	stays denied. The returned receipt never contains the prompt. A fake
+	observation type can satisfy the loaded seam and still cannot verify a
+	live Grok model.
+	"""
+
+	base: Dict[str, Any] = {
+		"status": "unavailable",
+		"code": "route_unverified",
+		"text": "",
+		"output_text": "",
+		"request_id": request_id if type(request_id) is str else "",
+		"native_invocation_id": "",
+		"observed_router": "",
+		"observed_provider": "",
+		"observed_model": "",
+		"observed_build": "",
+		"route_observation": "unverified",
+		"invocation_bound": False,
+		"native_observation_bound": False,
+		"evidence_class": "",
+		"transport_kind": "native_observation",
+		"model_dispatched": False,
+		"tools_invoked": False,
+		"tools_allowed": False,
+		"allow_local_fallback": False,
+		"allow_cross_provider_fallback": False,
+		"prompt_logged": False,
+		"live_canary": False,
+		"live_model_identity_verified": False,
+		"live_build_identity_verified": False,
+		"provider_supported_identity": False,
+	}
+
+	def finish(kind: str, **extra: Any) -> Dict[str, Any]:
+		payload = dict(base)
+		payload.update(extra)
+		payload["status"] = kind if kind in {"available", "timeout", "cancelled", "quota", "malformed"} else "unavailable"
+		payload["code"] = kind
+		payload["text"] = ""
+		payload["prompt_logged"] = False
+		payload["live_canary"] = False
+		payload["tools_invoked"] = False
+		payload["tools_allowed"] = False
+		payload["allow_local_fallback"] = False
+		payload["allow_cross_provider_fallback"] = False
+		if payload["live_model_identity_verified"] is not True:
+			payload["live_model_identity_verified"] = False
+			payload["live_build_identity_verified"] = False
+			payload["provider_supported_identity"] = False
+		return payload
+
+	if type(purpose_id) is not str or type(request_id) is not str or re.fullmatch(r"[0-9a-f]{32}", request_id) is None:
+		return finish("malformed")
+	if not isinstance(inputs, Mapping):
+		return finish("malformed")
+	if type(timeout) not in (int, float) or isinstance(timeout, bool) or not math.isfinite(float(timeout)) or float(timeout) <= 0:
+		return finish("malformed")
+	if type(max_output_bytes) is not int or not 1 <= max_output_bytes <= 8192:
+		return finish("malformed")
+	if cancel_event is not None and cancel_event.is_set():
+		return finish("cancelled", route_observation="cancelled")
+	generate, result_type, observation_type = load_observed_llm_symbols()
+	if not callable(generate) or not isinstance(result_type, type) or not isinstance(observation_type, type):
+		return finish("route_unverified", route_observation="unverified")
+	if pinned_grok47_adapter_binding(generate) is None:
+		return finish("route_unverified", route_observation="unverified")
+	qualified = _qualified_native_observation_types()
+	native_qualified = qualified is not None and result_type is qualified[0] and observation_type is qualified[1]
+	try:
+		prompt = json.dumps(
+			{"purpose_id": purpose_id, "inputs": dict(inputs),
+			 "instructions": "Return one JSON object for this purpose. Do not call tools."},
+			sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+		)
+		prompt.encode("utf-8")
+	except (TypeError, ValueError, UnicodeError):
+		return finish("malformed")
+	deadline = time.monotonic() + min(float(timeout), 60.0)
+	remaining = deadline - time.monotonic()
+	if remaining <= 0:
+		return finish("timeout", route_observation="timeout")
+
+	def progress(_summary: Any) -> None:
+		if cancel_event is not None and cancel_event.is_set():
+			raise _HookObservationCancelled()
+		if callable(progress_callback):
+			try:
+				progress_callback({"phase": "provider_progress", "router": INFERENCE_OWNER})
+			except Exception:
+				pass
+
+	try:
+		result = generate(
+			prompt=prompt,
+			provider=PINNED_GROK_PROVIDER,
+			model_name=PINNED_GROK_MODEL,
+			observation_request_id=request_id,
+			timeout=remaining,
+			allow_local_fallback=False,
+			allow_cross_provider_fallback=False,
+			grok_cli_cmd=["grok"],
+			grok_tools="read_file",
+			grok_disallowed_tools="read_file,search_tool,use_tool",
+			grok_permission_mode="dontAsk",
+			grok_max_turns=1,
+			grok_stream_progress=True,
+			grok_progress_callback=progress,
+			usage_cancel_event=cancel_event,
+		)
+	except _HookObservationCancelled:
+		return finish("cancelled", model_dispatched=True, route_observation="cancelled")
+	except Exception as exc:
+		kind = classify_router_failure(exc)
+		observation = {"timeout": "timeout", "cancelled": "cancelled", "quota": "quota", "malformed": "malformed"}.get(kind, "unavailable")
+		return finish(kind if kind in {"timeout", "cancelled", "quota", "malformed"} else "unavailable",
+			model_dispatched=True, route_observation=observation)
+	if cancel_event is not None and cancel_event.is_set():
+		return finish("cancelled", model_dispatched=True, route_observation="cancelled")
+	if time.monotonic() >= deadline:
+		return finish("timeout", model_dispatched=True, route_observation="timeout")
+	if type(result) is not result_type or not hasattr(result, "observation") or not hasattr(result, "text"):
+		return finish("route_unverified", model_dispatched=True, route_observation="unverified")
+	obs = result.observation
+	if not _hook_observation_bound(obs, observation_type, request_id):
+		return finish("route_unverified", model_dispatched=True, route_observation="unverified")
+	if (obs.selected_provider_name != PINNED_GROK_PROVIDER or obs.selected_model_name != PINNED_GROK_MODEL
+			or obs.provider_reported_model not in _HOOK_REPORTED_MODELS):
+		return finish("substitution_refused", model_dispatched=True, route_observation="mismatched",
+			observed_provider=str(getattr(obs, "selected_provider_name", "") or ""),
+			observed_model=str(getattr(obs, "selected_model_name", "") or ""),
+			observed_build=str(getattr(obs, "provider_reported_model", "") or ""))
+	if type(result.text) is not str or len(result.text.encode("utf-8")) > max_output_bytes:
+		return finish("malformed", model_dispatched=True, route_observation="malformed", invocation_bound=True,
+			native_invocation_id=obs.invocation_id)
+	bound_native = native_qualified is True
+	return finish(
+		"available",
+		model_dispatched=True,
+		output_text=result.text,
+		route_observation="verified",
+		invocation_bound=True,
+		native_observation_bound=bound_native,
+		native_invocation_id=obs.invocation_id,
+		observed_router=INFERENCE_OWNER,
+		observed_provider=obs.selected_provider_name,
+		observed_model=obs.selected_model_name,
+		observed_build=obs.provider_reported_model,
+		evidence_class=obs.evidence_class,
+		live_model_identity_verified=bound_native,
+		live_build_identity_verified=bound_native and obs.provider_reported_model in _HOOK_REPORTED_MODELS,
+		provider_supported_identity=bound_native,
+	)
+
+
 def generate_text_via_router(
 	prompt: str,
 	*,
@@ -1161,6 +1504,11 @@ def generate_text_via_router(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> str:
+	short = _declared_purpose_short_circuit(kwargs)
+	if short is not None:
+		if short["status"] == "local_only":
+			raise RuntimeError("local_purpose_no_model_dispatch")
+		raise RuntimeError(str(short.get("error") or "undeclared_purpose"))
 	if kwargs.get("intake_operation") is not None:
 		result = generate_text_with_metadata(prompt, provider=provider, model_name=model_name, **kwargs)
 		if result.get("status") != "available":
@@ -1257,6 +1605,15 @@ def generate_text_with_metadata(
 	model_name: Optional[str] = None,
 	**kwargs: Any,
 ) -> Dict[str, Any]:
+	short = _declared_purpose_short_circuit(kwargs)
+	if short is not None:
+		return with_adapter_metadata(
+			short,
+			operation="generate_text",
+			backend_available=generate_text is not None,
+			degraded_reason=short.get("error") or None,
+			implementation_status="available" if generate_text is not None else "unavailable",
+		)
 	host_meta = _pop_host_metadata(kwargs)
 	request_id = host_meta["request_id"]
 	intake_operation = host_meta["intake_operation"]
@@ -3092,6 +3449,294 @@ def public_query_reference(query: str) -> Dict[str, Any]:
 	}
 
 
+# Per-operation consent. Grok raw-intake consent authorizes one provider and
+# one data class. It does not authorize web/archive providers, tools, or any
+# other case data class. Invocation bindings are process-local and case-scoped.
+OPERATION_CONSENT_CONTRACT = "complaint_operation_consent"
+OPERATION_CONSENT_VERSION = "1"
+_RAW_INTAKE_PURPOSES = frozenset({"extract_facts", "propose_questions"})
+_CITATION_PURPOSES = frozenset({"citation_acquisition", "public_law_citation"})
+_PURPOSE_QUERY_FIELDS = {
+	"extract_facts": ("source_text", "target_ref"),
+	"propose_questions": ("gap_code", "target_ref"),
+	"explain_candidate": ("candidate_ref", "gap_code"),
+	"citation_acquisition": ("citation",),
+	"public_law_citation": ("citation",),
+}
+_UNRELATED_REMOTE_KINDS = frozenset({
+	"web_search", "web", "web_provider", "archive", "archive_fetch", "archive_provider", "wayback",
+})
+_REMOTE_INVOCATIONS: Dict[str, Dict[str, Any]] = {}
+_INVOCATION_LOCK = threading.Lock()
+
+
+def clear_remote_invocation_bindings() -> None:
+	with _INVOCATION_LOCK:
+		_REMOTE_INVOCATIONS.clear()
+
+
+def _consent_generation(consent: Any) -> int:
+	if not isinstance(consent, Mapping):
+		return 0
+	raw = consent.get("generation")
+	if type(raw) is not int or isinstance(raw, bool) or raw < 0:
+		return 0
+	return raw
+
+
+def _bounded_query_piece(value: Any, *, limit: int) -> str:
+	if type(value) is not str:
+		return ""
+	text = value.strip()
+	if not text or len(text.encode("utf-8")) > limit:
+		return ""
+	if any(ord(char) < 32 for char in text):
+		return ""
+	return text
+
+
+def minimize_purpose_query(
+	purpose: str,
+	*,
+	private_fields: Optional[Mapping[str, Any]] = None,
+	citation: Any = None,
+	complaint_text: Any = None,
+) -> Dict[str, Any]:
+	"""Keep a purpose query to its declared fields.
+
+	Public-law queries carry the citation only. A complaint body passed beside
+	the citation is not copied into the query.
+	"""
+
+	purpose_id = purpose if type(purpose) is str else ""
+	complaint = complaint_text if type(complaint_text) is str else ""
+	if purpose_id in _CITATION_PURPOSES:
+		citation_text = _bounded_query_piece(citation, limit=160)
+		if complaint and citation_text:
+			citation_text = citation_text.replace(complaint, "").strip()
+		query = {
+			"purpose": purpose_id,
+			"query_class": "public_law_citation_only",
+			"citation": citation_text,
+		}
+		return query
+	allowed = _PURPOSE_QUERY_FIELDS.get(purpose_id, ())
+	source = private_fields if isinstance(private_fields, Mapping) else {}
+	fields: Dict[str, str] = {}
+	for key in allowed:
+		piece = _bounded_query_piece(source.get(key), limit=500 if key == "source_text" else 128)
+		if piece and (not complaint or piece != complaint):
+			fields[key] = piece
+	return {
+		"purpose": purpose_id,
+		"query_class": "minimized_fields",
+		"fields": fields,
+	}
+
+
+def _explicit_operation_grant(
+	consent: Any,
+	*,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+) -> Optional[Mapping[str, Any]]:
+	if not isinstance(consent, Mapping) or consent.get("revoked") is True:
+		return None
+	grants = consent.get("grants")
+	if not isinstance(grants, list):
+		return None
+	for grant in grants:
+		if not isinstance(grant, Mapping) or grant.get("explicit") is not True:
+			continue
+		if grant.get("tools") is not False:
+			continue
+		if str(grant.get("purpose") or "") != purpose:
+			continue
+		if str(grant.get("provider_kind") or "") != provider_kind:
+			continue
+		if str(grant.get("data_class") or "") != data_class:
+			continue
+		if provider_kind == "grok_inference":
+			if str(grant.get("provider") or "") != PRIVACY_GROK_PROVIDER:
+				continue
+			if str(grant.get("model") or "") != PRIVACY_GROK_MODEL:
+				continue
+		return grant
+	return None
+
+
+def evaluate_remote_operation_consent(
+	record: Any,
+	*,
+	user_id: str,
+	case_id: str,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+	tools: bool = False,
+) -> Dict[str, Any]:
+	"""Decide one remote operation from an already loaded owner/case record.
+
+	This function does not load a provider. Missing, local, and revoked
+	records refuse effectful dispatch. Raw-intake Grok consent matches only
+	``grok_cli`` / ``grok-4.7`` for ``raw_intake`` purposes that do not use tools.
+	"""
+
+	def decision(code: str, *, effectful: bool = False, local: bool = False, generation: int = 0, revoked: bool = False) -> Dict[str, Any]:
+		return {
+			"effectful_allowed": effectful,
+			"local_query_allowed": local,
+			"code": code,
+			"generation": generation,
+			"revoked": revoked,
+			"tools_authorized": False,
+			"provider": PRIVACY_GROK_PROVIDER if effectful and provider_kind == "grok_inference" else "",
+			"model": PRIVACY_GROK_MODEL if effectful and provider_kind == "grok_inference" else "",
+			"data_class": data_class if type(data_class) is str else "",
+			"provider_kind": provider_kind if type(provider_kind) is str else "",
+			"live_model_identity_verified": False,
+		}
+
+	if not isinstance(record, Mapping) or record.get("found") is False:
+		return decision("consent_missing")
+	if record.get("case_match") is False:
+		return decision("wrong_case")
+	if str(record.get("user_id") or "") != str(user_id or "") or str(record.get("case_id") or "") != str(case_id or ""):
+		return decision("wrong_case")
+	consent = record.get("operation_consent")
+	generation = _consent_generation(consent)
+	revoked = isinstance(consent, Mapping) and consent.get("revoked") is True
+	purpose_id = purpose if type(purpose) is str else ""
+	kind = provider_kind if type(provider_kind) is str else ""
+	kind_normalized = kind.strip().lower()
+	data = data_class if type(data_class) is str else ""
+	local_kind = kind_normalized in {"", "none", "local", "local_private"}
+	if purpose_id in _CITATION_PURPOSES and local_kind and tools is not True:
+		return decision("local_only", effectful=False, local=True, generation=generation, revoked=revoked)
+	if tools is True:
+		return decision("tools_not_authorized", effectful=False, generation=generation, revoked=revoked)
+	inspection = inspect_privacy_policy(record.get("privacy_policy"), user_id=str(user_id or ""), case_id=str(case_id or ""))
+	policy = inspection.get("policy") if isinstance(inspection.get("policy"), Mapping) else {}
+	mode = str(policy.get("processing_mode") or "")
+	cloud = inspection.get("admitted") is True and inspection.get("cloud_processing_enabled") is True and mode == PRIVACY_PROCESSING_GROK
+	if revoked:
+		return decision("consent_revoked", effectful=False, generation=generation, revoked=True)
+	if not cloud:
+		if not inspection.get("admitted"):
+			return decision("consent_missing", effectful=False, generation=generation, revoked=False)
+		return decision("local_private", effectful=False, generation=generation, revoked=False)
+	explicit = _explicit_operation_grant(consent, purpose=purpose_id, provider_kind=kind_normalized, data_class=data)
+	raw_intake = (
+		explicit is None
+		and kind_normalized == "grok_inference"
+		and data == "raw_intake"
+		and purpose_id in _RAW_INTAKE_PURPOSES
+	)
+	if explicit is not None or raw_intake:
+		return decision("authorized", effectful=True, generation=generation, revoked=False)
+	if kind_normalized in _UNRELATED_REMOTE_KINDS or kind_normalized != "grok_inference":
+		return decision("provider_not_authorized", effectful=False, generation=generation, revoked=False)
+	if data != "raw_intake":
+		return decision("data_class_not_authorized", effectful=False, generation=generation, revoked=False)
+	return decision("purpose_not_authorized", effectful=False, generation=generation, revoked=False)
+
+
+def bind_remote_invocation(
+	*,
+	user_id: str,
+	case_id: str,
+	purpose: str,
+	provider_kind: str,
+	data_class: str,
+	generation: int,
+) -> str:
+	"""Bind one invocation to this owner and case. Another case cannot reuse it."""
+
+	invocation_id = os.urandom(16).hex()
+	binding = {
+		"invocation_id": invocation_id,
+		"user_id": str(user_id or ""),
+		"case_id": str(case_id or ""),
+		"purpose": purpose if type(purpose) is str else "",
+		"provider_kind": provider_kind if type(provider_kind) is str else "",
+		"data_class": data_class if type(data_class) is str else "",
+		"generation": int(generation),
+		"live_model_identity_verified": False,
+	}
+	with _INVOCATION_LOCK:
+		_REMOTE_INVOCATIONS[invocation_id] = binding
+	return invocation_id
+
+
+def remote_invocation_binding(invocation_id: str) -> Optional[Dict[str, Any]]:
+	if type(invocation_id) is not str:
+		return None
+	with _INVOCATION_LOCK:
+		found = _REMOTE_INVOCATIONS.get(invocation_id)
+		return deepcopy(found) if found is not None else None
+
+
+def accept_late_remote_result(
+	record: Any,
+	*,
+	invocation_id: str,
+	user_id: str,
+	case_id: str,
+	bound_graph_revision: Optional[str] = None,
+	current_graph_revision: Optional[str] = None,
+	bound_session_revision: Optional[int] = None,
+	current_session_revision: Optional[int] = None,
+) -> Dict[str, Any]:
+	"""Re-read consent before a late result can be accepted.
+
+	The caller supplies the persisted record loaded immediately before this
+	call. A revoked choice, a different case, or a changed graph or session
+	revision leaves the result unaccepted.
+	"""
+
+	binding = remote_invocation_binding(invocation_id)
+	if binding is None:
+		return {"accepted": False, "code": "invocation_missing", "live_model_identity_verified": False}
+	if binding["user_id"] != str(user_id or "") or binding["case_id"] != str(case_id or ""):
+		return {"accepted": False, "code": "invocation_not_reusable", "live_model_identity_verified": False}
+	revision_checked = (
+		bound_graph_revision is not None or current_graph_revision is not None
+		or bound_session_revision is not None or current_session_revision is not None
+	)
+	if revision_checked:
+		graph_ok = type(bound_graph_revision) is str and bound_graph_revision == current_graph_revision
+		session_ok = (
+			bound_session_revision is None and current_session_revision is None
+		) or (
+			type(bound_session_revision) is int and bound_session_revision == current_session_revision
+		)
+		if bound_graph_revision is None and current_graph_revision is None:
+			graph_ok = True
+		if not graph_ok or not session_ok:
+			return {"accepted": False, "code": "stale_revision", "live_model_identity_verified": False}
+	decision = evaluate_remote_operation_consent(
+		record,
+		user_id=binding["user_id"],
+		case_id=binding["case_id"],
+		purpose=str(binding["purpose"]),
+		provider_kind=str(binding["provider_kind"]),
+		data_class=str(binding["data_class"]),
+		tools=False,
+	)
+	if decision["generation"] != binding["generation"] or decision["revoked"] or not decision["effectful_allowed"]:
+		code = "consent_revoked" if decision["revoked"] or decision["generation"] != binding["generation"] else str(decision["code"])
+		if decision["code"] == "wrong_case":
+			code = "wrong_case"
+		return {"accepted": False, "code": code, "live_model_identity_verified": False}
+	return {
+		"accepted": True,
+		"code": "accepted",
+		"invocation_id": invocation_id,
+		"live_model_identity_verified": False,
+	}
+
+
 __all__ = [
 	"generate_text",
 	"generate_text_via_router",
@@ -3116,6 +3761,8 @@ __all__ = [
 	"classify_router_failure",
 	"intake_request_response_format",
 	"parse_intake_request",
+	"pinned_hook_inference_route",
+	"route_identity_diagnostics",
 	"coerce_effective_privacy_policy",
 	"complaint_data_class_inventory",
 	"inspect_privacy_policy",
@@ -3129,6 +3776,15 @@ __all__ = [
 	"open_private_embedding",
 	"redact_generation_diagnostic",
 	"public_query_reference",
+	"OPERATION_CONSENT_CONTRACT",
+	"OPERATION_CONSENT_VERSION",
+	"minimize_purpose_query",
+	"evaluate_remote_operation_consent",
+	"bind_remote_invocation",
+	"remote_invocation_binding",
+	"accept_late_remote_result",
+	"generate_observed_hook_purpose",
+	"clear_remote_invocation_bindings",
 	"MINIMAL_TURN_SCHEMA",
 	"PRIVATE_TURN_TIMEOUT_SECONDS",
 	"ARCH_CLASSIFICATION_BLOCKED",

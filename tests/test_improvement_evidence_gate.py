@@ -116,6 +116,7 @@ def _gate(tmp_path: Path, task: dict, observation: dict, **kwargs) -> dict:
     import os
     import subprocess
     measurement_fault = kwargs.pop("_measurement_fault", None)
+    measurement_context = kwargs.pop("_measurement_context", {})
     if observation.get("lane") == "local_node_integration" and all((tmp_path / p).is_file() for p in task["targets"]):
         tests = tmp_path / "tests"
         tests.mkdir(exist_ok=True)
@@ -203,7 +204,7 @@ def pytest_sessionfinish(session, exitstatus):
             return result
         measured = measure_behavioral_command(tmp_path, tmp_path / "state" / "runs", task, source_command,
                                                runner=delegate, environment=env, timeout_seconds=45, declared_command=COMMAND,
-                                               context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+                                               context={"require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard", **measurement_context})
         from integrations.ipfs_accelerate.improvement_runner import _observed_artifacts
         observation["artifacts"] = _observed_artifacts(tmp_path, observation)
         if all(a["present"] for a in observation["artifacts"]):
@@ -481,11 +482,26 @@ def test_native_proposal_scheduler_actually_consumes_gate_before_acceptance(tmp_
     if skip:
         test = tmp_path / "tests/test_improvement_evidence_gate.py"
         test.write_text("import pytest\ndef test_required_case(): pytest.skip('synthetic required skip')\n")
-    proposal = ImplementationProposal(task_id=task["id"], accepted_plan_id="plan:synthetic", repository_id="repo:synthetic",
-        repository_tree_id="tree:synthetic", objective_id="objective:synthetic", baseline_id="baseline:synthetic",
+    # Use the real Native producer and exact Git baseline, not serialized
+    # synthetic repository/tree labels or sources unrelated to the worktree.
+    import hashlib
+    import subprocess
+    from ipfs_accelerate_py.agent_supervisor.proof.code_proof_obligations import collect_git_candidate_diff
+    output = tmp_path / task["targets"][0]
+    candidate = output.read_bytes()
+    output.write_text("def ready():\n    return False\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "out", "tests"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid",
+                    "commit", "-qm", "Synthetic baseline"], check=True)
+    baseline = subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
+    common = Path(subprocess.check_output(["git", "-C", str(tmp_path), "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True).strip()).resolve()
+    output.write_bytes(candidate)
+    repository = "repository:sha256:" + hashlib.sha256(str(common).encode()).hexdigest()
+    proposal = ImplementationProposal(task_id=task["id"], accepted_plan_id="plan:synthetic", repository_id=repository,
+        repository_tree_id=baseline, objective_id="objective:synthetic", baseline_id=baseline,
         context_id="context:owned-synthetic-attempt", replay_nonce="synthetic-attempt-1",
-        declared_paths=tuple(task["targets"]), candidate_diff=(CandidateDiffEntry(old_path=task["targets"][0], new_path=task["targets"][0],
-            change_kind=DiffChangeKind.MODIFY, before_source="def ready(): return False\n", after_source="def ready(): return True\n"),))
+        declared_paths=tuple(task["targets"]), candidate_diff=tuple(entry for entry in
+            collect_git_candidate_diff(tmp_path, base_revision=baseline) if entry.new_path in task["targets"]))
     accepted = validate_implementation_proposal(proposal, policy=ProposalValidationPolicy(allowed_paths=tuple(task["targets"])))
     assert accepted.accepted
     import shlex
@@ -931,19 +947,39 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     phase_source = Path(__file__).resolve().parents[1] / "integrations/ipfs_accelerate/improvement_plan.py"
     phase = package / "improvement_plan.py"
     phase.write_bytes(phase_source.read_bytes())
+    campaign_source = phase_source.with_name("campaign.py")
+    campaign = package / "campaign.py"
+    campaign.write_bytes(campaign_source.read_bytes())
     declared = tmp_path / "external/ipfs_datasets_py"
     decoy = declared / "ipfs_accelerate_py"
     decoy.mkdir(parents=True)
     (decoy / "__init__.py").write_text("raise RuntimeError('untrusted_native_bootstrap')\n")
+    (tmp_path / "complaint_owned_network_guard.py").write_text(
+        "raise RuntimeError('candidate_shadowed_owned_network_guard')\n")
     native_root = Path(native_source.__file__).resolve().parents[3]
     seal = native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py"
     test = tmp_path / "tests/test_improvement_evidence_gate.py"
     test.write_text("from pathlib import Path\n"
+        "import ctypes, errno, socket\n"
         "import integrations.ipfs_accelerate.improvement_plan as phase\n"
+        "import integrations.ipfs_accelerate.campaign as campaign\n"
         "import ipfs_accelerate_py.testing.pytest_ast_seal as seal\n"
         "def test_actual_plugin_origins():\n"
         f" assert Path(phase.__file__).resolve() == Path({str(phase)!r})\n"
-        f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n")
+        f" assert Path(campaign.__file__).resolve() == Path({str(campaign)!r})\n"
+        f" assert Path(seal.__file__).resolve() == Path({str(seal)!r})\n"
+        " libc = ctypes.CDLL(None, use_errno=True)\n"
+        " for family in (socket.AF_INET, socket.AF_INET6):\n"
+        "  ctypes.set_errno(0)\n"
+        "  descriptor = libc.socket(family, socket.SOCK_STREAM, 0)\n"
+        "  if descriptor >= 0: libc.close(descriptor)\n"
+        "  assert descriptor == -1 and ctypes.get_errno() == errno.EPERM\n"
+        " left, right = socket.socketpair()\n"
+        " try:\n"
+        "  assert left.send(b'network-guard') == 13\n"
+        "  assert right.recv(13) == b'network-guard'\n"
+        " finally:\n"
+        "  left.close(); right.close()\n")
     # Reproduce the actual native scheduler's approved package-only environment
     # and the normalized task command's overwriting relative export.
     env["PYTHONPATH"] = str(Path(pytest.__file__).resolve().parents[1])
@@ -960,6 +996,126 @@ def test_real_sealed_pytest_bootstrap_survives_declared_pythonpath_export(tmp_pa
     assert all(result["validation_python_launcher"]["sealed"] is True for result in measured["results"])
     assert measured["imported_sources"][str(seal)] == hashlib.sha256(seal.read_bytes()).hexdigest()
     assert measured["imported_sources"][str(phase)] == hashlib.sha256(phase_source.read_bytes()).hexdigest()
+    assert measured["imported_sources"][str(campaign)] == hashlib.sha256(campaign_source.read_bytes()).hexdigest()
     assert all(result["original_command"] == command for result in measured["results"])
     assert all("-p complaint_fixture_guard" in result["executed_command"] for result in measured["results"])
+    assert all(" -P -m pytest " in result["executed_command"] for result in measured["results"])
+    network = measured["kernel_network_guard"]
+    assert network["validation_children_only"] is True
+    assert [row["mode"] for row in network["proofs"]] == ["collect", "run"]
+    assert all(Path(row["path"]).is_file() and row["sha256"] for row in network["proofs"])
     assert observed["completion_authority"] is False if "completion_authority" in observed else measured["completion_authority"] is False
+
+
+@pytest.mark.parametrize("changed", ["applications/complaint_workspace.py", "static/complaint_conversation.js", "static/complaint_mcp_sdk.js"])
+def test_correction_product_changes_require_the_bounded_accepted_companion(tmp_path, changed):
+    from integrations.ipfs_accelerate import improvement_runner as runtime
+    selector = ("tests/test_cimp_ux_10.py::"
+                "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+    expected = runtime._IMPACTED_BEHAVIORAL_CHECKS[changed]
+    late_selector = "tests/test_cimp_ux_10.py::test_delayed_answer_cannot_repaint_a_new_selected_case"
+    assert {selector, late_selector} <= set(expected)
+    for relative in expected:
+        path = tmp_path / relative.partition("::")[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert runtime._impacted_behavioral_checks(tmp_path, [changed]) == sorted(expected)
+    (tmp_path / "tests/test_cimp_ux_10.py").unlink()
+    with pytest.raises(ValueError, match="impacted_check_missing"):
+        runtime._impacted_behavioral_checks(tmp_path, [changed])
+
+
+@pytest.mark.parametrize("mode", ["passes", "strong_fails", "weakens", "omits", "full_file",
+                                  "filtered_node", "filtered_file", "parameters", "late_fails", "one_node_only", "partial_file"])
+def test_measured_correction_selector_enforces_success_without_running_unrelated_cases(tmp_path, monkeypatch, mode):
+    """Synthetic selector fixture, separate from the genuine browser acceptance.
+
+    A declared positive-VERSION test permits VERSION1. The trusted companion
+    requires VERSION2; unrelated failing cases prove the selector stays bounded.
+    The fixture retains the real sealed executor, AST and child/network guards.
+    """
+    import shlex
+    from integrations.ipfs_accelerate import improvement_runner as runtime
+    _write_output(tmp_path, "CIMP-OPS-04")
+    _, executor, environment = _gate(tmp_path, _task(), _observation(tmp_path), _return_measurement=True)
+    relative, _, function = runtime._FACTUAL_CORRECTION_ACCEPTANCE.partition("::")
+    late_function = runtime._CASE_SWITCH_ACCEPTANCE.partition("::")[2]
+    companion = tmp_path / relative
+    declaration = ("@pytest.mark.parametrize('expected', [2, 2], ids=['first', 'second'])\n"
+                   "def " + function + "(expected):\n    assert adapter.VERSION == expected\n"
+                   if mode == "parameters" else "def " + function + "():\n    assert adapter.VERSION == 2\n")
+    companion.write_text("import adapter, pytest\n\n" + declaration
+                         + "\ndef " + late_function + "():\n    assert adapter.CASE_ID == 'new-case'\n"
+                         + "\ndef test_unrelated_case_stays_out_of_bounded_selector():\n    assert "
+                         + ("True" if mode == "full_file" else "False") + "\n"
+                         + ("\ndef test_weak_declared_only():\n    assert adapter.VERSION > 0\n"
+                            if mode == "filtered_node" else ""))
+    reviewed = tmp_path / "reviewed-companion-baseline"
+    baseline = reviewed / relative
+    baseline.parent.mkdir(parents=True)
+    baseline.write_bytes(companion.read_bytes())
+    real_preserve = runtime._preserve_existing_behavioral_definitions
+    monkeypatch.setattr(runtime, "_preserve_existing_behavioral_definitions",
+        lambda root, paths: real_preserve(root, paths, trusted_root=reviewed))
+    key = "static/complaint_conversation.js"
+    product = tmp_path / key
+    product.parent.mkdir()
+    product.write_text("// Explicit synthetic impact input; real browser acceptance is qualified separately.\n")
+    impacted = sorted(runtime._IMPACTED_BEHAVIORAL_CHECKS[key])
+    if mode in {"filtered_file", "partial_file"}:
+        # Separate generic whole-file policy control, retaining real collection.
+        impacted = [relative]
+        monkeypatch.setitem(runtime._IMPACTED_BEHAVIORAL_CHECKS, key, tuple(impacted))
+    version = "2" if mode in {"passes", "full_file", "parameters", "late_fails", "one_node_only", "partial_file"} else "1"
+    case = "old-case" if mode == "late_fails" else "new-case"
+    (tmp_path / "adapter.py").write_text("VERSION=" + version + "\nCASE_ID=" + repr(case) + "\n")
+    if mode == "weakens":
+        companion.write_text(companion.read_text().replace("adapter.VERSION == 2", "adapter.VERSION > 0"))
+    elif mode == "omits":
+        companion.write_text(companion.read_text().replace("def " + function + "(", "def omitted_accepted_companion("))
+    command = COMMAND + (" " + relative if mode in {"full_file", "filtered_node", "one_node_only", "partial_file"} else "")
+    if mode == "filtered_node":
+        command += " -k weak"
+    elif mode == "filtered_file":
+        command += " -k local_node_evidence"
+    elif mode in {"one_node_only", "partial_file"}:
+        command += " -k answer_and_correction_update_graphs_once"
+    observed = runtime.measure_behavioral_command(tmp_path, tmp_path / "selector-runs", _task(command=command),
+        "PYTHONPATH=" + shlex.quote(environment["PYTHONPATH"]) + " " + command,
+        runner=executor, environment=environment, timeout_seconds=45, declared_command=command,
+        context={"changed_paths": [key], "require_child_guard": True, "pytest_guard_plugin": "complaint_fixture_guard"})
+    measured = observed["host_measurement"]
+    assert measured["impacted_checks"] == impacted
+    assert measured["completion_authority"] is False
+    if mode in {"filtered_node", "filtered_file", "one_node_only", "partial_file"}:
+        assert measured["reason"] == "impacted_required_case_missing"
+        missing = [runtime._CASE_SWITCH_ACCEPTANCE] if mode == "one_node_only" else impacted
+        assert measured["missing_impacted_checks"] == missing
+        assert [row["mode"] for row in measured["results"]] == ["collect"]
+        assert measured["results"][0]["returncode"] == 0
+        expected = (runtime._FACTUAL_CORRECTION_ACCEPTANCE if mode in {"one_node_only", "partial_file"} else
+                    relative + "::test_weak_declared_only" if mode == "filtered_node" else NODE_A)
+        assert observed["required_nodeids"] == [expected]
+        assert not (Path(measured["run_path"]) / "run.json").exists()
+    elif mode in {"weakens", "omits"}:
+        assert measured["reason"] == "existing_behavioral_definition_changed"
+        assert measured["behavioral_definition_diagnostic"]["candidate_executed"] is False
+        assert not measured["results"]
+    else:
+        assert measured["reason"] == ("failed_assertion" if mode in {"strong_fails", "late_fails"} else "")
+        companion_nodes = ({runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[first]",
+                            runtime._FACTUAL_CORRECTION_ACCEPTANCE + "[second]"}
+                           if mode == "parameters" else {runtime._FACTUAL_CORRECTION_ACCEPTANCE})
+        expected = {NODE_A, NODE_B, *companion_nodes, runtime._CASE_SWITCH_ACCEPTANCE}
+        if mode == "full_file":
+            expected.add(relative + "::test_unrelated_case_stays_out_of_bounded_selector")
+        assert set(observed["required_nodeids"]) == expected
+        assert observed["collected_count"] == len(expected)
+        # Host deliberately stops projecting cases at the first failure.
+        # The genuine phase manifest still records every executed test.
+        phases = json.loads((Path(measured["run_path"]) / "run.json").read_text())
+        cases = {row["nodeid"]: row["outcome"] for row in phases["reports"] if row["when"] == "call"}
+        assert cases[NODE_A] == cases[NODE_B] == "passed"
+        assert all(cases[node] == ("failed" if mode == "strong_fails" else "passed") for node in companion_nodes)
+        assert cases[runtime._CASE_SWITCH_ACCEPTANCE] == ("failed" if mode == "late_fails" else "passed")
+        assert any(row["path"] == relative for row in measured["preserved_behavioral_definitions"])

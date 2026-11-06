@@ -8,7 +8,7 @@ import tempfile
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Protocol, TypedDict, runtime_checkable
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, TypedDict, runtime_checkable
 
 from .loader import import_module_optional
 from .types import (
@@ -812,7 +812,10 @@ _PERSON_PATTERNS = (
     re.compile(r"\bI am " + _PERSON_NAME),
     re.compile(r"(?i:\b(?:manager|supervisor|landlord|owner) )" + _PERSON_NAME),
 )
-_ALLEGATION_MARKERS = ("fired", "discriminat", "denied", "retaliat", "harass", "evict", "allege")
+_ALLEGATION_MARKERS = (
+    "fired", "discriminat", "denied", "retaliat", "harass", "evict", "allege",
+    "not stated", "unresolved",
+)
 
 
 def classify_epistemic_class(text: str, *, explicit: Optional[str] = None, legal: bool = False) -> str:
@@ -1242,6 +1245,8 @@ _PRIVATE_EXTRACTION_RESULT_LIMIT = 40
 _PRIVATE_EXTRACTION_TIMEOUT_SECONDS = 5.0
 _ASSERTABLE_UPSTREAM_TYPES = frozenset({"person", "organization", "date", "fact"})
 _PRIVATE_EXTRACTOR_MODULE = "ipfs_datasets_py.knowledge_graphs.extraction.extractor"
+SELECTED_KG_EXTRACTION_PATH = "KnowledgeGraphExtractor.extract_knowledge_graph"
+_EXTERNAL_NON_USER_TOKENS = ("wikidata", "wikipedia")
 
 
 _PRIVATE_EXTRACTOR_CALL_SOURCE = r"""
@@ -1319,35 +1324,42 @@ def records(values, relationship=False):
         row.update({name:get(record,name) for name in ('properties','source_text','confidence','extraction_method')})
         result.append(safe(row))
     return result,truncated
-result={'status':'extractor_error','entities':[],'relationships':[]}
+executed=False
+enabled=''
+result={'status':'extractor_error','entities':[],'relationships':[],'path_executed':False,'enabled_path':''}
 try:
     module = importlib.import_module('ipfs_datasets_py.knowledge_graphs.extraction.extractor')
     cls = getattr(module,'KnowledgeGraphExtractor')
     if not callable(getattr(cls,'extract_knowledge_graph',None)): raise AttributeError()
     extractor = cls(**options)
     graph = extractor.extract_knowledge_graph(text)
+    # Importing the class is not execution. This flag is set only after the
+    # selected method returns.
+    executed=True
+    enabled='KnowledgeGraphExtractor.extract_knowledge_graph'
     entities,truncated_entities = records(get(graph,'entities'))
     relationships,truncated_relationships = records(get(graph,'relationships') or {},True)
     result={'status':'ok','entities':entities,'relationships':relationships,
-            'entity_result_bound':truncated_entities,'relationship_result_bound':truncated_relationships}
+            'entity_result_bound':truncated_entities,'relationship_result_bound':truncated_relationships,
+            'path_executed':True,'enabled_path':enabled}
 except (ImportError,AttributeError,FileNotFoundError):
-    result={'status':'extractor_unavailable','entities':[],'relationships':[]}
+    result={'status':'extractor_unavailable','entities':[],'relationships':[],'path_executed':executed,'enabled_path':enabled if executed else ''}
 except PrivateEffectDenied:
-    result={'status':'extractor_effect_denied','entities':[],'relationships':[]}
+    result={'status':'extractor_effect_denied','entities':[],'relationships':[],'path_executed':executed,'enabled_path':enabled if executed else ''}
 except (ValueError,TypeError,UnicodeError,RecursionError):
-    result={'status':'extractor_invalid_result','entities':[],'relationships':[]}
+    result={'status':'extractor_invalid_result','entities':[],'relationships':[],'path_executed':executed,'enabled_path':enabled if executed else ''}
 except BaseException:
-    result={'status':'extractor_error','entities':[],'relationships':[]}
+    result={'status':'extractor_error','entities':[],'relationships':[],'path_executed':executed,'enabled_path':enabled if executed else ''}
 # Optional imports can catch PermissionError; an attempted forbidden effect
 # still makes the whole private extraction unavailable, never a valid result.
 if denials:
-    result={'status':'extractor_effect_denied','entities':[],'relationships':[]}
+    result={'status':'extractor_effect_denied','entities':[],'relationships':[],'path_executed':executed,'enabled_path':enabled if executed else ''}
 result['denied_effect_counts'] = denials
 try:
     encoded=json.dumps(result,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
     if len(encoded)>524288: raise ValueError()
 except BaseException:
-    encoded=b'{"status":"extractor_output_limit","entities":[],"relationships":[],"denied_effect_counts":{}}'
+    encoded=json.dumps({'status':'extractor_output_limit','entities':[],'relationships':[],'denied_effect_counts':{},'path_executed':executed,'enabled_path':enabled if executed else ''},ensure_ascii=True,separators=(',',':')).encode()
 sys.stdout.buffer.write(encoded);sys.stdout.buffer.flush()
 """
 
@@ -1506,7 +1518,7 @@ def _run_owned_private_extractor(text: str, timeout_seconds: float) -> tuple[str
             cache.mkdir(mode=0o700)
             environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL") if key in os.environ}
             environment.update({"HOME": str(home), "TMPDIR": str(cache),
-                "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+                "HF_HUB_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
                 "COMMON_CRAWL_AUTO_CLONE_SOURCE": "0", "IPFS_DATASETS_PY_MINIMAL_IMPORTS": "1",
                 "IPFS_DATASETS_PY_AUTO_NLTK_DOWNLOAD": "0", "PYTHONDONTWRITEBYTECODE": "1"})
             try:
@@ -1617,6 +1629,42 @@ def _caller_source_context(source_id: Optional[str], metadata: Mapping[str, Any]
     return context
 
 
+def executed_extraction_path(payload: Any) -> str:
+    """Return the selected extractor path only after that method has returned.
+
+    A successful import of KnowledgeGraphExtractor is not execution.
+    """
+    if not isinstance(payload, Mapping):
+        return ""
+    if payload.get("path_executed") is not True:
+        return ""
+    enabled = payload.get("enabled_path")
+    if enabled != SELECTED_KG_EXTRACTION_PATH:
+        return ""
+    return SELECTED_KG_EXTRACTION_PATH
+
+
+def _non_user_extraction_kind(record: Any, properties: Mapping[str, Any], extraction_method: Any, entity_type: str) -> str:
+    """Legal text, retrieved graph claims, and encyclopedia facts are not user assertions."""
+    parts = [
+        str(extraction_method or ""),
+        str(entity_type or ""),
+        str(_record_get(record, "source", "graph_source") or ""),
+    ]
+    for key, value in properties.items():
+        parts.append(str(key))
+        if isinstance(value, str):
+            parts.append(value)
+    blob = " ".join(parts).lower()
+    if any(token in blob for token in _EXTERNAL_NON_USER_TOKENS):
+        return "wikidata_wikipedia"
+    if "retrieved" in blob and "graph" in blob:
+        return "retrieved_graph_claim"
+    if entity_type.lower() in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
+        return "legal_text"
+    return ""
+
+
 def _normalize_upstream_entity(record: Any, index: int, source_text: str) -> Optional[Dict[str, Any]]:
     name = str(_record_get(record, "name") or "").strip()
     entity_type = str(_record_get(record, "entity_type", "type") or "").strip()
@@ -1648,8 +1696,14 @@ def _normalize_upstream_entity(record: Any, index: int, source_text: str) -> Opt
     elif isinstance(upstream_source, str) and upstream_source == source_text:
         span_status = "source_text_not_a_span"
     attributes["span_status"] = span_status
-    rule_based = extraction_method in (None, "", "rule_based", "rule-based", "heuristic")
-    origin = "heuristic" if rule_based and span_status == "unique" and entity_type.lower() in _ASSERTABLE_UPSTREAM_TYPES else "model"
+    non_user_kind = _non_user_extraction_kind(record, properties, extraction_method, entity_type)
+    if non_user_kind:
+        attributes["non_user_kind"] = non_user_kind
+        attributes["record_type"] = "legal_text" if non_user_kind == "legal_text" else "model_suggestion"
+        origin = "model"
+    else:
+        rule_based = extraction_method in (None, "", "rule_based", "rule-based", "heuristic")
+        origin = "heuristic" if rule_based and span_status == "unique" and entity_type.lower() in _ASSERTABLE_UPSTREAM_TYPES else "model"
     provenance = {
         "extractor": "KnowledgeGraphExtractor",
         "upstream_entity_id": upstream_id,
@@ -1690,6 +1744,7 @@ def _normalize_upstream_relationship(
     extraction_method = _record_get(record, "extraction_method")
     upstream_id = str(_record_get(record, "relationship_id", "id") or "").strip()
     confidence = _record_get(record, "confidence")
+    non_user_kind = _non_user_extraction_kind(record, properties, extraction_method, relation_type)
     payload: Dict[str, Any] = {
         "type": relation_type,
         "relation_type": relation_type,
@@ -1701,6 +1756,7 @@ def _normalize_upstream_relationship(
             "upstream_relationship_id": upstream_id,
             "properties": properties,
             "inferred": True,
+            **({"non_user_kind": non_user_kind, "record_type": "legal_text" if non_user_kind == "legal_text" else "model_suggestion"} if non_user_kind else {}),
         },
         "provenance": {
             "extractor": "KnowledgeGraphExtractor",
@@ -1762,6 +1818,133 @@ def _normalize_private_records(
     return normalized_entities, normalized_relationships, diagnostics
 
 
+def _candidate_source_binding(
+    entities: Sequence[Mapping[str, Any]],
+    diagnostics: Sequence[str],
+    caller_context: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Keep extractor output a candidate until one exact user span is bound."""
+    caller_authorized = "caller_source_not_authorized" not in diagnostics
+    non_user = [
+        str((entity.get("attributes") or {}).get("non_user_kind") or "")
+        for entity in entities
+        if isinstance(entity, Mapping) and (entity.get("attributes") or {}).get("non_user_kind")
+    ]
+    bound = []
+    for entity in entities:
+        if not isinstance(entity, Mapping):
+            continue
+        attributes = entity.get("attributes") if isinstance(entity.get("attributes"), Mapping) else {}
+        if attributes.get("non_user_kind") or entity.get("origin") == "model":
+            continue
+        span = entity.get("source_span") if isinstance(entity.get("source_span"), Mapping) else {}
+        if attributes.get("span_status") == "unique" and isinstance(span.get("start"), int) and isinstance(span.get("end"), int):
+            bound.append(span)
+    source_hash = str(caller_context.get("source_hash") or "")
+    source_id = str(caller_context.get("source_id") or caller_context.get("message_id") or "")
+    source_version = str(caller_context.get("extractor_version") or "")
+    if entities and non_user and len(non_user) == len(list(entities)):
+        decision = "withheld"
+    elif (
+        caller_authorized
+        and len(bound) == 1
+        and not non_user
+        and bool(source_hash)
+        and bool(source_id)
+        and bool(source_version)
+    ):
+        decision = "admitted"
+    else:
+        decision = "unknown"
+    return {
+        "source_decision": decision,
+        "checked": True,
+        "withheld": sorted({item for item in non_user if item}),
+        "source_id": source_id,
+        "source_version": source_version,
+        "content_hash": source_hash,
+        "span_start": bound[0]["start"] if decision == "admitted" else None,
+        "span_end": bound[0]["end"] if decision == "admitted" else None,
+    }
+
+
+def bind_factual_candidate_roles(
+    extraction: Mapping[str, Any],
+    caller_context: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Admit one extracted_candidate role for a path that actually returned.
+
+    The role stays extracted_candidate. It does not become a user assertion,
+    and import availability cannot supply candidate_extractor_ref.
+    """
+    provenance = extraction.get("provenance") if isinstance(extraction.get("provenance"), Mapping) else {}
+    enabled = executed_extraction_path(provenance)
+    entities = extraction.get("entities") if isinstance(extraction.get("entities"), list) else []
+    diagnostics = extraction.get("diagnostics") if isinstance(extraction.get("diagnostics"), list) else []
+    binding = _candidate_source_binding(entities, diagnostics, caller_context or {})
+    roles: List[Dict[str, Any]] = []
+    if enabled:
+        from mediator.integrations.contracts import (
+            GROUNDING_ROLE_CONTRACT_VERSION,
+            ROLE_EXTRACTED_CANDIDATE,
+            admit_grounding_role,
+        )
+        payload: Dict[str, Any] = {
+            "contract_version": GROUNDING_ROLE_CONTRACT_VERSION,
+            "role": ROLE_EXTRACTED_CANDIDATE,
+            "owner_id": "ipfs_datasets_py",
+            "case_id": binding["source_id"] or "private-case",
+            "graph_revision": "private-kg-extraction",
+            "candidate_extractor_ref": enabled,
+            "source_decision": binding["source_decision"],
+            "source_id": binding["source_id"],
+            "source_version": binding["source_version"],
+        }
+        if binding["source_decision"] == "admitted":
+            payload["content_hash"] = binding["content_hash"]
+            payload["span_start"] = binding["span_start"]
+            payload["span_end"] = binding["span_end"]
+        roles.append(admit_grounding_role(payload).as_dict())
+    return {
+        "path_executed": bool(enabled),
+        "enabled_path": enabled,
+        "import_available_is_execution": False,
+        "source_binding": binding["source_decision"] if enabled else "unknown",
+        "binding_checked": bool(enabled),
+        "withheld_non_user": binding["withheld"] if enabled else [],
+        "roles": roles,
+    }
+
+
+def legal_candidate_role_handoff() -> Dict[str, Any]:
+    """Legal passages are not user assertions and do not run the private extractor."""
+    return {
+        "path_executed": False,
+        "enabled_path": "",
+        "import_available_is_execution": False,
+        "source_binding": "withheld",
+        "binding_checked": True,
+        "withheld_non_user": ["legal_text"],
+        "roles": [],
+        "reason": "legal_passage_not_private_extraction",
+    }
+
+
+def _finish_private_extraction(
+    payload: Dict[str, Any],
+    caller_context: Mapping[str, Any],
+    graph_payload: Any,
+) -> Dict[str, Any]:
+    provenance = dict(payload.get("provenance") or {})
+    enabled = executed_extraction_path(graph_payload)
+    provenance["path_executed"] = bool(enabled)
+    provenance["enabled_path"] = enabled
+    provenance["import_available_is_execution"] = False
+    payload["provenance"] = provenance
+    payload["factual_candidate_roles"] = bind_factual_candidate_roles(payload, caller_context)
+    return payload
+
+
 def prepare_private_extraction(
     text: str,
     caller_context: Mapping[str, Any],
@@ -1778,8 +1961,11 @@ def prepare_private_extraction(
     }
     if not isinstance(text, str) or not text.strip() or len(text) > _PRIVATE_EXTRACTION_TEXT_LIMIT:
         diagnostic = "input_empty" if isinstance(text, str) and not text.strip() else "input_bound_exceeded"
-        return {"status": "degraded", "diagnostic": diagnostic, "entities": [], "relationships": [],
-                "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False, "bounded": True}
+        return _finish_private_extraction(
+            {"status": "degraded", "diagnostic": diagnostic, "entities": [], "relationships": [],
+             "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False, "bounded": True},
+            caller_context, None,
+        )
     import math
     try:
         timeout_seconds = float(timeout_seconds)
@@ -1799,12 +1985,15 @@ def prepare_private_extraction(
         diagnostic = status if type(status) is str and status in {"extractor_unavailable", "extractor_effect_denied", "extractor_invalid_result", "extractor_output_limit", "extractor_error"} else "extractor_invalid_result"
     if diagnostic:
         status = "unavailable" if diagnostic in {"extractor_unavailable", "extractor_custody_unavailable"} else "degraded"
-        return {"status": status, "diagnostic": diagnostic, "entities": [], "relationships": [],
-                "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False,
-                "bounded": diagnostic != "extractor_cleanup_unconfirmed"}
+        return _finish_private_extraction(
+            {"status": status, "diagnostic": diagnostic, "entities": [], "relationships": [],
+             "diagnostics": [diagnostic], "provenance": provenance, "backend_available": False,
+             "bounded": diagnostic != "extractor_cleanup_unconfirmed"},
+            caller_context, graph if isinstance(graph, dict) else None,
+        )
     entity_records, relationship_records, invalid = _upstream_records(graph)
     if invalid:
-        return {
+        return _finish_private_extraction({
             "status": "degraded",
             "diagnostic": invalid,
             "entities": [],
@@ -1813,7 +2002,7 @@ def prepare_private_extraction(
             "provenance": provenance,
             "backend_available": False,
             "bounded": True,
-        }
+        }, caller_context, graph)
     entities, relationships, diagnostics = _normalize_private_records(
         text, entity_records, relationship_records, caller_context,
     )
@@ -1823,7 +2012,7 @@ def prepare_private_extraction(
         diagnostics.append("relationship_result_bound")
     if not entities and not relationships and "extractor_empty" not in diagnostics:
         diagnostics.append("extractor_empty")
-    return {
+    return _finish_private_extraction({
         "status": "available",
         "diagnostic": "",
         "entities": entities,
@@ -1832,7 +2021,7 @@ def prepare_private_extraction(
         "provenance": provenance,
         "backend_available": True,
         "bounded": True,
-    }
+    }, caller_context, graph)
 
 
 def _run_private_extraction(
@@ -2012,6 +2201,7 @@ def extract_graph_from_text(
             "diagnostics": list(extraction["diagnostics"]),
             "provenance": extraction["provenance"],
             "bounded": extraction.get("bounded", True),
+            "factual_candidate_roles": extraction.get("factual_candidate_roles"),
         })
         if extraction["status"] == "available":
             entities.extend(extraction["entities"])
@@ -2554,6 +2744,263 @@ def _seal_private_materials(graph_payload: Mapping[str, Any], private_context: M
     return receipts
 
 
+FACTUAL_GRAPH_ARTIFACT_SCHEMA = "cimp-mgnd-14-factual-graph-v1"
+FACTUAL_GRAPH_ARTIFACT_KIND = "fact-graph"
+_FACTUAL_ID_KEYS = frozenset({
+    "id",
+    "stable_id",
+    "source_id",
+    "entity_id",
+    "message_id",
+    "source_identity",
+    "graph_id",
+    "previous_stable_id",
+    "new_stable_id",
+    "previous_entity_id",
+    "new_entity_id",
+    "invalidated_entity_id",
+    "superseded_by",
+    "retracted_by",
+})
+
+
+def _factual_raw_graph(graph: Any) -> Dict[str, Any]:
+    if hasattr(graph, "to_dict") and callable(graph.to_dict):
+        raw = graph.to_dict()
+    elif isinstance(graph, Mapping):
+        raw = dict(graph)
+    else:
+        raise TypeError("factual graph must be a mapping or knowledge graph")
+    if not isinstance(raw, Mapping):
+        raise TypeError("factual graph document must be a mapping")
+    return dict(raw)
+
+
+def _factual_pairs(value: Any) -> List[tuple]:
+    if isinstance(value, Mapping):
+        return [(str(key), item) for key, item in value.items() if isinstance(item, Mapping)]
+    if isinstance(value, list):
+        return [(str(item.get("id") or ""), item) for item in value if isinstance(item, Mapping)]
+    return []
+
+
+def factual_graph_invalidations(raw: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Support that a revision marked stale. Contradiction rows are not included."""
+    found: List[Dict[str, Any]] = []
+    for record_id, relationship in _factual_pairs(raw.get("relationships")):
+        attributes = relationship.get("attributes") if isinstance(relationship.get("attributes"), Mapping) else {}
+        if attributes.get("activity_status") != "invalidated" and attributes.get("support_invalidated") is not True:
+            continue
+        found.append({
+            "id": str(record_id or relationship.get("id") or ""),
+            "kind": "relationship",
+            "activity_status": str(attributes.get("activity_status") or "invalidated"),
+            "reason": str(attributes.get("invalidation_reason") or ""),
+            "invalidated_entity_id": str(attributes.get("invalidated_entity_id") or ""),
+        })
+    for record_id, entity in _factual_pairs(raw.get("entities")):
+        attributes = entity.get("attributes") if isinstance(entity.get("attributes"), Mapping) else {}
+        if attributes.get("support_invalidated") is not True:
+            continue
+        found.append({
+            "id": str(record_id or entity.get("id") or ""),
+            "kind": "entity",
+            "activity_status": "invalidated",
+            "reason": "support_invalidated",
+            "invalidated_entity_id": str(record_id or entity.get("id") or ""),
+        })
+    found.sort(key=lambda item: (item["kind"], item["id"], item["reason"]))
+    return found
+
+
+def factual_graph_plaintext_ids(document: Mapping[str, Any]) -> set[str]:
+    """Source and assertion identities that must not be reused as storage ids."""
+    found: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if key in _FACTUAL_ID_KEYS and isinstance(item, str) and item:
+                    found.add(item)
+                else:
+                    walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(document)
+    return found
+
+
+def build_factual_graph_artifact(graph: Any) -> Dict[str, Any]:
+    """Canonical factual revision document. It carries no ciphertext storage id."""
+    raw = _factual_raw_graph(graph)
+    metadata = dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), Mapping) else {}
+    ledger = metadata.get("factual_ledger") if isinstance(metadata.get("factual_ledger"), Mapping) else {}
+    revisions = [dict(item) for item in list(ledger.get("revisions") or []) if isinstance(item, Mapping)]
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    conflicts = []
+    for item in list(ledger.get("conflicts") or []):
+        if isinstance(item, Mapping) and str(item.get("status") or "unresolved") == "unresolved":
+            conflicts.append(dict(item))
+    provenance = dict(raw.get("provenance") or {}) if isinstance(raw.get("provenance"), Mapping) else {}
+    return {
+        "schema": FACTUAL_GRAPH_ARTIFACT_SCHEMA,
+        "graph_id": str(raw.get("graph_id") or metadata.get("graph_id") or ""),
+        "graph_version": str(raw.get("graph_version") or metadata.get("graph_version") or "0"),
+        "provenance": provenance,
+        "revisions": revisions,
+        "assertion_states": {str(key): dict(value) for key, value in states.items() if isinstance(value, Mapping)},
+        "entities": dict(raw.get("entities") or {}) if isinstance(raw.get("entities"), Mapping) else list(raw.get("entities") or []),
+        "relationships": dict(raw.get("relationships") or {}) if isinstance(raw.get("relationships"), Mapping) else list(raw.get("relationships") or []),
+        "invalidations": factual_graph_invalidations(raw),
+        "unresolved_conflicts": conflicts,
+        "metadata": metadata,
+    }
+
+
+def encode_factual_graph_artifact(document: Mapping[str, Any]) -> bytes:
+    if str(document.get("schema") or "") != FACTUAL_GRAPH_ARTIFACT_SCHEMA:
+        raise ValueError("factual graph artifact schema mismatch")
+    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def seal_factual_graph_artifact(
+    graph: Any,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    backend: Any,
+    backend_name: str,
+    key: Optional[bytes] = None,
+    key_id: Optional[str] = None,
+    key_provider: Any = None,
+    pin_content: bool = False,
+) -> Dict[str, Any]:
+    """Seal one factual graph through the automatic private-artifact owner.
+
+    There is no plaintext CID, local-cache, or JSON fallback. A rejected
+    backend leaves no graph document behind. The returned storage id is the
+    ciphertext address, never a source or assertion id.
+    """
+    if backend is None:
+        raise ValueError("factual graph storage requires the bound private backend")
+    document = build_factual_graph_artifact(graph)
+    payload = encode_factual_graph_artifact(document)
+    plaintext_ids = factual_graph_plaintext_ids(document)
+    from integrations.ipfs_datasets.storage import store_automatic_private_artifact
+    from integrations.private_storage import PrivateStorageError
+
+    try:
+        receipt = store_automatic_private_artifact(
+            payload,
+            access=access,
+            tenant_id=str(tenant_id),
+            case_id=str(case_id),
+            principal_id=str(principal_id),
+            artifact_kind=FACTUAL_GRAPH_ARTIFACT_KIND,
+            revision=str(revision),
+            key=key,
+            key_id=key_id,
+            key_provider=key_provider,
+            backend=backend,
+            backend_name=str(backend_name),
+            pin_content=bool(pin_content),
+        )
+    except PrivateStorageError:
+        raise
+    except Exception as exc:
+        raise PrivateStorageError(
+            "factual graph artifact store failed",
+            code="artifact_unavailable",
+        ) from exc
+    storage_id = str(receipt.get("cid") or "")
+    if not storage_id or storage_id in plaintext_ids or storage_id.startswith("assertion:"):
+        raise PrivateStorageError(
+            "ciphertext storage id collided with a plaintext identifier",
+            code="storage_id_rejected",
+        )
+    if receipt.get("verified") is not True or receipt.get("private_artifact") is False:
+        raise PrivateStorageError("factual graph ciphertext was not verified", code="readback_mismatch")
+    return {
+        "status": "stored-private",
+        "persisted": True,
+        "private_artifact": True,
+        "plaintext_fallback": False,
+        "plaintext_catalog": False,
+        "plaintext_cache": False,
+        "plaintext_publication": False,
+        "graph_registry_used": False,
+        "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+        "artifact_revision": str(revision),
+        "ciphertext_storage_id": storage_id,
+        "key_id": str(receipt.get("key_id") or ""),
+        "document": document,
+        "payload": payload,
+        "receipt": receipt,
+    }
+
+
+def open_factual_graph_artifact(
+    storage_id: str,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    backend: Any,
+    backend_name: str,
+    key: Optional[bytes] = None,
+    key_id: Optional[str] = None,
+    key_provider: Any = None,
+) -> Dict[str, Any]:
+    """Open one sealed factual graph for the same owner and case binding.
+
+    Wrong key, wrong case, and corrupt ciphertext raise. This function does
+    not read a plaintext JSON document and does not write a replacement graph.
+    """
+    if backend is None:
+        raise ValueError("factual graph reload requires the bound private backend")
+    if not isinstance(storage_id, str) or not storage_id or storage_id.startswith("assertion:"):
+        raise ValueError("ciphertext storage id is required")
+    from integrations.ipfs_datasets.storage import retrieve_private_artifact
+
+    opened = retrieve_private_artifact(
+        storage_id,
+        access=access,
+        tenant_id=str(tenant_id),
+        case_id=str(case_id),
+        principal_id=str(principal_id),
+        artifact_kind=FACTUAL_GRAPH_ARTIFACT_KIND,
+        revision=str(revision),
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        backend=backend,
+        backend_name=str(backend_name),
+    )
+    data = opened.get("data")
+    if opened.get("status") != "available" or not isinstance(data, (bytes, bytearray)):
+        from integrations.private_storage import PrivateStorageError
+        raise PrivateStorageError("factual graph ciphertext is unavailable", code="artifact_unavailable")
+    try:
+        document = json.loads(bytes(data).decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed") from exc
+    if not isinstance(document, dict) or document.get("schema") != FACTUAL_GRAPH_ARTIFACT_SCHEMA:
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed")
+    if encode_factual_graph_artifact(document) != bytes(data):
+        from integrations.private_storage import PrivateArtifactIntegrityError
+        raise PrivateArtifactIntegrityError("malformed")
+    return document
+
+
 def persist_private_graph_snapshot(
     graph_payload: Dict[str, Any],
     private_context: Mapping[str, Any],
@@ -3090,6 +3537,10 @@ __all__ = [
     "build_graph_support_query",
     "extract_graph_from_text",
     "prepare_private_extraction",
+    "SELECTED_KG_EXTRACTION_PATH",
+    "executed_extraction_path",
+    "bind_factual_candidate_roles",
+    "legal_candidate_role_handoff",
     "query_graph_support",
     "persist_graph_snapshot",
     "persist_private_graph_snapshot",

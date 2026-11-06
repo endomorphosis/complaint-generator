@@ -29,6 +29,7 @@ from integrations.ipfs_datasets.types import (
     ProvenanceRecord,
     RuleCandidate,
 )
+from mediator.evidence_hooks import PrivateDerivedIndexMixin
 from integrations.ipfs_datasets.legal import (
     LEGAL_SCRAPERS_AVAILABLE,
     LEGAL_SOURCE_AVAILABILITY,
@@ -1249,8 +1250,26 @@ Return only the search terms, one per line."""
         )
         return envelope
 
+    def acquire_bounded_canonical_sources(self, binding: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Acquire owned source candidates. This does not initialize CommonCrawl."""
+        from integrations.ipfs_datasets.legal import acquire_bounded_canonical_legal_sources
 
-class LegalAuthorityStorageHook:
+        result = acquire_bounded_canonical_legal_sources(binding, **kwargs)
+        self.mediator.log(
+            'legal_source_candidate_acquisition',
+            status=str(result.get('status') or ''),
+            error_code=str(result.get('error_code') or ''),
+            found=int(result.get('result_count') or 0),
+            remote_dispatched=bool(result.get('remote_dispatched')),
+            model_inference_used=bool(result.get('model_inference_used')),
+            commoncrawl_initialized=False,
+        )
+        result['commoncrawl_initialized'] = False
+        result['corpus_download_started'] = False
+        return result
+
+
+class LegalAuthorityStorageHook(PrivateDerivedIndexMixin):
     """
     Hook for storing legal authorities in DuckDB.
     
@@ -1616,8 +1635,8 @@ class LegalAuthorityStorageHook:
                     chunk.get('index'),
                     chunk.get('start'),
                     chunk.get('end'),
-                    chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
+                    '' if getattr(self, '_suppress_authority_plaintext', False) else self._seal_column(chunk.get('text'), 'chunk_text'),
+                    self._seal_json(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
@@ -1681,7 +1700,7 @@ class LegalAuthorityStorageHook:
                 [
                     authority_id,
                     fact.fact_id,
-                    fact.text,
+                    '' if getattr(self, '_suppress_authority_plaintext', False) else self._seal_column(fact.text, 'fact_text'),
                     fact.source_authority_id,
                     fact.confidence,
                     json.dumps(fact.metadata),
@@ -2744,6 +2763,44 @@ class LegalAuthorityStorageHook:
 
         return None
     
+    def store_acquired_authority(self, authority_data: Dict[str, Any],
+                                user_id: str, complaint_id: Optional[str] = None,
+                                claim_type: Optional[str] = None) -> Dict[str, Any]:
+        """Store one canonical acquired record through upsert_authority.
+
+        Caller verification flags are refused here. This method does not add
+        dependency-graph nodes and does not treat storage as proof.
+        """
+        refused = {'record_id': -1, 'created': False, 'reused': False, 'status': 'rejected'}
+        if not isinstance(authority_data, dict):
+            return dict(refused, reason='malformed_record')
+        metadata = authority_data.get('metadata') if isinstance(authority_data.get('metadata'), dict) else {}
+        for key in ('verified', 'applicable', 'support_eligible', 'promoted', 'proof'):
+            if authority_data.get(key) is True or metadata.get(key) is True:
+                return dict(refused, reason='caller_verification_flag')
+        content = authority_data.get('content')
+        if not isinstance(content, str) or not content:
+            return dict(refused, reason='source_text_missing')
+        for key in ('source_text', 'text', 'source_passage'):
+            alternate = metadata.get(key)
+            if isinstance(alternate, str) and alternate and alternate != content:
+                return dict(refused, reason='substituted_metadata_text')
+        result = self.upsert_authority(
+            authority_data,
+            user_id,
+            complaint_id=complaint_id,
+            claim_type=claim_type,
+            search_query=None,
+        )
+        stored = dict(result)
+        if stored.get('record_id') in (None, -1):
+            stored['status'] = 'unavailable'
+            stored['reason'] = 'storage_unavailable'
+        else:
+            stored['status'] = 'stored'
+            stored['reason'] = 'upsert_authority'
+        return stored
+
     def add_authority(self, authority_data: Dict[str, Any],
                      user_id: str, complaint_id: Optional[str] = None,
                      claim_type: Optional[str] = None,
@@ -2873,7 +2930,35 @@ class LegalAuthorityStorageHook:
                     claim_element_id=normalized_authority.get('claim_element_id'),
                 )
                 return {'record_id': existing_record_id, 'created': False, 'reused': True}
-            
+
+            stored_content = normalized_authority.get('content')
+            stored_preview = parsed_text_preview
+            stored_title = normalized_authority.get('title')
+            stored_claim_element = claim_element.get('claim_element')
+            authority_meta = authority_data.get('metadata') if isinstance(authority_data.get('metadata'), dict) else {}
+            is_public_law = (
+                authority_data.get('storage_class') == 'public_legal_corpus'
+                or authority_data.get('classification') == 'public_legal_corpus'
+                or authority_meta.get('storage_class') == 'public_legal_corpus'
+            )
+            if is_public_law and self._private_columns_sealed():
+                cached = self.cache_public_law_source(
+                    citation=str(normalized_authority.get('citation') or ''),
+                    text=str(stored_content or stored_preview or ''),
+                )
+                authority_record_metadata = dict(authority_record_metadata)
+                authority_record_metadata['public_cache_id'] = cached['cache_id']
+                authority_record_metadata['storage_class'] = 'public_legal_corpus'
+                stored_content = ''
+                stored_preview = ''
+            if self._private_columns_sealed() and not is_public_law:
+                stored_content = self._seal_column(stored_content, 'content')
+                stored_preview = self._seal_column(stored_preview, 'parsed_text_preview')
+                stored_title = self._seal_column(stored_title, 'title')
+            if self._private_columns_sealed():
+                stored_claim_element = self._seal_column(stored_claim_element, 'claim_element')
+                search_query = self._seal_column(search_query, 'search_query')
+
             result = conn.execute("""
                 INSERT INTO legal_authorities (
                     user_id, complaint_id, claim_type, authority_type,
@@ -2892,21 +2977,21 @@ class LegalAuthorityStorageHook:
                 normalized_authority.get('type', 'unknown'),
                 normalized_authority.get('source', 'unknown'),
                 normalized_authority.get('citation'),
-                normalized_authority.get('title'),
-                normalized_authority.get('content'),
+                stored_title,
+                stored_content,
                 normalized_authority.get('url'),
-                json.dumps(normalized_authority.get('metadata', {})),
+                self._seal_json(authority_record_metadata),
                 normalized_authority.get('relevance_score', 0.5),
                 search_query,
                 provenance.jurisdiction,
                 provenance.source_system,
-                json.dumps(provenance.as_dict()),
+                self._seal_json(provenance.as_dict()),
                 claim_element.get('claim_element_id'),
-                claim_element.get('claim_element'),
+                stored_claim_element,
                 parse_contract.get('status'),
                 parse_contract.get('chunk_count', 0),
-                parsed_text_preview,
-                json.dumps(parse_storage_metadata),
+                stored_preview,
+                self._seal_json(parse_storage_metadata),
                 None,
                 0,
                 0,
@@ -2960,6 +3045,7 @@ class LegalAuthorityStorageHook:
                     record_id,
                 ],
             )
+            self._suppress_authority_plaintext = bool(is_public_law and self._private_columns_sealed())
             self._store_authority_chunks(conn, record_id, document_parse)
             self._store_authority_graph(conn, record_id, graph_payload)
             self._store_authority_facts(
@@ -2969,6 +3055,7 @@ class LegalAuthorityStorageHook:
                 provenance,
                 document_parse,
             )
+            self._suppress_authority_plaintext = False
             self._store_authority_search_programs(
                 conn,
                 record_id,
@@ -3505,3 +3592,586 @@ Provide brief analysis of:
             return response
         except Exception:
             return f'Found {len(authorities)} legal authorities. Review citations for strongest support.'
+
+    def bind_support_projections(self, projections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Record analysis ownership on projections already decided by this hook's rules.
+
+        The decision itself is ``project_authority_support``. This method does
+        not promote a search hit, suggestion, or caller flag.
+        """
+        bound = []
+        for item in projections:
+            row = dict(item)
+            row["owner"] = "LegalAuthorityAnalysisHook"
+            if row.get("governing_authority") is True and not row.get("lineage"):
+                row["governing_authority"] = False
+                row["verified_support"] = False
+                row["projection_status"] = "unverified"
+            bound.append(row)
+        if hasattr(self.mediator, "log"):
+            self.mediator.log(
+                "authority_support_projected",
+                governing_count=sum(1 for row in bound if row.get("governing_authority") is True),
+                retired_count=sum(1 for row in bound if row.get("projection_status") == "retired"),
+            )
+        return bound
+
+    def derive_dependency_requirements(self, case_file: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+        """Public workflow entry: derive requirements from admitted passages.
+
+        The effect is the returned derivation. It is produced by the Dataset
+        corpus lookup and the source-bound rule extractor. This method does
+        not invent elements when authority is missing or in conflict.
+        """
+        result = derive_admitted_dependency_requirements(case_file, body)
+        if hasattr(self.mediator, "log"):
+            self.mediator.log(
+                "derived_dependency_requirements",
+                status=str(result.get("status") or ""),
+                requirement_count=len(result.get("requirements") or []),
+                unresolved_count=len(result.get("unresolved_research") or []),
+            )
+        return result
+
+
+DEPENDENCY_REQUIREMENT_TASK_ID = "CIMP-UX-26"
+_DERIVATION_TOOL = "extract_source_bound_rule_candidates"
+_CORPUS_TOOL = "lookup_bounded_legal_corpus"
+
+
+def _passage_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("text", "source_text", "content", "full_text"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                return item
+    return ""
+
+
+def _case_coordinate(case_file: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, str]:
+    context = case_file.get("legal_context") if isinstance(case_file.get("legal_context"), dict) else {}
+    law_date = context.get("applicable_law_date") if isinstance(context.get("applicable_law_date"), dict) else {}
+    event_date = context.get("event_date") if isinstance(context.get("event_date"), dict) else {}
+    effective = str(law_date.get("precise_date") or law_date.get("raw_text") or "")
+    as_of = str(event_date.get("precise_date") or effective or "")
+    version = body.get("authority_version")
+    return {
+        "jurisdiction": str(context.get("jurisdiction") or ""),
+        "effective_date": effective,
+        "as_of_date": as_of,
+        "authority_version": version.strip() if isinstance(version, str) else "",
+    }
+
+
+def _support_facts(body: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw = body.get("facts") if isinstance(body.get("facts"), list) else []
+    facts: List[Dict[str, str]] = []
+    for item in raw[:8]:
+        if not isinstance(item, dict):
+            continue
+        fact_id = str(item.get("fact_id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if fact_id and text and len(fact_id) <= 80 and len(text) <= 500:
+            facts.append({"fact_id": fact_id, "text": text})
+    return facts
+
+
+def _authority_for_passage(passage: Dict[str, Any], coordinates: Dict[str, str]) -> Dict[str, Any]:
+    from integrations.ipfs_datasets.logic import sha256_utf8
+
+    text = passage["text"]
+    authority_id = str(passage.get("citation") or passage.get("passage_id") or "admitted-passage")
+    version = coordinates["authority_version"]
+    return {
+        "source_text": text,
+        "source_hash": sha256_utf8(text),
+        "content_hash_scope": "authority_text",
+        "jurisdiction": coordinates["jurisdiction"],
+        "authority_id": authority_id,
+        "citation": str(passage.get("citation") or ""),
+        "authority_version": version,
+        "effective_date": coordinates["effective_date"],
+        "as_of_date": coordinates["as_of_date"] or coordinates["effective_date"],
+        "law_version_id": authority_id + ":" + version,
+        "law_versions": [{
+            "law_version_id": authority_id + ":" + version,
+            "authority_id": authority_id,
+            "citation": str(passage.get("citation") or ""),
+            "jurisdiction": coordinates["jurisdiction"],
+            "version": version,
+            "effective_date": coordinates["effective_date"],
+        }],
+    }
+
+
+def _lineage(candidate: Dict[str, Any], passage: Dict[str, Any], coordinates: Dict[str, str]) -> Dict[str, Any]:
+    temporal = candidate.get("temporal_applicability") if isinstance(candidate.get("temporal_applicability"), dict) else {}
+    return {
+        "tool": _DERIVATION_TOOL,
+        "module": "integrations.ipfs_datasets.logic",
+        "contract": str(candidate.get("contract") or ""),
+        "corpus_tool": _CORPUS_TOOL,
+        "temporal_api": str(temporal.get("api") or ""),
+        "temporal_graph_id": str(temporal.get("temporal_authority_graph_id") or ""),
+        "passage_id": passage.get("passage_id") or "",
+        "jurisdiction": str(candidate.get("jurisdiction") or coordinates["jurisdiction"]),
+        "effective_date": coordinates["effective_date"],
+        "authority_version": str(candidate.get("authority_version") or coordinates["authority_version"]),
+        "source_hash": str(candidate.get("source_hash") or ""),
+        "span_sha256": str(candidate.get("span_sha256") or ""),
+        "authority_text_sha256": str(candidate.get("authority_text_sha256") or ""),
+    }
+
+
+def _attach_fact_support(requirement: Dict[str, Any], facts: List[Dict[str, str]]) -> None:
+    """Facts may be recorded against a requirement. They do not edit the rule."""
+    frozen = (
+        requirement.get("rule_text"),
+        requirement.get("jurisdiction"),
+        requirement.get("authority_version"),
+        requirement.get("effective_date"),
+        json.dumps(requirement.get("source_span"), sort_keys=True),
+    )
+    words = {word.lower() for word in str(requirement.get("rule_text") or "").split() if len(word) > 4}
+    support = []
+    for fact in facts:
+        tokens = {word.lower().strip(".,") for word in fact["text"].split()}
+        support.append({
+            "fact_id": fact["fact_id"],
+            "affects": "support",
+            "rewrites_law": False,
+            "overlap": sorted(words & tokens),
+        })
+    requirement["fact_support"] = support
+    requirement["support_state"] = "fact_recorded" if any(item["overlap"] for item in support) else "unsupported"
+    requirement["satisfied"] = False
+    requirement["proof"] = False
+    requirement["legal_sufficiency"] = False
+    assert (
+        requirement.get("rule_text"),
+        requirement.get("jurisdiction"),
+        requirement.get("authority_version"),
+        requirement.get("effective_date"),
+        json.dumps(requirement.get("source_span"), sort_keys=True),
+    ) == frozen
+
+
+def derive_admitted_dependency_requirements(case_file: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    """Build current requirements from admitted passages through the real SDK tools.
+
+    A fact can change only the support record. Missing coordinates and
+    conflicting full texts stay unresolved research. Keyword templates are
+    not substituted.
+    """
+    from applications.legal_context_api import LegalContextError, conduct_legal_source_flow
+    from integrations.ipfs_datasets.logic import extract_source_bound_rule_candidates
+
+    if not isinstance(case_file, dict) or not isinstance(body, dict):
+        raise LegalContextError("legal_context_field")
+    flow = conduct_legal_source_flow(case_file, body)
+    coordinates = _case_coordinate(case_file, body)
+    facts = _support_facts(body)
+    base = {
+        "task_id": DEPENDENCY_REQUIREMENT_TASK_ID,
+        "tools": [_CORPUS_TOOL, _DERIVATION_TOOL],
+        "admitted_law": False,
+        "proof": False,
+        "legal_sufficiency": False,
+        "hardcoded_elements_used": False,
+        "fact_rewrites_ignored": any(isinstance(item, dict) and "rule_text" in item for item in (body.get("facts") or []) if isinstance(body.get("facts"), list)),
+        "coordinates": coordinates,
+        "source_flow_status": flow.get("status"),
+        "requirements": [],
+        "unresolved_research": [],
+        "derivation_lineage": [],
+    }
+    if flow.get("status") == "questions_open" or flow.get("tool") == "not_called":
+        base["status"] = "unresolved_research"
+        base["unresolved_research"] = [{
+            "reason": "missing_legal_context",
+            "questions": list(flow.get("questions") or []),
+            "visible": True,
+        }]
+        return base
+    passages = []
+    citations: Dict[str, List[str]] = {}
+    for item in (flow.get("decisions") or {}).get("custody") or []:
+        if not isinstance(item, dict):
+            continue
+        text = _passage_text(item.get("source_passage"))
+        discovery = next((row for row in (flow.get("decisions") or {}).get("discovery") or []
+                          if isinstance(row, dict) and row.get("passage_id") == item.get("passage_id")), {})
+        citation = str(discovery.get("citation") or "")
+        passage = {"passage_id": str(item.get("passage_id") or ""), "text": text, "citation": citation}
+        passages.append(passage)
+        citations.setdefault(citation or passage["passage_id"], []).append(text)
+    conflicts = [key for key, texts in citations.items() if len({text for text in texts if text}) > 1]
+    admitted_ids = set(flow.get("admitted_passage_ids") or [])
+    admitted = [passage for passage in passages if passage["passage_id"] in admitted_ids and passage["text"]]
+    if conflicts:
+        for passage in passages:
+            if not passage["text"]:
+                continue
+            authority = _authority_for_passage(passage, coordinates)
+            extracted = extract_source_bound_rule_candidates(authority)
+            base["derivation_lineage"].append({
+                "tool": _DERIVATION_TOOL,
+                "module": "integrations.ipfs_datasets.logic",
+                "contract": extracted.get("contract"),
+                "passage_id": passage["passage_id"],
+                "promoted_count": extracted.get("promoted_count"),
+                "withheld_because": "conflicting_authority",
+            })
+        base["status"] = "unresolved_research"
+        base["unresolved_research"] = [{
+            "reason": "conflicting_authority",
+            "citations": conflicts,
+            "passage_ids": [passage["passage_id"] for passage in passages],
+            "visible": True,
+        }]
+        return base
+    if not admitted:
+        base["status"] = "unresolved_research"
+        base["unresolved_research"] = [{
+            "reason": "no_admitted_passage",
+            "visible": True,
+            "discovery_admitted": False,
+        }]
+        return base
+    requirements = []
+    unresolved = []
+    for passage in admitted:
+        authority = _authority_for_passage(passage, coordinates)
+        extracted = extract_source_bound_rule_candidates(authority)
+        promoted = list(extracted.get("promoted_requirements") or [])
+        if not promoted:
+            candidate = (extracted.get("candidates") or [{}])[0]
+            unresolved.append({
+                "reason": "authority_not_promoted",
+                "visible": True,
+                "passage_id": passage["passage_id"],
+                "review_reasons": list(candidate.get("review_reasons") or []),
+                "temporal_reason": str((candidate.get("temporal_applicability") or {}).get("reason") or ""),
+                "rule_text": "",
+            })
+            base["derivation_lineage"].append(_lineage(candidate if isinstance(candidate, dict) else {}, passage, coordinates))
+            continue
+        for candidate in promoted:
+            if candidate.get("applicable") is not True or candidate.get("support_eligible") is not True:
+                unresolved.append({
+                    "reason": "authority_not_current",
+                    "visible": True,
+                    "passage_id": passage["passage_id"],
+                    "review_reasons": list(candidate.get("review_reasons") or []),
+                })
+                continue
+            requirement = {
+                "name": str(candidate.get("citation") or passage["citation"] or "Admitted requirement"),
+                "description": candidate.get("rule_text") or "",
+                "rule_text": candidate.get("rule_text") or "",
+                "source_span": candidate.get("source_span"),
+                "source_hash": candidate.get("source_hash"),
+                "span_sha256": candidate.get("span_sha256"),
+                "authority_text_sha256": candidate.get("authority_text_sha256"),
+                "authority_id": candidate.get("authority_id"),
+                "authority_version": candidate.get("authority_version"),
+                "jurisdiction": candidate.get("jurisdiction"),
+                "effective_date": coordinates["effective_date"],
+                "applicable_date": coordinates["as_of_date"],
+                "temporal_applicability": candidate.get("temporal_applicability"),
+                "treatment_edges": candidate.get("treatment_edges"),
+                "blocking_treatments": candidate.get("blocking_treatments"),
+                "applicable": True,
+                "support_eligible": True,
+                "treatment_blocks_support": False,
+                "source_record": authority,
+                "passage_id": passage["passage_id"],
+                "citation": candidate.get("citation") or passage["citation"],
+                "verification_status": "promoted",
+                "source_bound": True,
+                "admitted_law": True,
+                "proof": False,
+                "legal_sufficiency": False,
+                "derivation_lineage": _lineage(candidate, passage, coordinates),
+                "derivation_task": DEPENDENCY_REQUIREMENT_TASK_ID,
+            }
+            _attach_fact_support(requirement, facts)
+            requirements.append(requirement)
+            base["derivation_lineage"].append(requirement["derivation_lineage"])
+    base["requirements"] = requirements
+    base["unresolved_research"] = unresolved
+    base["status"] = "current" if requirements and not unresolved else "unresolved_research" if not requirements else "current_with_gaps"
+    base["admitted_law"] = bool(requirements)
+    return base
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _mapping(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def classify_non_governing_materials(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Search hits, stale caches, suggestions, and caller flags are not authority.
+
+    LegalAuthoritySearchHook owns this classification. Nothing here is stored
+    as governing law or verified support.
+    """
+    caller = _mapping(payload.get("caller_flags"))
+    hits = []
+    for item in payload.get("search_hits") or []:
+        if not isinstance(item, dict):
+            continue
+        hits.append({
+            "record_kind": "search_hit",
+            "citation": _text(item.get("citation")),
+            "snippet": _text(item.get("snippet") or item.get("text")),
+            "cache_generation": _text(item.get("cache_generation")),
+            "governing_authority": False,
+            "verified_support": False,
+            "creates_law": False,
+            "caller_flag_ignored": True,
+        })
+    stale = []
+    for item in payload.get("stale_cache") or []:
+        if not isinstance(item, dict):
+            continue
+        stale.append({
+            "record_kind": "stale_cache",
+            "passage_id": _text(item.get("passage_id")),
+            "requirement_id": _text(item.get("requirement_id")),
+            "source_version": _text(item.get("source_version")),
+            "definition_version": _text(item.get("definition_version")),
+            "projection_status": "retired",
+            "retirement_reason": "stale_cache",
+            "governing_authority": False,
+            "verified_support": False,
+            "creates_law": False,
+        })
+    suggestions = []
+    for item in payload.get("suggestions") or []:
+        if not isinstance(item, dict):
+            continue
+        suggestions.append({
+            "record_kind": "suggestion",
+            "requirement_id": _text(item.get("requirement_id")),
+            "text": _text(item.get("text")),
+            "governing_authority": False,
+            "verified_support": False,
+            "creates_law": False,
+        })
+    return {
+        "owner": "LegalAuthoritySearchHook",
+        "search_hits": hits,
+        "stale_cache": stale,
+        "suggestions": suggestions,
+        "caller_flags_seen": {
+            "verified_support": caller.get("verified_support") is True,
+            "governing_authority": caller.get("governing_authority") is True,
+        },
+        "caller_flags_applied": False,
+        "governing_authority": False,
+        "verified_support": False,
+    }
+
+
+def _passage_record(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    from integrations.ipfs_datasets.logic import sha256_utf8
+
+    text = _text(item.get("text") or item.get("source_text"))
+    passage_id = _text(item.get("passage_id"))
+    requirement_id = _text(item.get("requirement_id"))
+    source_version = _text(item.get("source_version"))
+    definition_version = _text(item.get("definition_version"))
+    if not (text and passage_id and requirement_id and source_version and definition_version):
+        return None
+    digest = sha256_utf8(text)
+    supplied = _text(item.get("source_hash"))
+    if supplied and supplied != digest:
+        return {
+            "passage_id": passage_id,
+            "requirement_id": requirement_id,
+            "text": text,
+            "citation": _text(item.get("citation")),
+            "source_version": source_version,
+            "definition_version": definition_version,
+            "source_hash": digest,
+            "supplied_hash": supplied,
+            "admitted": False,
+            "integrity": "source_hash_mismatch",
+        }
+    return {
+        "passage_id": passage_id,
+        "requirement_id": requirement_id,
+        "text": text,
+        "citation": _text(item.get("citation")) or passage_id,
+        "source_version": source_version,
+        "definition_version": definition_version,
+        "source_hash": digest,
+        "supplied_hash": supplied or digest,
+        "admitted": True,
+        "integrity": "matched",
+    }
+
+
+def project_authority_support(payload: Dict[str, Any], passages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """LegalAuthorityAnalysisHook: governing authority needs an admitted passage and lineage.
+
+    Source drift and contradictions retire every projection that uses the
+    affected passage or requirement. Caller support flags are not read.
+    """
+    admitted = [row for row in passages if row.get("admitted") is True]
+    by_requirement: Dict[str, List[Dict[str, Any]]] = {}
+    for row in admitted:
+        by_requirement.setdefault(row["requirement_id"], []).append(row)
+    contradicted = set()
+    for requirement_id, rows in by_requirement.items():
+        texts = {row["text"] for row in rows}
+        if len(texts) > 1:
+            contradicted.add(requirement_id)
+    for item in payload.get("contradictions") or []:
+        if isinstance(item, dict) and _text(item.get("requirement_id")):
+            contradicted.add(_text(item.get("requirement_id")))
+    drift_ids = set()
+    drift_requirements = set()
+    for item in payload.get("source_drift") or []:
+        if not isinstance(item, dict):
+            continue
+        passage_id = _text(item.get("passage_id"))
+        requirement_id = _text(item.get("requirement_id"))
+        if passage_id:
+            drift_ids.add(passage_id)
+        if requirement_id:
+            drift_requirements.add(requirement_id)
+    lineage_rows = [row for row in (payload.get("support_lineage") or []) if isinstance(row, dict)]
+
+    projections = []
+    for row in passages:
+        requirement_id = row["requirement_id"]
+        passage_id = row["passage_id"]
+        reason = ""
+        if row.get("admitted") is not True:
+            reason = "source_drift" if row.get("integrity") == "source_hash_mismatch" else "not_admitted"
+        elif requirement_id in contradicted:
+            reason = "contradiction"
+        elif passage_id in drift_ids or requirement_id in drift_requirements:
+            reason = "source_drift"
+        matches = []
+        if not reason:
+            for link in lineage_rows:
+                if _text(link.get("passage_id")) != passage_id:
+                    continue
+                if _text(link.get("requirement_id")) != requirement_id:
+                    continue
+                if _text(link.get("source_version")) != row["source_version"]:
+                    continue
+                if _text(link.get("definition_version")) != row["definition_version"]:
+                    continue
+                if _text(link.get("source_hash")) != row["source_hash"]:
+                    continue
+                fact_id = _text(link.get("fact_id"))
+                evidence_ref = _text(link.get("evidence_ref"))
+                lineage_id = _text(link.get("lineage_id"))
+                if not (fact_id and evidence_ref and lineage_id):
+                    continue
+                matches.append({
+                    "lineage_id": lineage_id,
+                    "fact_id": fact_id,
+                    "evidence_ref": evidence_ref,
+                })
+        verified = bool(matches) and not reason
+        projections.append({
+            "owner": "LegalAuthorityAnalysisHook",
+            "passage_id": passage_id,
+            "requirement_id": requirement_id,
+            "citation": row.get("citation") or "",
+            "source_version": row["source_version"],
+            "definition_version": row["definition_version"],
+            "source_hash": row["source_hash"],
+            "lineage": matches,
+            "governing_authority": verified,
+            "verified_support": verified,
+            "projection_status": "retired" if reason in {"source_drift", "contradiction", "stale_cache"} else ("current" if verified else "unverified"),
+            "retirement_reason": reason if reason in {"source_drift", "contradiction", "stale_cache"} else "",
+            "admission_reason": reason if reason == "not_admitted" else "",
+            "creates_law": False,
+            "proof": False,
+            "legal_sufficiency": False,
+        })
+    return projections
+
+
+def store_admitted_authority_passages(storage: Any, payload: Dict[str, Any], passages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Persist admitted passage text. Search hits are refused, including caller-verified hits."""
+    user_id = _text(payload.get("user_id")) or "actor"
+    complaint_id = _text(payload.get("complaint_id")) or "case"
+    claim_type = _text(payload.get("claim_type")) or "claim"
+    stored = []
+    for row in passages:
+        if row.get("admitted") is not True:
+            continue
+        result = storage.store_acquired_authority(
+            {
+                "type": "statute",
+                "source": "admitted_passage",
+                "citation": row["citation"],
+                "title": row["requirement_id"],
+                "content": row["text"],
+                "metadata": {
+                    "passage_id": row["passage_id"],
+                    "requirement_id": row["requirement_id"],
+                    "source_version": row["source_version"],
+                    "definition_version": row["definition_version"],
+                    "source_hash": row["source_hash"],
+                    "admitted": True,
+                    "governing_authority": False,
+                    "verified_support": False,
+                },
+            },
+            user_id,
+            complaint_id=complaint_id,
+            claim_type=claim_type,
+        )
+        stored.append({
+            "passage_id": row["passage_id"],
+            "requirement_id": row["requirement_id"],
+            "record_id": result.get("record_id"),
+            "status": result.get("status"),
+            "reason": result.get("reason"),
+            "source": "admitted_passage",
+        })
+    refused_hits = []
+    for item in payload.get("search_hits") or []:
+        if not isinstance(item, dict):
+            continue
+        snippet = _text(item.get("snippet") or item.get("text")) or "search hit"
+        refused = storage.store_acquired_authority(
+            {
+                "type": "statute",
+                "source": "search_hit",
+                "citation": _text(item.get("citation")) or "search-hit",
+                "title": "search hit",
+                "content": snippet,
+                "verified": True,
+                "metadata": {"verified": True, "governing_authority": True, "record_kind": "search_hit"},
+            },
+            user_id,
+            complaint_id=complaint_id,
+            claim_type=claim_type,
+        )
+        refused_hits.append({
+            "status": refused.get("status"),
+            "reason": refused.get("reason"),
+            "record_id": refused.get("record_id"),
+            "stored": False,
+        })
+    return {
+        "owner": "LegalAuthorityStorageHook",
+        "stored_passages": stored,
+        "refused_search_hits": refused_hits,
+        "search_hits_stored": 0,
+    }

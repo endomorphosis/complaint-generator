@@ -22,6 +22,7 @@ from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_grap
 from integrations.ipfs_datasets.logic import (
     build_legal_ir_premise_inventory,
     check_contradictions,
+    connect_definition_handoff_proof,
     generate_bound_legal_ir_proof_obligations,
     proof_cache_identity,
     replay_satisfied_element_proof,
@@ -35,6 +36,7 @@ from complaint_analysis.temporal_rule_profiles import (
     rank_follow_ups,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
+from mediator.evidence_hooks import PrivateDerivedIndexMixin
 from ._claim_support_reasoning import (
     extract_logic_contradiction_count as _extract_logic_contradiction_count_payload,
     extract_logic_proof_counts as _extract_logic_proof_counts_payload,
@@ -96,7 +98,7 @@ _ENRICHMENT_QUEUE_DDL = """
 """
 
 
-class ClaimSupportHook:
+class ClaimSupportHook(PrivateDerivedIndexMixin):
     """Track which evidence and authorities support each claim type."""
 
     _CONTENT_ORIGIN_ARTIFACT_FAMILY = CONTENT_ORIGIN_ARTIFACT_FAMILY
@@ -3425,6 +3427,9 @@ class ClaimSupportHook:
             'coverage_status': str(element.get('coverage_status') or element.get('status') or ''),
             'max_obligations': element.get('max_obligations'),
             'source_text': element.get('source_text') if isinstance(element.get('source_text'), str) else None,
+            'requirement_id': str(element.get('requirement_id') or element.get('element_id') or ''),
+            'definition_handoff': element.get('definition_handoff') if isinstance(element.get('definition_handoff'), dict) else None,
+            'adverse_treatment': element.get('adverse_treatment'),
         }
 
     def _build_reasoning_ontology_fallback(
@@ -3676,6 +3681,9 @@ class ClaimSupportHook:
                     legal_context_version=obligation_inputs['legal_context_version'],
                     coverage_status=obligation_inputs['coverage_status'],
                     source_text=obligation_inputs['source_text'],
+                    requirement_id=obligation_inputs.get('requirement_id') or '',
+                    definition_binding=obligation_inputs.get('definition_handoff'),
+                    adverse_treatment=obligation_inputs.get('adverse_treatment'),
                 )
             except Exception as exc:
                 legal_ir_proof_obligations = {
@@ -3731,6 +3739,11 @@ class ClaimSupportHook:
                 'premise_inventory': deepcopy(inventory) if isinstance(inventory, dict) else {},
                 'sample_or_document': deepcopy(obligation_inputs.get('sample_or_document')),
                 'canonical_receipt': deepcopy(obligation_inputs.get('canonical_receipt')),
+                'requirement_id': str(versions.get('requirement_id') or obligation_inputs.get('requirement_id') or ''),
+                'definition_identity': str(versions.get('definition_identity') or ''),
+                'assumption_identity': str(versions.get('assumption_identity') or ''),
+                'adverse_treatment_identity': str(versions.get('adverse_treatment_identity') or ''),
+                'source_identity': str(versions.get('source_identity') or versions.get('document_sha256') or ''),
             },
             compiler={
                 'execution_identity': identity,
@@ -3781,6 +3794,16 @@ class ClaimSupportHook:
                     'lean_reconstruction': 0.25,
                 },
                 required_trust='kernel',
+                requirement_id=str(versions.get('requirement_id') or ''),
+                expected_requirement_id=str(versions.get('requirement_id') or ''),
+                definition_identity=str(versions.get('definition_identity') or ''),
+                expected_definition_identity=str(versions.get('definition_identity') or ''),
+                assumption_identity=str(versions.get('assumption_identity') or ''),
+                expected_assumption_identity=str(versions.get('assumption_identity') or ''),
+                adverse_treatment_identity=str(versions.get('adverse_treatment_identity') or ''),
+                expected_adverse_treatment_identity=str(versions.get('adverse_treatment_identity') or ''),
+                source_identity=str(versions.get('source_identity') or versions.get('document_sha256') or ''),
+                expected_source_identity=str(versions.get('source_identity') or versions.get('document_sha256') or ''),
             )
 
         try:
@@ -4802,13 +4825,13 @@ class ClaimSupportHook:
                     complaint_id,
                     claim_type,
                     claim_element_id,
-                    claim_element_text,
+                    self._seal_column(claim_element_text, 'claim_element_text'),
                     support_kind,
                     support_ref,
-                    support_label,
+                    self._seal_column(support_label, 'support_label'),
                     source_table,
                     support_strength,
-                    json.dumps(normalized_metadata or {}),
+                    self._seal_json(normalized_metadata or {}),
                 ],
             ).fetchone()
             conn.close()
@@ -10455,3 +10478,178 @@ class ClaimSupportHook:
                 'top_results': [],
                 'has_retrieval_context': False,
             }
+
+    def forward_conditional_norm_evidence(
+        self,
+        requirement: Dict[str, Any],
+        definition_envelope: Optional[Dict[str, Any]] = None,
+        scope_envelope: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Forward definition and scope evidence without changing admitted text or proof.
+
+        The requirement mapping is left as the caller supplied it. Conflicting or
+        absent owner evidence stays an unresolved dependency on the returned handoff.
+        """
+        from integrations.ipfs_datasets.definition_evidence import forward_conditional_norm_evidence
+
+        admitted = requirement.get('admitted_legal_text')
+        proof = requirement.get('proof')
+        proof_satisfied = requirement.get('proof_satisfied')
+        handoff = forward_conditional_norm_evidence(requirement, definition_envelope, scope_envelope)
+        if requirement.get('admitted_legal_text') != admitted or requirement.get('proof') != proof:
+            handoff['admitted_legal_text_changed'] = True
+            handoff['proof_changed'] = requirement.get('proof') != proof
+        handoff['prior_proof_satisfied'] = proof_satisfied
+        handoff['proof_satisfied'] = False
+        return handoff
+
+    def forward_independent_norm_decisions(
+        self,
+        requirement: Dict[str, Any],
+        definition_envelope: Optional[Dict[str, Any]] = None,
+        scope_envelope: Optional[Dict[str, Any]] = None,
+        review_envelope: Optional[Dict[str, Any]] = None,
+        bound_variable_envelope: Optional[Dict[str, Any]] = None,
+        declared_prover_result: Any = None,
+    ) -> Dict[str, Any]:
+        """Forward review and bound-variable decisions without signing or proving them.
+
+        Source, edition, meaning, and context permissions stay on separate records.
+        An unprovided review is left absent. Generated Lean stays unbuilt unless the
+        owner report and a hash-matching declared prover result both say otherwise.
+        """
+        from integrations.ipfs_datasets.definition_evidence import forward_independent_norm_decisions
+
+        admitted = requirement.get('admitted_legal_text')
+        proof = requirement.get('proof')
+        proof_satisfied = requirement.get('proof_satisfied')
+        handoff = forward_independent_norm_decisions(
+            requirement,
+            definition_envelope,
+            scope_envelope,
+            review_envelope,
+            bound_variable_envelope,
+            declared_prover_result,
+        )
+        if requirement.get('admitted_legal_text') != admitted or requirement.get('proof') != proof:
+            handoff['admitted_legal_text_changed'] = True
+            handoff['proof_changed'] = requirement.get('proof') != proof
+        handoff['prior_proof_satisfied'] = proof_satisfied
+        handoff['proof_satisfied'] = False
+        handoff['reviews_synthesized'] = False
+        return handoff
+
+    def connect_definition_handoff_proof(
+        self,
+        requirement: Dict[str, Any],
+        handoff: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Route the current definition handoff without promoting review or Lean to proof."""
+
+        bound = connect_definition_handoff_proof(requirement, handoff)
+        bound['factual_assertion_is_legal_sufficiency'] = False
+        if bound.get('proof_field_supported') is not True:
+            bound['proof'] = requirement.get('proof')
+            bound['proof_satisfied'] = False
+            bound['proof_changed'] = False
+        return bound
+
+
+def apply_qualified_claim_support(
+    hook: "ClaimSupportHook",
+    payload: Dict[str, Any],
+    projections: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Write support rows only from analysis projections.
+
+    A caller ``verified_support`` flag is not consulted. Retired and unverified
+    projections stay unverified. The stored rows are read back from the hook.
+    """
+    user_id = str(payload.get("user_id") or "actor")
+    complaint_id = str(payload.get("complaint_id") or "case")
+    claim_type = str(payload.get("claim_type") or "claim")
+    written = []
+    for projection in projections:
+        verified = projection.get("verified_support") is True and projection.get("governing_authority") is True
+        retired = projection.get("projection_status") == "retired"
+        if not verified and not retired and projection.get("projection_status") != "unverified":
+            continue
+        lineage = list(projection.get("lineage") or [])
+        primary = lineage[0] if lineage else {}
+        kind = "admitted_lineage" if verified else ("retired_projection" if retired else "unverified_requirement")
+        metadata = {
+            "passage_id": projection.get("passage_id"),
+            "requirement_id": projection.get("requirement_id"),
+            "source_version": projection.get("source_version"),
+            "definition_version": projection.get("definition_version"),
+            "source_hash": projection.get("source_hash"),
+            "lineage_id": primary.get("lineage_id") or "",
+            "fact_id": primary.get("fact_id") or "",
+            "evidence_ref": primary.get("evidence_ref") or "",
+            "verified_support": verified,
+            "governing_authority": verified,
+            "projection_status": projection.get("projection_status"),
+            "retirement_reason": projection.get("retirement_reason") or "",
+            "caller_flag_ignored": True,
+        }
+        support_ref = str(primary.get("evidence_ref") or projection.get("passage_id") or "projection")
+        result = hook.upsert_support_link(
+            user_id=user_id,
+            complaint_id=complaint_id,
+            claim_type=claim_type,
+            claim_element_id=str(projection.get("requirement_id") or ""),
+            claim_element_text=str(projection.get("requirement_id") or ""),
+            support_kind=kind,
+            support_ref=support_ref,
+            support_label=str(projection.get("citation") or projection.get("passage_id") or ""),
+            source_table="admitted_passages",
+            support_strength=1.0 if verified else 0.0,
+            metadata=metadata,
+        )
+        written.append({"record_id": result.get("record_id"), "support_kind": kind, "created": result.get("created")})
+    stored = hook.get_support_links(user_id, claim_type)
+    verified_rows = [
+        row for row in stored
+        if (row.get("metadata") or {}).get("verified_support") is True
+        and row.get("support_kind") == "admitted_lineage"
+    ]
+    retired_rows = [
+        row for row in stored
+        if row.get("support_kind") == "retired_projection"
+        and (row.get("metadata") or {}).get("verified_support") is not True
+    ]
+    return {
+        "owner": "ClaimSupportHook",
+        "written": written,
+        "stored_count": len(stored),
+        "verified_support_count": len(verified_rows),
+        "retired_count": len(retired_rows),
+        "verified_links": [
+            {
+                "record_id": row.get("id"),
+                "requirement_id": (row.get("metadata") or {}).get("requirement_id"),
+                "passage_id": (row.get("metadata") or {}).get("passage_id"),
+                "source_version": (row.get("metadata") or {}).get("source_version"),
+                "definition_version": (row.get("metadata") or {}).get("definition_version"),
+                "source_hash": (row.get("metadata") or {}).get("source_hash"),
+                "lineage_id": (row.get("metadata") or {}).get("lineage_id"),
+                "fact_id": (row.get("metadata") or {}).get("fact_id"),
+                "evidence_ref": (row.get("metadata") or {}).get("evidence_ref"),
+                "support_kind": row.get("support_kind"),
+                "verified_support": True,
+                "governing_authority": (row.get("metadata") or {}).get("governing_authority") is True,
+            }
+            for row in verified_rows
+        ],
+        "retired_links": [
+            {
+                "record_id": row.get("id"),
+                "requirement_id": (row.get("metadata") or {}).get("requirement_id"),
+                "retirement_reason": (row.get("metadata") or {}).get("retirement_reason"),
+                "verified_support": False,
+                "governing_authority": False,
+                "projection_status": "retired",
+            }
+            for row in retired_rows
+        ],
+    }

@@ -99,6 +99,7 @@ def ownership(tmp_path, monkeypatch):
         checkout_lock_repository_matches=lambda *_args: True)
     plane = SimpleNamespace(read_portal_task_state_snapshot=lambda _path: {"body": deepcopy(body), "revision": 1})
     monkeypatch.setattr(runner, "_validation_activity_modules", lambda: (daemon, native, plane))
+    monkeypatch.setattr(runner, "_validation_activity_snapshot", lambda _campaign: plane.read_portal_task_state_snapshot(state_path))
     monkeypatch.setattr(runner, "recorded_worktree_root", lambda *_args: (worktrees, None))
     return SimpleNamespace(target=target, campaign=campaign, workspace=workspace, log=log,
         task=task, context=context, body=body, birth=birth, lease=lease, claim=claim,

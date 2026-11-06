@@ -35,15 +35,19 @@ Dependency contract (not a Kit package version):
   original size and other rich fields. The canonical envelope does not
   serialize that object. Kit is not started as a daemon.
 
-Existing sessions and artifacts are not migrated here. Coverage of historical
-bytes is DUR002. A missing ``cryptography`` install raises
-``PrivateCryptoCapabilityError`` and writes nothing. There is no XOR, plaintext
-tempfile, or fake encrypted-success path.
+Existing sessions and artifacts are not migrated automatically. Coverage of
+historical bytes is DUR002. One explicit legacy private hook artifact can be
+preflighted and committed by the caller; that path does not scan sessions,
+user trees, campaign artifacts, or historical qualifiers. A missing
+``cryptography`` install raises ``PrivateCryptoCapabilityError`` and writes
+nothing. There is no XOR, plaintext tempfile, or fake encrypted-success path.
 """
 
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager, ExitStack
+from functools import wraps
 import hashlib
 import hmac
 import json
@@ -957,6 +961,100 @@ def _recovery_aad(tenant_id: str, case_id: str, key_id: str) -> bytes:
     return RECOVERY_WRAP_DOMAIN + _data_aad(tenant_id, case_id, key_id)
 
 
+RESOURCE_GRANT_SCHEMA = "complaint-generator/resource-key-grant"
+RESOURCE_GRANT_VERSION = 1
+RESOURCE_GRANT_WRAP_DOMAIN = b"complaint-generator/private-key/resource-grant@1\x00"
+RECIPIENT_WRAP_DOMAIN = b"complaint-generator/private-key/recipient-wrap@1\x00"
+
+
+def _recipient_wrap_aad(wrap_key_id: str) -> bytes:
+    _require_key_id(wrap_key_id)
+    return RECIPIENT_WRAP_DOMAIN + wrap_key_id.encode("utf-8")
+
+
+def resource_grant_associated_data(
+    *,
+    tenant_id: str,
+    case_id: str,
+    canonical_principal_id: str,
+    revision: str,
+    recipient_principal_id: str,
+    artifact_kind: str,
+    resource_id: str,
+    membership_grant_id: str,
+    membership_version: int,
+    data_key_id: str,
+    recipient_wrap_key_id: str,
+) -> bytes:
+    """AAD for a recipient-wrapped case key.
+
+    The authenticated actor is not a field. The principal is the canonical
+    artifact owner, which is the case tenant, plus the recipient who may unwrap.
+    """
+
+    if type(membership_version) is not int or membership_version < 1:
+        raise PrivateArtifactBindingError("revision")
+    if canonical_principal_id != tenant_id:
+        raise PrivateArtifactBindingError("canonical_owner")
+    fields = (
+        RESOURCE_GRANT_SCHEMA,
+        str(RESOURCE_GRANT_VERSION),
+        tenant_id,
+        case_id,
+        canonical_principal_id,
+        revision,
+        recipient_principal_id,
+        artifact_kind,
+        resource_id,
+        membership_grant_id,
+        str(membership_version),
+        data_key_id,
+        recipient_wrap_key_id,
+    )
+    chunks = [RESOURCE_GRANT_WRAP_DOMAIN]
+    for field in fields:
+        if field in {data_key_id, recipient_wrap_key_id}:
+            raw = _require_key_id(field)
+        else:
+            _require_label(field)
+            raw = field.encode("utf-8")
+        chunks.append(len(raw).to_bytes(4, "big"))
+        chunks.append(raw)
+    return b"".join(chunks)
+
+
+def wrap_resource_key_for_recipient(
+    data_key: bytes,
+    recipient_wrap_key: bytes,
+    associated_data: bytes,
+) -> dict[str, str]:
+    """Wrap a case data key to a recipient wrap key. The data key is not returned."""
+
+    key_bytes = _require_data_key(data_key)
+    wrap_key = _require_data_key(recipient_wrap_key)
+    if wrap_key == key_bytes:
+        raise PrivateKeyMaterialError("owner_key_not_a_grant")
+    if not isinstance(associated_data, (bytes, bytearray)) or len(associated_data) < len(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    if not bytes(associated_data).startswith(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    wrapped = _wrap_secret(wrap_key, key_bytes, bytes(associated_data))
+    return {"nonce": wrapped["nonce"], "ciphertext": wrapped["ciphertext"]}
+
+
+def unwrap_resource_key_for_recipient(
+    wrapped: Mapping[str, Any],
+    recipient_wrap_key: bytes,
+    associated_data: bytes,
+) -> bytes:
+    """Open a recipient-bound wrap. A master key or browser key is not accepted here."""
+
+    wrap_key = _require_data_key(recipient_wrap_key)
+    if not isinstance(associated_data, (bytes, bytearray)) or not bytes(associated_data).startswith(RESOURCE_GRANT_WRAP_DOMAIN):
+        raise PrivateArtifactBindingError("grant_aad")
+    return _unwrap_secret(wrap_key, wrapped, bytes(associated_data))
+
+
 def _kdf_metadata(salt: bytes) -> dict[str, Any]:
     return {
         "name": "scrypt",
@@ -1015,6 +1113,22 @@ def _read_private_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _key_session_operation(*, authenticate: bool = True):
+    """Serialize a session operation and refresh its authenticated disk state."""
+    def decorate(function):
+        @wraps(function)
+        def invoke(self, *args, **kwargs):
+            with self._key_operation(authenticate=authenticate):
+                return function(self, *args, **kwargs)
+        return invoke
+    return decorate
+
+
+_CASE_EPOCH_LOCKS: dict[tuple[int, str], threading.RLock] = {}
+_CASE_EPOCH_LOCKS_GUARD = threading.Lock()
+_CASE_EPOCH_HELD = threading.local()
+
+
 class UserOwnedKeySession:
     """Passphrase- or keyring-wrapped master key with per-case data keys.
 
@@ -1033,12 +1147,29 @@ class UserOwnedKeySession:
         self._data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
         self._retained_data_keys: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
         self._pending_data_keys: dict[tuple[str, str], tuple[str, bytes]] = {}
+        self._recipient_wrap: tuple[str, bytes] | None = None
+        self._case_grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+        self._operation_lock = threading.RLock()
+        self._session_epoch = 0
+        self._operation_depth = 0
+        self._store_lock_fd: int | None = None
+        self._store_directory_fd: int | None = None
         if self.path.exists():
             self._document = self._load_document()
 
     @property
     def unlocked(self) -> bool:
         return self._master is not None
+
+    @property
+    def session_epoch(self) -> int:
+        """Volatile session lifetime, without key material or access authority.
+
+        Explicit create/unlock and every lock retire an earlier operation.
+        Ordinary authenticated key-store refreshes preserve this lifetime.
+        """
+        with self._operation_lock:
+            return self._session_epoch
 
     def public_state(self) -> dict[str, Any]:
         document = self._document
@@ -1082,6 +1213,7 @@ class UserOwnedKeySession:
             case_count=case_count,
         )
 
+    @_key_session_operation(authenticate=False)
     def create(
         self,
         *,
@@ -1133,8 +1265,10 @@ class UserOwnedKeySession:
         self._document = document
         self._master = master
         self._master_id = master_id
+        self._session_epoch += 1
         return self.public_state()
 
+    @_key_session_operation(authenticate=False)
     def unlock_passphrase(self, passphrase: str) -> dict[str, Any]:
         document = self._require_document()
         if document.get("protection") != "passphrase":
@@ -1155,8 +1289,10 @@ class UserOwnedKeySession:
             self.lock()
             raise PrivateArtifactIntegrityError(exc.reason) from None
         self._install_master(document, master)
+        self._session_epoch += 1
         return self.public_state()
 
+    @_key_session_operation(authenticate=False)
     def unlock_keyring(self, keyring: Any = None) -> dict[str, Any]:
         document = self._require_document()
         if document.get("protection") != "keyring":
@@ -1195,18 +1331,24 @@ class UserOwnedKeySession:
             self.lock()
             raise PrivateArtifactIntegrityError(exc.reason) from None
         self._install_master(document, master)
+        self._session_epoch += 1
         return self.public_state()
 
     def lock(self) -> dict[str, Any]:
-        if self._master is not None:
-            self._master = bytes(DATA_KEY_BYTES)
-            self._master = None
-        self._data_keys.clear()
-        self._retained_data_keys.clear()
-        self._pending_data_keys.clear()
-        self._master_id = None
-        return self.public_state()
+        with self._operation_lock:
+            self._session_epoch += 1
+            if self._master is not None:
+                self._master = bytes(DATA_KEY_BYTES)
+                self._master = None
+            self._data_keys.clear()
+            self._retained_data_keys.clear()
+            self._pending_data_keys.clear()
+            self._recipient_wrap = None
+            self._case_grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+            self._master_id = None
+            return self.public_state()
 
+    @_key_session_operation()
     def ensure_data_key(self, tenant_id: str, case_id: str) -> str:
         _require_label(tenant_id)
         _require_label(case_id)
@@ -1237,6 +1379,312 @@ class UserOwnedKeySession:
         self._data_keys[(tenant_id, case_id)] = (key_id, data_key)
         return key_id
 
+    @_key_session_operation()
+    def ensure_recipient_wrap_key(self) -> str:
+        """Create the session wrap key used only to receive case key grants.
+
+        The wrap key stays inside this unlocked session. Callers cannot submit
+        a browser key, a raw ``.key`` file, or the master key in its place.
+        """
+
+        if not self.unlocked or self._master is None or self._document is None:
+            raise PrivateKeyLockedError(
+                "The recipient wrap key is locked, so no key grant was written.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        if self._recipient_wrap is not None:
+            return self._recipient_wrap[0]
+        key_id = _opaque_key_id("r-")
+        material = _random_secret()
+        if material == self._master:
+            raise PrivateKeyMaterialError("owner_key_not_a_grant")
+        document = dict(self._document)
+        document["recipient_wrap"] = {
+            "wrap_key_id": key_id,
+            "wrapped_wrap_key": _wrap_secret(self._master, material, _recipient_wrap_aad(key_id)),
+        }
+        document["raw_key_persisted"] = False
+        self._write_document(document)
+        self._document = document
+        self._recipient_wrap = (key_id, material)
+        return key_id
+
+    @contextmanager
+    def case_key_epoch_scope(self, tenant_id: str, case_id: str):
+        """Hold one case key epoch before Grant, Member or key-store locks.
+
+        No key material or authority is yielded. Callers must acquire this
+        scope before entering key RMW operations. Independent unlocked handles
+        for this same owned store share the lock; nested same-thread calls are
+        reentrant. The lock is separate from Keys so publication callbacks can
+        retain their established Grant -> Member -> Keys order.
+        """
+        _require_label(tenant_id)
+        _require_label(case_id)
+        directory = self.directory
+        if directory.resolve(strict=True) != directory:
+            raise PrivateKeyMaterialError("permissions")
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = None
+        try:
+            info = os.fstat(directory_fd)
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o700):
+                raise PrivateKeyMaterialError("permissions")
+            digest = hashlib.sha256(json.dumps([tenant_id, case_id], separators=(",", ":")).encode()).hexdigest()
+            name = ".case-epoch-" + digest + ".lock"
+            identity = (os.getpid(), str(directory / name))
+            with _CASE_EPOCH_LOCKS_GUARD:
+                lock = _CASE_EPOCH_LOCKS.setdefault(identity, threading.RLock())
+            with lock:
+                held = getattr(_CASE_EPOCH_HELD, "locks", None)
+                if held is None:
+                    held = _CASE_EPOCH_HELD.locks = {}
+                # A fork must not reuse a parent's reentrancy or keep its copied
+                # descriptor alive while attempting a second flock.
+                for inherited, handle in list(held.items()):
+                    if inherited[0] != os.getpid():
+                        os.close(handle)
+                        del held[inherited]
+                if identity in held:
+                    yield
+                    return
+                descriptor = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                     0o600, dir_fd=directory_fd)
+                before = os.fstat(descriptor)
+                def reprove():
+                    named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    parent = directory.lstat()
+                    if (not stat.S_ISREG(named.st_mode) or named.st_uid != os.getuid()
+                            or stat.S_IMODE(named.st_mode) != 0o600 or named.st_nlink != 1
+                            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+                            or (info.st_dev, info.st_ino) != (parent.st_dev, parent.st_ino)
+                            or parent.st_uid != os.getuid() or stat.S_IMODE(parent.st_mode) != 0o700):
+                        raise PrivateKeyMaterialError("permissions")
+                reprove()
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                reprove()
+                held[identity] = descriptor
+                try:
+                    yield
+                finally:
+                    del held[identity]
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(directory_fd)
+
+    def rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
+                                   resource_id: str, expected_data_key_id: str,
+                                   operation_id: str,
+                                   before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        # Epoch must precede the Keys decorator, including direct trusted calls.
+        with self.case_key_epoch_scope(tenant_id, case_id):
+            return self._rotate_case_grant_data_key(tenant_id, case_id, resource_id=resource_id,
+                expected_data_key_id=expected_data_key_id, operation_id=operation_id,
+                **({"before_publish":before_publish} if before_publish is not None else {}))
+
+    @_key_session_operation()
+    def _rotate_case_grant_data_key(self, tenant_id: str, case_id: str, *,
+                                   resource_id: str, expected_data_key_id: str,
+                                   operation_id: str,
+                                   before_publish: Callable[[], Any] | None = None) -> dict[str, Any]:
+        """Rotate the active case DEK under a verified canonical resource scope.
+
+        CaseDirectory currently has one canonical resource per case. This is
+        the same DEK selected by provider().resolve for ordinary owner writes;
+        it is not a grant-only key or a workspace ciphertext migration.
+        """
+        self._require_unlocked("Case key rotation requires an unlocked session. Nothing was changed.")
+        _require_label(tenant_id)
+        _require_label(case_id)
+        _require_label(resource_id)
+        _require_label(operation_id)
+        operation_hash = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
+        current = self._data_keys.get((tenant_id, case_id))
+        if current is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        current_id, current_key = current
+        prior_rotation = self._case_grant_state["rotations"].get(operation_hash)
+        if prior_rotation is not None:
+            if (prior_rotation.get("tenant_id"), prior_rotation.get("case_id"), prior_rotation.get("resource_id"),
+                    prior_rotation.get("old_data_key_id")) != (tenant_id, case_id, resource_id, expected_data_key_id):
+                raise PrivateKeyMaterialError("key_rotation_replay_mismatch")
+            if current_id != prior_rotation.get("new_data_key_id"):
+                raise PrivateKeyMaterialError("key_rotation_superseded")
+            return {**prior_rotation, "rotated": False, "replayed": True,
+                    "workspace_ciphertext_migrated": False}
+        if current_id != expected_data_key_id:
+            raise PrivateKeyMaterialError("key_revision_conflict")
+        assert self._document is not None
+        associations = dict(self._case_grant_state["resources"])
+        slot = f"{tenant_id}\n{case_id}"
+        if associations.get(slot) not in {None, resource_id}:
+            raise PrivateArtifactBindingError("resource_mismatch")
+        slot, record = self._case_record(tenant_id, case_id)
+        if record.get("pending_data_key") is not None:
+            raise PrivateKeyMaterialError("key_rotation_in_progress")
+        assert self._master is not None
+        new_id, new_key = _opaque_key_id("d-"), _random_secret()
+        retained = [dict(item) for item in record.get("retained_data_keys") or []]
+        retained.append({"data_key_id": current_id,
+                         "wrapped_data_key": dict(record["wrapped_data_key"]), "status": "retained"})
+        record.update(data_key_id=new_id,
+            wrapped_data_key=_wrap_secret(self._master, new_key, _data_aad(tenant_id, case_id, new_id)),
+            retained_data_keys=retained)
+        document = dict(self._document)
+        cases = dict(document.get("cases") or {})
+        cases[slot] = record
+        associations[slot] = resource_id
+        receipt = {"old_data_key_id": current_id, "new_data_key_id": new_id,
+                   "tenant_id": tenant_id, "case_id": case_id, "resource_id": resource_id,
+                   "operation_id_sha256": operation_hash}
+        rotations = dict(self._case_grant_state["rotations"])
+        rotations[operation_hash] = receipt
+        state = {"schema": "case-grant-key-state@1", "resources": associations, "rotations": rotations}
+        document["cases"] = cases
+        self._seal_case_grant_state(document, state)
+        self._write_document(document, **({"before_publish":before_publish} if before_publish is not None else {}))
+        self._document = document
+        self._case_grant_state = state
+        self._data_keys[(tenant_id, case_id)] = (new_id, new_key)
+        self._retained_data_keys.setdefault((tenant_id, case_id), []).append((current_id, current_key))
+        return {**receipt, "rotated": True, "replayed": False, "workspace_ciphertext_migrated": False}
+
+    def _bind_case_grant_resource(self, tenant_id: str, case_id: str, resource_id: str) -> None:
+        _require_label(tenant_id)
+        _require_label(case_id)
+        _require_label(resource_id)
+        self._require_unlocked("Resource key binding requires an unlocked session.")
+        assert self._document is not None
+        associations = dict(self._case_grant_state["resources"])
+        slot = f"{tenant_id}\n{case_id}"
+        prior = associations.get(slot)
+        if prior is not None and prior != resource_id:
+            raise PrivateArtifactBindingError("resource_mismatch")
+        if prior is None:
+            associations[slot] = resource_id
+            document = dict(self._document)
+            state = {**self._case_grant_state, "resources": associations}
+            self._seal_case_grant_state(document, state)
+            self._write_document(document)
+            self._document = document
+            self._case_grant_state = state
+
+    def _case_grant_state_binding(self, master_id: str) -> PrivateArtifactBinding:
+        return PrivateArtifactBinding(tenant_id=master_id, case_id="key-store-grants",
+            principal_id=master_id, artifact_kind="case-grant-key-state", revision="1")
+
+    def _seal_case_grant_state(self, document: dict[str, Any], state: Mapping[str, Any]) -> None:
+        assert self._master is not None and self._master_id is not None
+        envelope = seal_private_artifact(json.dumps(state, sort_keys=True, separators=(",", ":")).encode(),
+            binding=self._case_grant_state_binding(self._master_id), key=self._master, key_id=self._master_id)
+        document["case_grant_state"] = _b64e(envelope)
+
+    @_key_session_operation()
+    def recipient_wrap_key(self) -> tuple[str, bytes]:
+        """Return the in-process wrap key. Locked sessions and raw files fail."""
+
+        if not self.unlocked or self._recipient_wrap is None:
+            raise PrivateKeyLockedError(
+                "The recipient wrap key is unavailable. Unlock the session and create it there.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        self.assert_no_raw_key_files()
+        return self._recipient_wrap
+
+    @_key_session_operation()
+    def wrap_case_key_for_recipient(
+        self,
+        *,
+        tenant_id: str,
+        case_id: str,
+        recipient_wrap_key: bytes,
+        recipient_wrap_key_id: str,
+        canonical_principal_id: str,
+        revision: str,
+        recipient_principal_id: str,
+        artifact_kind: str,
+        resource_id: str,
+        membership_grant_id: str,
+        membership_version: int,
+    ) -> dict[str, str]:
+        """Wrap this session's case data key. The master key is not a grant key."""
+
+        if not self.unlocked or self._master is None:
+            raise PrivateKeyLockedError(
+                "The case key is locked, so it was not wrapped for a recipient.",
+                actions=self.public_state()["actions"],
+                protection=(self._document or {}).get("protection") if isinstance(self._document, dict) else None,
+            )
+        self._bind_case_grant_resource(tenant_id, case_id, resource_id)
+        found = self._data_keys.get((tenant_id, case_id))
+        if found is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        data_key_id, data_key = found
+        wrap_key = _require_data_key(recipient_wrap_key)
+        if wrap_key == self._master or wrap_key == data_key:
+            raise PrivateKeyMaterialError("owner_key_not_a_grant")
+        associated = resource_grant_associated_data(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            canonical_principal_id=canonical_principal_id,
+            revision=revision,
+            recipient_principal_id=recipient_principal_id,
+            artifact_kind=artifact_kind,
+            resource_id=resource_id,
+            membership_grant_id=membership_grant_id,
+            membership_version=membership_version,
+            data_key_id=data_key_id,
+            recipient_wrap_key_id=recipient_wrap_key_id,
+        )
+        wrapped = wrap_resource_key_for_recipient(data_key, wrap_key, associated)
+        wrapped["data_key_id"] = data_key_id
+        wrapped["recipient_wrap_key_id"] = recipient_wrap_key_id
+        return wrapped
+
+    @_key_session_operation()
+    def unwrap_granted_resource_key(
+        self,
+        wrapped: Mapping[str, Any],
+        *,
+        tenant_id: str,
+        case_id: str,
+        canonical_principal_id: str,
+        revision: str,
+        recipient_principal_id: str,
+        artifact_kind: str,
+        resource_id: str,
+        membership_grant_id: str,
+        membership_version: int,
+        data_key_id: str,
+        recipient_wrap_key_id: str,
+    ) -> bytes:
+        """Unwrap with this session's recipient wrap key, never the master key."""
+
+        wrap_id, wrap_key = self.recipient_wrap_key()
+        if wrap_id != recipient_wrap_key_id:
+            raise PrivateKeyMaterialError("recipient_mismatch")
+        if self._master is not None and wrap_key == self._master:
+            raise PrivateKeyMaterialError("admin_master_rejected")
+        associated = resource_grant_associated_data(
+            tenant_id=tenant_id,
+            case_id=case_id,
+            canonical_principal_id=canonical_principal_id,
+            revision=revision,
+            recipient_principal_id=recipient_principal_id,
+            artifact_kind=artifact_kind,
+            resource_id=resource_id,
+            membership_grant_id=membership_grant_id,
+            membership_version=membership_version,
+            data_key_id=data_key_id,
+            recipient_wrap_key_id=recipient_wrap_key_id,
+        )
+        return unwrap_resource_key_for_recipient(wrapped, wrap_key, associated)
+
     def provider(self) -> InjectedCaseKeyProvider:
         if not self.unlocked:
             raise PrivateKeyLockedError(
@@ -1254,16 +1702,18 @@ class UserOwnedKeySession:
                 super().__init__({})
 
             def resolve(self, binding: PrivateArtifactBinding) -> tuple[str, bytes]:
-                if not session.unlocked:
-                    raise PrivateKeyLockedError(
-                        "The key session is locked. Unlock it before resolving a case key.",
-                        actions=session.public_state()["actions"],
-                        protection=(session._document or {}).get("protection"),
-                    )
-                return InjectedCaseKeyProvider(session._data_keys).resolve(binding)
+                with session._key_operation():
+                    if not session.unlocked:
+                        raise PrivateKeyLockedError(
+                            "The key session is locked. Unlock it before resolving a case key.",
+                            actions=session.public_state()["actions"],
+                            protection=(session._document or {}).get("protection"),
+                        )
+                    return InjectedCaseKeyProvider(session._data_keys).resolve(binding)
 
         return SessionKeyProvider()
 
+    @_key_session_operation()
     def export_recovery(self, tenant_id: str, case_id: str, recovery_passphrase: str, destination: str | Path | None = None) -> dict[str, Any]:
         if not self.unlocked:
             raise PrivateKeyLockedError(
@@ -1307,6 +1757,7 @@ class UserOwnedKeySession:
             "unlock_is_remote_consent": False,
         }
 
+    @_key_session_operation()
     def import_recovery(
         self,
         payload: bytes | str | Mapping[str, Any],
@@ -1374,6 +1825,7 @@ class UserOwnedKeySession:
         state["data_reset"] = False
         return state
 
+    @_key_session_operation()
     def lookup_data_key(self, tenant_id: str, case_id: str, key_id: str) -> bytes | None:
         """Return an unlocked active, pending, or retained data key."""
 
@@ -1388,6 +1840,7 @@ class UserOwnedKeySession:
                 return retained_key
         return None
 
+    @_key_session_operation()
     def rotate_wrapping_key(
         self,
         new_passphrase: str,
@@ -1482,6 +1935,7 @@ class UserOwnedKeySession:
         _PORTABILITY_LOG.info("wrapping key rewrapped; data keys were not reencrypted")
         return state
 
+    @_key_session_operation()
     def rotate_data_key(
         self,
         tenant_id: str,
@@ -1622,6 +2076,7 @@ class UserOwnedKeySession:
         _PORTABILITY_LOG.info("data key reencrypted; previous generation retained")
         return state
 
+    @_key_session_operation()
     def revoke_retained_keys(
         self,
         tenant_id: str,
@@ -1738,6 +2193,7 @@ class UserOwnedKeySession:
         item = destroyed.get(f"{tenant_id}\n{case_id}")
         return isinstance(item, Mapping) and item.get("status") == "destroyed"
 
+    @_key_session_operation()
     def destroy_case_keys(self, tenant_id: str, case_id: str) -> dict[str, Any]:
         """Destroy one case's data keys. The master key and other cases stay."""
 
@@ -1845,11 +2301,38 @@ class UserOwnedKeySession:
                     pending_id,
                     _unwrap_secret(master, pending_doc.get("wrapped_data_key") or {}, _data_aad(tenant, case, pending_id)),
                 )
+        recipient_wrap: tuple[str, bytes] | None = None
+        wrap_document = document.get("recipient_wrap")
+        if wrap_document is not None:
+            if not isinstance(wrap_document, Mapping):
+                raise PrivateArtifactIntegrityError("malformed")
+            wrap_id = str(wrap_document.get("wrap_key_id") or "")
+            opened_wrap = _unwrap_secret(
+                master,
+                wrap_document.get("wrapped_wrap_key") or {},
+                _recipient_wrap_aad(wrap_id),
+            )
+            recipient_wrap = (wrap_id, opened_wrap)
+        grant_state = {"schema": "case-grant-key-state@1", "resources": {}, "rotations": {}}
+        if document.get("case_grant_state") is not None:
+            master_id = str(document.get("master_key_id") or "")
+            opened_state = open_private_artifact(_b64d(document["case_grant_state"]),
+                binding=self._case_grant_state_binding(master_id), key=master, expected_key_id=master_id)
+            try:
+                grant_state = json.loads(opened_state)
+                if (not isinstance(grant_state, dict) or set(grant_state) != {"schema", "resources", "rotations"}
+                        or grant_state["schema"] != "case-grant-key-state@1"
+                        or not isinstance(grant_state["resources"], dict) or not isinstance(grant_state["rotations"], dict)):
+                    raise ValueError("invalid grant state")
+            except (ValueError, TypeError):
+                raise PrivateArtifactIntegrityError("malformed") from None
         self._master = master
         self._master_id = str(document.get("master_key_id") or "")
         self._data_keys = loaded
         self._retained_data_keys = retained
         self._pending_data_keys = pending
+        self._recipient_wrap = recipient_wrap
+        self._case_grant_state = grant_state
 
     def _new_document(
         self,
@@ -1877,15 +2360,92 @@ class UserOwnedKeySession:
             document["keyring_account"] = keyring_account
         return document
 
-    def _write_document(self, document: Mapping[str, Any]) -> None:
+    @contextmanager
+    def _key_operation(self, *, authenticate: bool = True):
+        with self._operation_lock:
+            outer = self._operation_depth == 0
+            self._operation_depth += 1
+            try:
+                if outer:
+                    if self.path.exists():
+                        self._acquire_store_lock()
+                        try:
+                            document = self._load_document()
+                            if authenticate and self._master is not None:
+                                if document.get("master_key_id") != self._master_id:
+                                    raise PrivateKeyMaterialError("key_store_changed")
+                                self._install_master(document, self._master)
+                            self._document = document
+                        except Exception:
+                            self.lock()
+                            raise
+                    elif self._document is not None:
+                        self.lock()
+                        raise PrivateKeyMaterialError("key_store_missing")
+                yield
+            finally:
+                self._operation_depth -= 1
+                if outer:
+                    if self._store_lock_fd is not None:
+                        os.close(self._store_lock_fd)
+                        self._store_lock_fd = None
+                    if self._store_directory_fd is not None:
+                        os.close(self._store_directory_fd)
+                        self._store_directory_fd = None
+
+    def _acquire_store_lock(self) -> None:
+        if self._store_lock_fd is not None:
+            return
+        import fcntl
+        root = self.directory.absolute()
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if root.resolve() != root:
+            raise PrivateKeyMaterialError("permissions")
+        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = None
+        try:
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                raise PrivateKeyMaterialError("permissions")
+            descriptor = os.open(".keystore.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                 0o600, dir_fd=directory)
+            before = os.fstat(descriptor)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                    or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600):
+                raise PrivateKeyMaterialError("permissions")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            named = os.stat(".keystore.lock", dir_fd=directory, follow_symlinks=False)
+            if (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino):
+                raise PrivateKeyMaterialError("permissions")
+            self._store_lock_fd, self._store_directory_fd = descriptor, directory
+        except BaseException:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(directory)
+            raise
+
+    def _write_document(self, document: Mapping[str, Any], *, before_publish: Callable[[], Any] | None = None) -> None:
+        if self._operation_depth < 1:
+            raise PrivateKeyMaterialError("key_store_transaction_required")
+        self._acquire_store_lock()
+        if self._document is None and self.path.exists():
+            raise PrivateKeyMaterialError("key_store_changed")
         encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
         self.directory.mkdir(parents=True, exist_ok=True)
         os.chmod(self.directory, 0o700)
         temporary = self.directory / f".{KEY_STORE_FILENAME}.tmp"
         _write_private_bytes(temporary, encoded, protect_parent=True)
-        os.replace(temporary, self.path)
+        try:
+            if before_publish is not None and before_publish() is False:
+                raise PrivateKeyMaterialError("publication_denied")
+            os.replace(temporary, self.path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         os.chmod(self.path, 0o600)
         _assert_owner_mode(self.path, 0o600)
+        assert self._store_directory_fd is not None
+        os.fsync(self._store_directory_fd)
 
     def _load_document(self) -> dict[str, Any]:
         raw = _read_private_bytes(self.path)
@@ -2303,6 +2863,7 @@ def _atomic_write(
     *,
     fsync_file: Callable[[int], None] | None,
     fsync_directory: Callable[[int], None] | None,
+    before_replace: Callable[[], Any] | None = None,
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
@@ -2326,7 +2887,15 @@ def _atomic_write(
         raise
     os.close(descriptor)
     _fsync_directory(directory, fsync_directory)
-    os.replace(temporary, directory / name)
+    try:
+        if before_replace is not None and before_replace() is False:
+            raise PrivateRevisionError("Publication admission refused.",
+                code="publication_denied", state="aborted")
+        os.replace(temporary, directory / name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        _fsync_directory(directory, fsync_directory)
+        raise
     _fsync_directory(directory, fsync_directory)
 
 
@@ -2347,6 +2916,7 @@ def _seal_role(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> bytes:
     binding = PrivateArtifactBinding(
         tenant_id=tenant_id,
@@ -2368,6 +2938,7 @@ def _open_role(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> bytes:
     binding = PrivateArtifactBinding(
         tenant_id=tenant_id,
@@ -2376,6 +2947,12 @@ def _open_role(
         revision=revision,
         principal_id=principal_id,
     )
+    actual_id = parse_private_envelope(envelope)["key_id"]
+    if actual_id != key_id and key_resolver is not None:
+        key = key_resolver(actual_id)
+        if key is None:
+            raise PrivateArtifactIntegrityError("authentication_failed")
+        key_id = actual_id
     return open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
 
 
@@ -2392,6 +2969,7 @@ def _open_manifest(
     revision: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any]:
     body = _open_role(
         envelope,
@@ -2402,6 +2980,7 @@ def _open_manifest(
         revision=revision,
         key=key,
         key_id=key_id,
+        key_resolver=key_resolver,
     )
     document = json.loads(body.decode("utf-8"))
     if not isinstance(document, dict) or document.get("schema") != _REVISION_SCHEMA:
@@ -2594,6 +3173,7 @@ def _head_record(root: Path) -> tuple[bytes | None, str | None]:
 def _open_head(
     root: Path, *, tenant_id: str, case_id: str, principal_id: str,
     key: bytes, key_id: str, revision_hint: str | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any] | None:
     envelope, revision = _head_record(root)
     if envelope is None:
@@ -2603,7 +3183,7 @@ def _open_head(
     try:
         manifest = _open_manifest(envelope, tenant_id=tenant_id, case_id=case_id,
                                   principal_id=principal_id, key=key, key_id=key_id,
-                                  revision=str(revision))
+                                  revision=str(revision), key_resolver=key_resolver)
     except PrivateStorageError:
         raise PrivateRevisionError("revision head did not authenticate", code="authentication_failed") from None
     if str(manifest.get("revision")) != revision:
@@ -2615,22 +3195,25 @@ def _publish_head(
     root: Path, envelope: bytes, revision: str, *,
     fsync_file: Callable[[int], None] | None,
     fsync_directory: Callable[[int], None] | None,
+    before_publish: Callable[[], Any] | None = None,
 ) -> None:
     encoded = str(revision).encode("ascii")
     if not 0 < len(encoded) <= 128 or not str(revision).isdigit():
         raise PrivateRevisionError("head revision is invalid", code="bad_revision")
     record = _HEAD_RECORD_MAGIC + len(encoded).to_bytes(2, "big") + encoded + envelope
-    _atomic_write(root, _HEAD_NAME, record, fsync_file=fsync_file, fsync_directory=fsync_directory)
+    _atomic_write(root, _HEAD_NAME, record, fsync_file=fsync_file, fsync_directory=fsync_directory,
+        **({"before_replace": before_publish} if before_publish is not None else {}))
 
 
 def _authenticate_revision_owner(
     root: Path, *, tenant_id: str, case_id: str, principal_id: str, key: bytes,
     key_id: str, create: bool = False, fsync_file=None, fsync_directory=None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> None:
     """Authenticate the caller before any WAL writer, replay, or compensation."""
     raw = _read_exact(root / _OWNER_NAME)
     options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
-                   key=key, key_id=key_id, kind="revision-owner", revision="1")
+                   key=key, key_id=key_id, kind="revision-owner", revision="1", key_resolver=key_resolver)
     marker = b"complaint-private-revision-owner@1"
     if raw is not None:
         try:
@@ -2645,7 +3228,7 @@ def _authenticate_revision_owner(
     # decryption. Uncommitted legacy debris has no safe ownership proof.
     if _read_exact(root / _HEAD_NAME) is not None:
         _open_head(root, tenant_id=tenant_id, case_id=case_id, principal_id=principal_id,
-                   key=key, key_id=key_id)
+                   key=key, key_id=key_id, key_resolver=key_resolver)
     elif (root / "wal").exists() or (root / "o").exists():
         raise PrivateRevisionError("legacy repository owner proof is unavailable", code="owner_binding_unavailable")
     _atomic_write(root, _OWNER_NAME, _seal_role(marker, **options),
@@ -2690,7 +3273,7 @@ def _recovery_status(root: Path, *, options: Mapping[str, Any], phase: str | Non
 
 
 def private_revision_readiness(repository: str | Path, *, tenant_id: str, case_id: str,
-                               principal_id: str, key: bytes, key_id: str) -> str:
+                               principal_id: str, key: bytes, key_id: str, key_resolver: Callable[[str], bytes | None] | None = None) -> str:
     """Pure admission for canonical readers/writers, including a missing head.
 
     Owner/objects alone never prove an empty committed state. A first-commit
@@ -2699,7 +3282,7 @@ def private_revision_readiness(repository: str | Path, *, tenant_id: str, case_i
     root = Path(repository)
     if not any((root / name).exists() for name in (_OWNER_NAME, _HEAD_NAME, "wal", "o")):
         return "new"
-    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     if (root / _HEAD_NAME).exists():
         manifest = _open_head(root, **options)
         if manifest is None:
@@ -2754,7 +3337,8 @@ def _intent_document(
 
 
 def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync_file, fsync_directory,
-                  lineage: Mapping[str, Any] | None = None) -> bool:
+                  lineage: Mapping[str, Any] | None = None,
+                  before_publish: Callable[[], Any] | None = None) -> bool:
     revision = str(intent.get("revision") or "")
     effect_id = str(intent.get("effect_id") or "")
     current_envelope, current_revision = _head_record(root)
@@ -2785,7 +3369,8 @@ def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync
         if current_ref != str(intent.get("previous_head_ref") or ""):
             return False
         envelope = _object_bytes(root, str(intent["manifest_ref"]))
-        _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory)
+        _publish_head(root, envelope, revision, fsync_file=fsync_file, fsync_directory=fsync_directory,
+            **({"before_publish": before_publish} if before_publish is not None else {}))
         return True
     if current != revision:
         return True
@@ -2808,17 +3393,23 @@ def _apply_intent(root: Path, intent: Mapping[str, Any], *, install: bool, fsync
 
 
 def _authenticate_intent(root: Path, intent: Mapping[str, Any], *, tenant_id: str,
-                         case_id: str, principal_id: str, key: bytes, key_id: str) -> None:
+                         case_id: str, principal_id: str, key: bytes, key_id: str, key_resolver: Callable[[str], bytes | None] | None = None) -> None:
     """Bind every replay/rollback reference to an authenticated caller-owned revision."""
     revision = str(intent.get("revision") or "")
     expected = str(intent.get("expected_revision") or "")
-    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+    options = dict(tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     try:
-        manifest = _open_manifest(_object_bytes(root, str(intent["manifest_ref"])),
+        manifest_envelope = _object_bytes(root, str(intent["manifest_ref"]))
+        manifest_key_id = parse_private_envelope(manifest_envelope)["key_id"]
+        identity_key = key if manifest_key_id == key_id else (
+            key_resolver(manifest_key_id) if key_resolver is not None else None)
+        if identity_key is None:
+            raise PrivateArtifactIntegrityError("authentication_failed")
+        manifest = _open_manifest(manifest_envelope,
                                   revision=revision, **options)
         objects = manifest.get("objects") or {}
-        keyed = (intent.get("transaction_id") == _wal_identity(key, b"transaction\x00", str(manifest.get("transaction_id") or ""))
-                 and intent.get("effect_id") == _wal_identity(key, b"effect\x00", str(manifest.get("effect_id") or "")))
+        keyed = (intent.get("transaction_id") == _wal_identity(identity_key, b"transaction\x00", str(manifest.get("transaction_id") or ""))
+                 and intent.get("effect_id") == _wal_identity(identity_key, b"effect\x00", str(manifest.get("effect_id") or "")))
         legacy = (intent.get("schema") == "cg-revision-intent-v1"
                   and intent.get("transaction_id") == manifest.get("transaction_id")
                   and intent.get("effect_id") == manifest.get("effect_id"))
@@ -2943,13 +3534,27 @@ def commit_private_revision(
     writer: Any | None = None,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
+    before_publish: Callable[[], Any] | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
+    publication_scope: Callable[[], Any] | None = None,
 ) -> RevisionPublication:
     """Publish one answer revision across session, fact graph, and proof.
 
     Objects are sealed first. The visible head changes only inside the effect,
     after the intent is durable. ``network_pinned`` stays false.
+
+    ``before_publish`` is a trusted in-process late admission check. It runs
+    after authenticated encryption and head staging/fsync, inside the revision
+    CAS effect immediately before replacing the visible head. A refusal raises through the normal terminal
+    WAL abort path; recovery cannot replay that refused transaction. Readers
+    and key/session reproofs may be used by the callback, but it must not start
+    another revision write under this same lock.
     """
 
+    if before_publish is not None and not callable(before_publish):
+        raise TypeError("before_publish must be a trusted callable")
+    if publication_scope is not None and not callable(publication_scope):
+        raise TypeError("publication_scope must be a trusted scope factory")
     wal = _load_wal()
     root = Path(repository)
     transaction_id, effect_id = _identity_args(transaction_id, effect_id)
@@ -2971,7 +3576,7 @@ def commit_private_revision(
         expected = "0" if expected_revision in {None, ""} else str(expected_revision)
         _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
             principal_id=principal_id, key=key, key_id=key_id, create=True,
-            fsync_file=fsync_file, fsync_directory=fsync_directory)
+            fsync_file=fsync_file, fsync_directory=fsync_directory, key_resolver=key_resolver)
         head_raw, recorded_revision = _head_record(root)
         current = recorded_revision or "0"
         if current in {"",}:
@@ -2991,9 +3596,10 @@ def commit_private_revision(
                 revision=expected,
                 key=key,
                 key_id=key_id,
+                key_resolver=key_resolver,
             )
             _require_committed_revision(root, current_manifest, tenant_id=tenant_id,
-                case_id=case_id, principal_id=principal_id, key=key, key_id=key_id)
+                case_id=case_id, principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             if current_manifest.get("effect_id") == effect_id and current_manifest.get("transaction_id") == transaction_id:
                 return RevisionPublication(
                     True, "committed", transaction_id, effect_id, expected,
@@ -3003,7 +3609,7 @@ def commit_private_revision(
             if head_raw not in {None, b""}:
                 raise PrivateRevisionError("unexpected head", code="revision_conflict", state="conflict")
         _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
-            principal_id=principal_id, key=key, key_id=key_id), phase="pending",
+            principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver), phase="pending",
             fsync_file=fsync_file, fsync_directory=fsync_directory)
         next_revision = str(int(expected) + 1) if expected.isdigit() else uuid.uuid4().hex
         sealed = {}
@@ -3069,50 +3675,62 @@ def commit_private_revision(
             crash_injector=crash_injector,
         )
 
+        publication_hold = ExitStack()
+        publication_entered = False
+        def admit_publication():
+            nonlocal publication_entered
+            if publication_scope is not None and not publication_entered:
+                publication_hold.enter_context(publication_scope())
+                publication_entered = True
+            if before_publish is not None:
+                return before_publish()
+
         def effect() -> bool:
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(
                 root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory,
+                **({"before_publish": admit_publication} if before_publish is not None or publication_scope is not None else {}),
             )
 
         def compensate() -> bool:
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(
                 root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory,
             )
 
-        try:
-            result = coordinator.execute(
-                intent,
-                effect,
-                compensate,
-                transaction_id=wal_transaction_id,
-                effect_id=wal_effect_id,
+        with publication_hold:
+            try:
+                result = coordinator.execute(
+                    intent,
+                    effect,
+                    compensate,
+                    transaction_id=wal_transaction_id,
+                    effect_id=wal_effect_id,
+                )
+            except wal["WALTransactionCrash"] as exc:
+                raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
+            except wal["WALQueueFullError"] as exc:
+                raise PrivateRevisionError("WAL backpressure", code="wal_backpressure", state="recoverable") from exc
+            except wal["WALWriterError"] as exc:
+                raise PrivateRevisionError("WAL writer is closed", code="wal_closed", state="recoverable") from exc
+            except wal["WALTransactionError"] as exc:
+                raise PrivateRevisionError(str(exc), code="transaction_failed", state="recoverable") from exc
+            except PrivateRevisionError:
+                raise
+            if not result.committed or not bridge.receipts:
+                raise PrivateRevisionError("commit receipt missing", code="durability_unproven", state="recoverable")
+            mode = bridge.receipts[-1].acknowledgement_mode
+            return RevisionPublication(
+                True,
+                "committed",
+                transaction_id,
+                effect_id,
+                next_revision,
+                getattr(mode, "value", str(mode)),
+                len(bridge.receipts),
             )
-        except wal["WALTransactionCrash"] as exc:
-            raise PrivateRevisionInterrupted(str(getattr(exc, "args", ["crash"])[0]), transaction_id) from exc
-        except wal["WALQueueFullError"] as exc:
-            raise PrivateRevisionError("WAL backpressure", code="wal_backpressure", state="recoverable") from exc
-        except wal["WALWriterError"] as exc:
-            raise PrivateRevisionError("WAL writer is closed", code="wal_closed", state="recoverable") from exc
-        except wal["WALTransactionError"] as exc:
-            raise PrivateRevisionError(str(exc), code="transaction_failed", state="recoverable") from exc
-        except PrivateRevisionError:
-            raise
-        if not result.committed or not bridge.receipts:
-            raise PrivateRevisionError("commit receipt missing", code="durability_unproven", state="recoverable")
-        mode = bridge.receipts[-1].acknowledgement_mode
-        return RevisionPublication(
-            True,
-            "committed",
-            transaction_id,
-            effect_id,
-            next_revision,
-            getattr(mode, "value", str(mode)),
-            len(bridge.receipts),
-        )
     finally:
         if coordinator is not None:
             coordinator.close()
@@ -3133,6 +3751,7 @@ def recover_private_revision(
     key_id: str,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> RevisionPublication:
     """Replay a committed revision or compensate an open one. A second call is a no-op."""
 
@@ -3153,11 +3772,11 @@ def recover_private_revision(
     try:
         lock = _acquire_lock(root)
         _authenticate_revision_owner(root, tenant_id=tenant_id, case_id=case_id,
-            principal_id=principal_id, key=key, key_id=key_id)
+            principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         _open_head(root, tenant_id=tenant_id, case_id=case_id,
-                   principal_id=principal_id, key=key, key_id=key_id)
+                   principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         lineage = _authenticate_recovery_journal(root, tenant_id=tenant_id, case_id=case_id,
-                   principal_id=principal_id, key=key, key_id=key_id)
+                   principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         writer = __import__(
             "ipfs_kit_py.core.wal.writer", fromlist=["WALWriter"]
         ).WALWriter(root / "wal" / "records")
@@ -3168,14 +3787,14 @@ def recover_private_revision(
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(root, intent, install=True, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         def rollback(intent: Mapping[str, Any], effect_id: str) -> bool:
             if str(intent.get("effect_id") or "") != effect_id:
                 return False
             _authenticate_intent(root, intent, tenant_id=tenant_id, case_id=case_id,
-                                 principal_id=principal_id, key=key, key_id=key_id)
+                                 principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
             return _apply_intent(root, intent, install=False, fsync_file=fsync_file, fsync_directory=fsync_directory, lineage=lineage)
 
         try:
@@ -3194,12 +3813,13 @@ def recover_private_revision(
                     key=key,
                     key_id=key_id,
                     revision_hint=revision,
+                    key_resolver=key_resolver,
                 )
             except PrivateRevisionError:
                 raise
         if manifest is not None:
             _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
-                                       principal_id=principal_id, key=key, key_id=key_id)
+                                       principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
         committed = bool(manifest) and counts["rolled_back"] == 0 and (
             counts["replayed"] > 0 or revision is not None
         )
@@ -3216,7 +3836,7 @@ def recover_private_revision(
             committed = True
         if manifest is None:
             _recovery_status(root, options=dict(tenant_id=tenant_id, case_id=case_id,
-                principal_id=principal_id, key=key, key_id=key_id), phase="recovered_empty",
+                principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver), phase="recovered_empty",
                 fsync_file=fsync_file, fsync_directory=fsync_directory)
         effect = str((manifest or {}).get("effect_id") or "")
         transaction = str((manifest or {}).get("transaction_id") or "")
@@ -3249,12 +3869,13 @@ def read_private_revision(
     principal_id: str,
     key: bytes,
     key_id: str,
+    key_resolver: Callable[[str], bytes | None] | None = None,
 ) -> dict[str, Any] | None:
     """Open the published head. Wrong key or case raises; nothing is rewritten."""
 
     root = Path(repository)
     readiness = private_revision_readiness(root, tenant_id=tenant_id, case_id=case_id,
-        principal_id=principal_id, key=key, key_id=key_id)
+        principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     if readiness in {"new", "empty"}:
         return None
     manifest = _open_head(
@@ -3264,11 +3885,12 @@ def read_private_revision(
         principal_id=principal_id,
         key=key,
         key_id=key_id,
+        key_resolver=key_resolver,
     )
     if manifest is None:
         raise PrivateRevisionError("committed revision head changed during read", code="recovery_required")
     _require_committed_revision(root, manifest, tenant_id=tenant_id, case_id=case_id,
-                               principal_id=principal_id, key=key, key_id=key_id)
+                               principal_id=principal_id, key=key, key_id=key_id, key_resolver=key_resolver)
     revision = str(manifest["revision"])
     opened: dict[str, Any] = {"manifest": manifest, "revision": revision}
     for role in _ROLE_NAMES:
@@ -3283,9 +3905,86 @@ def read_private_revision(
             revision=revision,
             key=key,
             key_id=key_id,
+            key_resolver=key_resolver,
         )
     opened["network_pinned"] = False
     return opened
+
+
+@contextmanager
+def private_revision_source_scope(repository: str | Path):
+    """Hold an existing joined source against its normal CAS writers.
+
+    The yielded hash identifies opaque ciphertext only. It grants no read,
+    key, source, law or proof authority. Trusted provisioning must authenticate
+    the actual snapshot with ``read_private_revision`` while this hold lasts.
+    No repository or ownership marker is created by this observer.
+    """
+    root = Path(os.path.abspath(repository))
+    if root.resolve(strict=True) != root:
+        raise PrivateRevisionError("Source path is aliased.", code="source_unavailable")
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise PrivateRevisionError("Source is not privately owned.", code="source_unavailable")
+    lock = _process_lock(root)
+    lock.acquire()
+    descriptor = -1
+    try:
+        descriptor = os.open(root / _LOCK_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid() or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) != 0o600:
+            raise PrivateRevisionError("Source lock changed.", code="source_unavailable")
+        import fcntl
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        def opaque_identity():
+            material = {}
+            for name in (_HEAD_NAME, "head.rev"):
+                try:
+                    fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+                except FileNotFoundError:
+                    if name == _HEAD_NAME:
+                        raise PrivateRevisionError("Source head is missing.", code="source_unavailable") from None
+                    continue
+                try:
+                    item = os.fstat(fd)
+                    if (not stat.S_ISREG(item.st_mode) or item.st_uid != os.getuid() or item.st_nlink != 1
+                            or stat.S_IMODE(item.st_mode) != 0o600 or not 0 < item.st_size <= 8 * 1024 * 1024):
+                        raise PrivateRevisionError("Source head is untrusted.", code="source_unavailable")
+                    raw = bytearray()
+                    while len(raw) <= item.st_size:
+                        chunk = os.read(fd, min(65536, item.st_size + 1 - len(raw)))
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
+                    after = os.fstat(fd)
+                    signature = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+                    if len(raw) != item.st_size or signature(item) != signature(after):
+                        raise PrivateRevisionError("Source changed while read.", code="revision_conflict")
+                    material[name] = hashlib.sha256(raw).hexdigest()
+                finally:
+                    os.close(fd)
+            return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        identity = opaque_identity()
+        yield {"head_sha256": identity, "opaque_ciphertext_only": True, "authority": False}
+        current = (root / _LOCK_NAME).lstat()
+        current_root = root.lstat()
+        if (root.resolve(strict=True) != root
+                or (current_root.st_dev, current_root.st_ino) != (info.st_dev, info.st_ino)
+                or not stat.S_ISDIR(current_root.st_mode) or current_root.st_uid != os.getuid()
+                or stat.S_IMODE(current_root.st_mode) & 0o077
+                or (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
+                or not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid()
+                or current.st_nlink != 1 or stat.S_IMODE(current.st_mode) != 0o600
+                or opaque_identity() != identity):
+            raise PrivateRevisionError("Source changed during admission.", code="revision_conflict")
+    finally:
+        if descriptor >= 0:
+            try:
+                import fcntl
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        lock.release()
 
 
 # --- Case manifest CAS (CIMP-DUR-004) --------------------------------------
@@ -3303,6 +4002,16 @@ _CASE_ROLES = (
     ("legal_rule_source", "legal-rule-source"),
     ("evaluation", "evaluation"),
     ("proof", "proof"),
+)
+# Complete case snapshots add the owners a later reader must see together.
+# A partial set is not published and is not treated as a new empty case.
+_COMPLETE_CASE_ROLES = _CASE_ROLES + (
+    ("knowledge_graph", "knowledge-graph"),
+    ("dependency_graph", "dependency-graph"),
+    ("inquiries", "inquiries"),
+    ("proof_references", "proof-references"),
+    ("grants", "grants"),
+    ("workflow_revisions", "workflow-revisions"),
 )
 _CASE_HEAD_NAME = "case-head"
 _CASE_GENERATIONS = "generations"
@@ -3488,6 +4197,8 @@ def _open_case_document(
         return None
     if not isinstance(document, dict) or document.get("schema") != _CASE_SCHEMA:
         return None
+    if document.get("complete") is True and not _complete_role_index(document.get("roles")):
+        return None
     if _opaque_ref(_manifest_bytes(document)) != manifest_hash:
         return None
     if document.get("parent_generation") in {None, ""}:
@@ -3614,6 +4325,18 @@ def _publish_iroh_cas(
     return int(snapshot.head.revision), str(snapshot.head.manifest_hash)
 
 
+def _complete_role_index(roles: Any) -> bool:
+    if not isinstance(roles, Mapping):
+        return False
+    for public_name, kind in _COMPLETE_CASE_ROLES:
+        slot = roles.get(public_name)
+        if not isinstance(slot, Mapping):
+            return False
+        if slot.get("kind") != kind or not slot.get("ref") or not slot.get("revision"):
+            return False
+    return True
+
+
 def publish_case_manifest(
     repository: str | Path,
     *,
@@ -3628,6 +4351,8 @@ def publish_case_manifest(
     private_names: Mapping[str, Any] | None = None,
     backend: str = "local",
     iroh_store: Any = None,
+    complete: bool = False,
+    fail_before_head: bool = False,
     fsync_file: Callable[[int], None] | None = None,
     fsync_directory: Callable[[int], None] | None = None,
 ) -> CaseManifestPublication:
@@ -3647,7 +4372,8 @@ def publish_case_manifest(
     names = dict(private_names or {})
     sealed_roles: dict[str, bytes] = {}
     role_index: dict[str, dict[str, str]] = {}
-    for public_name, kind in _CASE_ROLES:
+    role_table = _COMPLETE_CASE_ROLES if complete else _CASE_ROLES
+    for public_name, kind in role_table:
         body, revision = _role_payload(artifacts, public_name)
         envelope = _seal_role(body, kind=kind, revision=revision, **options)
         sealed_roles[public_name] = envelope
@@ -3722,6 +4448,10 @@ def publish_case_manifest(
             "iroh_manifest_hash": iroh_hash,
             "backend": backend,
         }
+        if complete:
+            document["complete"] = True
+            if not _complete_role_index(role_index):
+                raise PrivateRevisionError("case role is missing", code="role_missing", state="recoverable")
         manifest_hash = _opaque_ref(_manifest_bytes(document))
         manifest_envelope = _seal_role(
             _manifest_bytes(document),
@@ -3733,6 +4463,8 @@ def publish_case_manifest(
         verified = _open_case_document(root, generation, manifest_hash, **options)
         if verified != document:
             raise PrivateRevisionError("case manifest readback failed", code="readback_mismatch", state="recoverable")
+        if fail_before_head:
+            raise PrivateRevisionInterrupted("case-head", generation)
         _write_case_head(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
         _append_generation(root, generation, manifest_hash, fsync_file=fsync_file, fsync_directory=fsync_directory)
         return CaseManifestPublication(
@@ -3784,9 +4516,17 @@ def read_case_manifest(
             "roles": {},
             "envelopes": {},
             "private_names": document.get("private_names") or {},
+            "complete": document.get("complete") is True,
             "minted_completion": False,
         }
-        for public_name, kind in _CASE_ROLES:
+        role_table = _COMPLETE_CASE_ROLES if document.get("complete") is True else _CASE_ROLES
+        if document.get("complete") is True and not _complete_role_index(document.get("roles")):
+            raise PrivateRevisionError(
+                "case manifest blob is missing or stale",
+                code="stale_head",
+                state="recoverable",
+            )
+        for public_name, kind in role_table:
             slot = (document.get("roles") or {}).get(public_name) or {}
             ref = str(slot.get("ref") or "")
             revision = str(slot.get("revision") or "")
@@ -3865,6 +4605,71 @@ def recover_case_manifest(
         if lock is not None:
             _release_lock(lock)
         process_lock.release()
+
+
+def replay_acknowledged_case_revision(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    generation: str,
+    manifest_hash: str,
+) -> CaseManifestPublication:
+    """Confirm an acknowledged generation without publishing a replacement.
+
+    Replay reads the current head. It does not seal a new manifest, move the
+    head backward, or create a case when the acknowledged blob is missing.
+    """
+
+    root = _case_root(repository)
+    before = _snapshot_bytes(root)
+    try:
+        acknowledged = _hex_generation(generation, "generation")
+        acknowledged_hash = _hex_generation(manifest_hash, "manifest_hash")
+        options = _case_options(tenant_id, case_id, principal_id, key, key_id)
+        if not (root / _CASE_HEAD_NAME).exists():
+            return CaseManifestPublication(
+                False, "recoverable", None, None, None, None, False, "local", "missing_repository",
+            )
+        try:
+            head_generation, head_hash = _case_head(root)
+        except PrivateRevisionError:
+            return CaseManifestPublication(
+                False, "recoverable", None, None, None, None, False, "local", "corrupt_manifest",
+            )
+        document = _chain_complete(root, acknowledged, acknowledged_hash, **options)
+        if document is None or (document.get("complete") is True and not _complete_role_index(document.get("roles"))):
+            return CaseManifestPublication(
+                False, "recoverable", head_generation or None, None, head_hash or None, None, False, "local", "stale_head",
+            )
+        if head_generation == acknowledged and head_hash == acknowledged_hash:
+            return CaseManifestPublication(
+                False,
+                "replayed",
+                acknowledged,
+                str(document.get("parent_generation") or "") or None,
+                acknowledged_hash,
+                str(document.get("parent_hash") or "") or None,
+                False,
+                str(document.get("backend") or "local"),
+            )
+        return CaseManifestPublication(
+            False,
+            "preserved",
+            head_generation,
+            str(document.get("parent_generation") or "") or None,
+            head_hash,
+            str(document.get("parent_hash") or "") or None,
+            False,
+            str(document.get("backend") or "local"),
+            "manifest_conflict",
+        )
+    finally:
+        if _snapshot_bytes(root) != before:
+            raise PrivateRevisionError("case manifest replay changed bytes", code="journal_mutated", state="recoverable")
 
 
 # Replica policy is explicit. Importing this module, publishing in local private
@@ -6142,6 +6947,658 @@ def delete_private_case(
     return receipt
 
 
+LEGACY_HOOK_ARTIFACT_CLASS = "legacy-private-hook"
+LEGACY_HOOK_RETENTION = ("retain", "retire_plaintext_after_verified_commit")
+_LEGACY_HOOK_HEAD = "legacy-hook-head.json"
+_LEGACY_HOOK_SCHEMA = "legacy-hook-encrypted-head"
+_LEGACY_HOOK_RECEIPT = "legacy-hook-migration-receipt"
+_LEGACY_HOOK_MAX_BYTES = 1024 * 1024
+
+
+def _legacy_hook_ref(revision: str, preimage: str) -> str:
+    return f"{LEGACY_HOOK_ARTIFACT_CLASS}:{revision}:{preimage}"
+
+
+def _legacy_hook_binding(
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+) -> dict[str, str]:
+    return {
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "artifact_kind": LEGACY_HOOK_ARTIFACT_CLASS,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "revision": revision,
+    }
+
+
+def _legacy_hook_receipt(
+    *,
+    status: str,
+    code: str,
+    revision: str,
+    preimage: str,
+    binding: Mapping[str, str],
+    retention_policy: str,
+    encrypted: bool,
+    pending_kind: str,
+    verified_commit: bool,
+    plaintext_retired: bool,
+    plaintext_retirement: str,
+    source_bytes_preserved: bool,
+    last_valid_head_preserved: bool,
+    prior_head_present: bool,
+    encryption_established: bool,
+) -> dict[str, Any]:
+    ref = _legacy_hook_ref(revision, preimage)
+    encrypted_items = [{"ref": ref, "case_id": binding["case_id"], "revision": revision, "source_preimage": preimage}] if encrypted else []
+    pending_items: list[dict[str, str]] = []
+    if pending_kind:
+        pending_items.append({"ref": ref, "pending": pending_kind})
+    return {
+        "schema": _LEGACY_HOOK_RECEIPT,
+        "schema_version": 1,
+        "status": status,
+        "code": code,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "single_case": True,
+        "automatic_scan": False,
+        "imported_sessions": False,
+        "rewrote_user_tree": False,
+        "rewrote_campaign_artifacts": False,
+        "rewrote_historical_qualifiers": False,
+        "encrypted": encrypted,
+        "pending": bool(pending_items),
+        "encrypted_items": encrypted_items,
+        "pending_items": pending_items,
+        "verified_commit": verified_commit,
+        "encryption_established": encryption_established,
+        "plaintext_retired": plaintext_retired,
+        "plaintext_retirement": plaintext_retirement,
+        "source_bytes_preserved": source_bytes_preserved,
+        "last_valid_head_preserved": last_valid_head_preserved,
+        "prior_head_present": prior_head_present,
+        "retention_policy": retention_policy,
+        "source_preimage": preimage,
+        "destination_binding": dict(binding),
+        "durable": False,
+        "network_durable": False,
+        "stored_local": encrypted,
+        "mode_bits_establish_encryption": False,
+        "local_copy_establishes_encryption": False,
+        "local_copy_establishes_durability": False,
+    }
+
+
+def legacy_hook_migration_claim(
+    *,
+    mode_private: bool = False,
+    local_copy: bool = False,
+    receipt: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Mode bits and a local copy do not establish encryption or durability."""
+
+    established = bool(
+        isinstance(receipt, Mapping)
+        and receipt.get("encryption_established") is True
+        and receipt.get("verified_commit") is True
+    )
+    return {
+        "encrypted": established,
+        "encryption_established": established,
+        "durable": False,
+        "network_durable": False,
+        "mode_private": bool(mode_private),
+        "local_copy": bool(local_copy),
+        "mode_bits_establish_encryption": False,
+        "local_copy_establishes_encryption": False,
+        "local_copy_establishes_durability": False,
+        "automatic_scan": False,
+    }
+
+
+def _legacy_preimage(value: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise PrivateArtifactIntegrityError("preimage")
+    return value
+
+
+def _inspect_legacy_hook_source(path: Path) -> dict[str, Any]:
+    if path.is_symlink():
+        return {"ok": False, "code": "aliased_source"}
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return {"ok": False, "code": "source_missing"}
+    except OSError:
+        return {"ok": False, "code": "aliased_source"}
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return {"ok": False, "code": "source_not_file"}
+        if info.st_nlink != 1:
+            return {"ok": False, "code": "aliased_source"}
+        if info.st_size > _LEGACY_HOOK_MAX_BYTES:
+            return {"ok": False, "code": "oversized"}
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+            if sum(len(item) for item in chunks) > _LEGACY_HOOK_MAX_BYTES:
+                return {"ok": False, "code": "oversized"}
+        payload = b"".join(chunks)
+    finally:
+        os.close(descriptor)
+    if not payload:
+        return {"ok": False, "code": "empty_source", "dev": info.st_dev, "ino": info.st_ino}
+    return {"ok": True, "data": payload, "dev": info.st_dev, "ino": info.st_ino, "nlink": info.st_nlink}
+
+
+def _read_nofollow_bytes(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    if path.is_symlink():
+        raise PrivateArtifactIntegrityError("aliased_destination")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise PrivateArtifactIntegrityError("aliased_destination")
+        return os.read(descriptor, info.st_size + 1)
+    finally:
+        os.close(descriptor)
+
+
+def _write_exclusive(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = payload
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise PrivateStorageError("private write failed", code="legacy_hook_io")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _publish_legacy_head(destination: Path, payload: bytes) -> None:
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = destination / (".legacy-hook-head-" + uuid.uuid4().hex + ".tmp")
+    _write_exclusive(temporary, payload)
+    os.replace(temporary, destination / _LEGACY_HOOK_HEAD)
+    try:
+        directory = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _load_legacy_head(destination: Path) -> dict[str, Any]:
+    head_path = destination / _LEGACY_HOOK_HEAD
+    if not head_path.exists() and not head_path.is_symlink():
+        return {"present": False}
+    try:
+        raw = _read_nofollow_bytes(head_path)
+    except PrivateArtifactIntegrityError:
+        return {"present": True, "aliased": True}
+    except OSError:
+        return {"present": True, "corrupt": True, "raw": b""}
+    if raw is None:
+        return {"present": False}
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"present": True, "corrupt": True, "raw": raw}
+    if not isinstance(document, dict) or document.get("schema") != _LEGACY_HOOK_SCHEMA:
+        return {"present": True, "corrupt": True, "raw": raw}
+    digest = str(document.get("ciphertext_sha256") or "")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        return {"present": True, "corrupt": True, "raw": raw}
+    object_path = destination / "objects" / f"{digest}.bin"
+    try:
+        envelope = _read_nofollow_bytes(object_path)
+    except (PrivateArtifactIntegrityError, OSError):
+        return {"present": True, "corrupt": True, "raw": raw, "document": document}
+    if envelope is None or hashlib.sha256(envelope).hexdigest() != digest:
+        return {"present": True, "corrupt": True, "raw": raw, "document": document}
+    return {"present": True, "corrupt": False, "raw": raw, "document": document, "envelope": envelope}
+
+
+def _legacy_hook_keys(
+    binding: PrivateArtifactBinding,
+    *,
+    key: bytes | None,
+    key_id: str | None,
+    key_provider: InjectedCaseKeyProvider | None,
+) -> tuple[str, bytes]:
+    return _resolve_key(binding, key=key, key_id=key_id, key_provider=key_provider)
+
+
+def _retire_legacy_source(path: Path, snapshot: Mapping[str, Any], payload: bytes) -> bool:
+    inspected = _inspect_legacy_hook_source(path)
+    if not inspected.get("ok"):
+        return False
+    if inspected["data"] != payload or inspected["dev"] != snapshot["dev"] or inspected["ino"] != snapshot["ino"]:
+        return False
+    if inspected["nlink"] != 1:
+        return False
+    path.unlink()
+    return not path.exists()
+
+
+def preflight_legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str = "retain",
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+) -> dict[str, Any]:
+    """Inspect one caller-selected legacy hook artifact. Writes nothing."""
+
+    return _legacy_hook_migration(
+        source_path,
+        source_preimage=source_preimage,
+        destination=destination,
+        access=access,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        revision=revision,
+        retention_policy=retention_policy,
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        commit=False,
+        interrupt_at=None,
+    )
+
+
+def commit_legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str = "retain",
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+    interrupt_at: str | None = None,
+) -> dict[str, Any]:
+    """Seal one explicit legacy hook artifact, then retire plaintext only if verified.
+
+    ``interrupt_at`` may be ``before_object``, ``before_head``, or ``before_retire``.
+    A mode change or local copy is not a commit.
+    """
+
+    return _legacy_hook_migration(
+        source_path,
+        source_preimage=source_preimage,
+        destination=destination,
+        access=access,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        revision=revision,
+        retention_policy=retention_policy,
+        key=key,
+        key_id=key_id,
+        key_provider=key_provider,
+        commit=True,
+        interrupt_at=interrupt_at,
+    )
+
+
+def open_legacy_hook_artifact(
+    destination: str | Path,
+    *,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    key: bytes | None = None,
+    key_id: str | None = None,
+    key_provider: InjectedCaseKeyProvider | None = None,
+) -> dict[str, Any]:
+    """Open the last valid encrypted head for one destination binding."""
+
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=LEGACY_HOOK_ARTIFACT_CLASS,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    assert_access_matches_binding(access, binding)
+    loaded = _load_legacy_head(Path(destination))
+    if not loaded.get("present") or loaded.get("corrupt") or loaded.get("aliased"):
+        raise PrivateArtifactIntegrityError("corrupt_head" if loaded.get("present") else "head_missing")
+    document = loaded["document"]
+    if str(document.get("case_id") or "") != case_id or str(document.get("revision") or "") != revision:
+        raise PrivateArtifactBindingError("foreign_case")
+    resolved_id, resolved_key = _legacy_hook_keys(binding, key=key, key_id=key_id, key_provider=key_provider)
+    if str(document.get("key_id") or "") != resolved_id:
+        raise PrivateArtifactIntegrityError("authentication_failed")
+    plaintext = open_private_artifact(
+        loaded["envelope"],
+        binding=binding,
+        key=resolved_key,
+        expected_key_id=resolved_id,
+    )
+    return {
+        "status": "available",
+        "data": plaintext,
+        "source_preimage": hashlib.sha256(plaintext).hexdigest(),
+        "verified_commit": document.get("verified_commit") is True,
+        "network_durable": False,
+        "durable": False,
+    }
+
+
+def _legacy_hook_migration(
+    source_path: str | Path,
+    *,
+    source_preimage: str,
+    destination: str | Path,
+    access: Any,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    revision: str,
+    retention_policy: str,
+    key: bytes | None,
+    key_id: str | None,
+    key_provider: InjectedCaseKeyProvider | None,
+    commit: bool,
+    interrupt_at: str | None,
+) -> dict[str, Any]:
+    if interrupt_at not in {None, "before_object", "before_head", "before_retire"}:
+        raise PrivateStorageError("unknown migration interrupt", code="interrupt_at")
+    preimage = _legacy_preimage(source_preimage)
+    _require_label(revision)
+    if retention_policy not in LEGACY_HOOK_RETENTION:
+        raise PrivateKeyMaterialError("retention_policy")
+    binding_record = _legacy_hook_binding(
+        tenant_id=tenant_id, case_id=case_id, principal_id=principal_id, revision=revision,
+    )
+    artifact_binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=LEGACY_HOOK_ARTIFACT_CLASS,
+        revision=revision,
+        principal_id=principal_id,
+    )
+    assert_access_matches_binding(access, artifact_binding)
+
+    def finish(**kwargs: Any) -> dict[str, Any]:
+        return _legacy_hook_receipt(
+            revision=revision,
+            preimage=preimage,
+            binding=binding_record,
+            retention_policy=retention_policy,
+            **kwargs,
+        )
+
+    source = Path(source_path)
+    dest = Path(destination)
+    if source.is_symlink():
+        return finish(status="rejected", code="aliased_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    try:
+        source_resolved = source.resolve()
+        dest_resolved = dest.resolve() if dest.exists() else dest.absolute()
+    except OSError:
+        return finish(status="unavailable", code="destination_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    if source_resolved == dest_resolved or dest_resolved in source_resolved.parents or source_resolved in dest_resolved.parents:
+        return finish(status="rejected", code="source_destination_overlap", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    if dest.is_symlink() or (dest.exists() and not dest.is_dir()):
+        return finish(status="unavailable", code="destination_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=True, last_valid_head_preserved=True, prior_head_present=False,
+                      encryption_established=False)
+    head_before = _load_legacy_head(dest) if dest.exists() else {"present": False}
+    prior = bool(head_before.get("present"))
+    inspected = _inspect_legacy_hook_source(source)
+    source_existed = source.exists() or source.is_symlink()
+    original = inspected.get("data") if inspected.get("ok") else (source.read_bytes() if source.is_file() and not source.is_symlink() else None)
+
+    def preserved() -> bool:
+        if original is None:
+            return not source.exists()
+        if not source.is_file() or source.is_symlink():
+            return False
+        try:
+            return source.read_bytes() == original and source.stat().st_nlink >= 1
+        except OSError:
+            return False
+
+    if head_before.get("aliased"):
+        return finish(status="rejected", code="aliased_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    if not inspected.get("ok"):
+        code = str(inspected.get("code") or "source_missing")
+        status = "rejected" if code in {"aliased_source", "corrupt_source", "empty_source", "preimage_mismatch"} else "pending"
+        if code == "source_missing" and prior and not head_before.get("corrupt"):
+            status = "pending"
+        return finish(status=status, code=code, encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved() if source_existed or original is not None else True,
+                      last_valid_head_preserved=True, prior_head_present=prior, encryption_established=False)
+    payload = bytes(inspected["data"])
+    if hashlib.sha256(payload).hexdigest() != preimage:
+        return finish(status="rejected", code="corrupt_source", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    if head_before.get("corrupt"):
+        return finish(status="rejected", code="corrupt_head", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                      encryption_established=False)
+    try:
+        resolved_id, resolved_key = _legacy_hook_keys(
+            artifact_binding, key=key, key_id=key_id, key_provider=key_provider,
+        )
+    except PrivateCryptoCapabilityError:
+        return finish(status="unavailable", code="private_crypto_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    except PrivateKeyMaterialError as exc:
+        return finish(status="unavailable", code=str(exc.reason or "key_unavailable"), encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+
+    document = head_before.get("document") if head_before.get("present") else None
+    if isinstance(document, dict):
+        same_binding = (
+            document.get("tenant_id") == tenant_id
+            and document.get("case_id") == case_id
+            and document.get("principal_id") == principal_id
+            and document.get("revision") == revision
+            and document.get("artifact_class") == LEGACY_HOOK_ARTIFACT_CLASS
+        )
+        if not same_binding:
+            return finish(status="rejected", code="binding_mismatch", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        if str(document.get("key_id") or "") != resolved_id:
+            return finish(status="rejected", code="wrong_key", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        try:
+            opened = open_private_artifact(
+                head_before["envelope"], binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id,
+            )
+        except PrivateArtifactIntegrityError:
+            return finish(status="rejected", code="wrong_key", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        if opened != payload or str(document.get("source_preimage") or "") != preimage:
+            return finish(status="rejected", code="preimage_mismatch", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                          encryption_established=False)
+        retired = document.get("plaintext_retired") is True and not source.exists()
+        if commit and retention_policy == "retire_plaintext_after_verified_commit" and not retired and interrupt_at != "before_retire":
+            retired = _retire_legacy_source(source, inspected, payload)
+            if retired:
+                updated = dict(document)
+                updated["plaintext_retired"] = True
+                _publish_legacy_head(dest, _json_bytes(updated))
+        retirement = "retired" if retired else ("pending" if retention_policy == "retire_plaintext_after_verified_commit" else "retained")
+        return finish(
+            status="committed" if commit else "preflight",
+            code="",
+            encrypted=True,
+            pending_kind="" if retirement != "pending" else "plaintext_retirement",
+            verified_commit=True,
+            plaintext_retired=retired,
+            plaintext_retirement=retirement,
+            source_bytes_preserved=not retired,
+            last_valid_head_preserved=True,
+            prior_head_present=True,
+            encryption_established=True,
+        )
+
+    if not commit or interrupt_at == "before_object":
+        return finish(
+            status="preflight" if not commit else "interrupted",
+            code="" if not commit else "interrupted",
+            encrypted=False,
+            pending_kind="encryption",
+            verified_commit=False,
+            plaintext_retired=False,
+            plaintext_retirement="retained",
+            source_bytes_preserved=preserved(),
+            last_valid_head_preserved=True,
+            prior_head_present=prior,
+            encryption_established=False,
+        )
+    try:
+        load_aesgcm()
+        envelope = seal_private_artifact(payload, binding=artifact_binding, key=resolved_key, key_id=resolved_id)
+        if open_private_artifact(envelope, binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id) != payload:
+            raise PrivateArtifactIntegrityError("readback_mismatch")
+    except PrivateCryptoCapabilityError:
+        return finish(status="unavailable", code="private_crypto_unavailable", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    digest = hashlib.sha256(envelope).hexdigest()
+    object_path = dest / "objects" / f"{digest}.bin"
+    if not object_path.exists():
+        _write_exclusive(object_path, envelope)
+    else:
+        existing = _read_nofollow_bytes(object_path)
+        if existing != envelope:
+            return finish(status="rejected", code="destination_conflict", encrypted=False, pending_kind="encryption",
+                          verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                          source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                          encryption_established=False)
+    if interrupt_at == "before_head":
+        return finish(status="interrupted", code="interrupted", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    head_document = {
+        "schema": _LEGACY_HOOK_SCHEMA,
+        "schema_version": 1,
+        "artifact_class": LEGACY_HOOK_ARTIFACT_CLASS,
+        "tenant_id": tenant_id,
+        "case_id": case_id,
+        "principal_id": principal_id,
+        "revision": revision,
+        "source_preimage": preimage,
+        "ciphertext_sha256": digest,
+        "key_id": resolved_id,
+        "verified_commit": True,
+        "plaintext_retired": False,
+    }
+    _publish_legacy_head(dest, _json_bytes(head_document))
+    reread = _load_legacy_head(dest)
+    if reread.get("corrupt") or reread.get("envelope") != envelope:
+        return finish(status="rejected", code="readback_mismatch", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=prior,
+                      encryption_established=False)
+    confirmed = open_private_artifact(reread["envelope"], binding=artifact_binding, key=resolved_key, expected_key_id=resolved_id)
+    if confirmed != payload or not preserved():
+        return finish(status="rejected", code="readback_mismatch", encrypted=False, pending_kind="encryption",
+                      verified_commit=False, plaintext_retired=False, plaintext_retirement="retained",
+                      source_bytes_preserved=preserved(), last_valid_head_preserved=True, prior_head_present=True,
+                      encryption_established=False)
+    retired = False
+    if retention_policy == "retire_plaintext_after_verified_commit" and interrupt_at != "before_retire":
+        retired = _retire_legacy_source(source, inspected, payload)
+        if retired:
+            head_document["plaintext_retired"] = True
+            _publish_legacy_head(dest, _json_bytes(head_document))
+    retirement = "retired" if retired else ("pending" if retention_policy == "retire_plaintext_after_verified_commit" else "retained")
+    return finish(
+        status="committed",
+        code="",
+        encrypted=True,
+        pending_kind="" if retirement != "pending" else "plaintext_retirement",
+        verified_commit=True,
+        plaintext_retired=retired,
+        plaintext_retirement=retirement,
+        source_bytes_preserved=not retired,
+        last_valid_head_preserved=True,
+        prior_head_present=prior,
+        encryption_established=True,
+    )
+
+
 def assert_store_isolated_from_exports(store_dir: str | Path, export_dir: str | Path) -> None:
     """Refuse to keep a key store inside or next to an encrypted export directory."""
 
@@ -6179,6 +7636,11 @@ __all__ = [
     "retrieve_private_artifact",
     "seal_private_artifact",
     "store_private_artifact",
+    "RESOURCE_GRANT_SCHEMA",
+    "RESOURCE_GRANT_VERSION",
+    "resource_grant_associated_data",
+    "wrap_resource_key_for_recipient",
+    "unwrap_resource_key_for_recipient",
     "KEY_STORE_SCHEMA",
     "KEY_RECOVERY_SCHEMA",
     "PrivateKeyLockedError",
@@ -6227,4 +7689,1360 @@ __all__ = [
     "read_case_tombstone",
     "record_managed_replica",
     "write_case_local_private_file",
+    "LEGACY_HOOK_ARTIFACT_CLASS",
+    "LEGACY_HOOK_RETENTION",
+    "preflight_legacy_hook_migration",
+    "commit_legacy_hook_migration",
+    "open_legacy_hook_artifact",
+    "legacy_hook_migration_claim",
+    "DURABILITY_STATES",
+    "verify_ciphertext_durability",
+    "CiphertextDurabilityError",
+    "KitLocalCiphertextBackend",
+    "PRIVATE_RECORD_KINDS",
+    "MAX_BOUND_RECOVERY_ATTEMPTS",
+    "BoundPrivateRecordError",
+    "commit_private_bound_record",
+    "stage_interrupted_bound_record",
+    "open_private_bound_record",
+    "recover_private_bound_records",
+    "qualify_content_address",
 ]
+
+
+# Ciphertext durability is four observations. A local manifest commit, a queued
+# replication acknowledgement, and a pin are never a verified replica. Only a
+# Kit readback of the same ciphertext bytes can set durable. A CID string or a
+# public gateway URL is not evidence.
+
+DURABILITY_STATE_LOCAL_COMMIT = "local_commit"
+DURABILITY_STATE_QUEUED_REPLICATION = "queued_replication"
+DURABILITY_STATE_PIN = "pin"
+DURABILITY_STATE_VERIFIED_REPLICA = "verified_replica"
+DURABILITY_STATES = (
+    DURABILITY_STATE_LOCAL_COMMIT,
+    DURABILITY_STATE_QUEUED_REPLICATION,
+    DURABILITY_STATE_PIN,
+    DURABILITY_STATE_VERIFIED_REPLICA,
+)
+_GATEWAY_MARKERS = (
+    "ipfs.io",
+    "gateway.ipfs",
+    "dweb.link",
+    "cloudflare-ipfs.com",
+    "ipfs.tech/ipfs",
+    "https://",
+    "http://",
+)
+
+
+class CiphertextDurabilityError(PrivateStorageError):
+    """Kit durability could not be shown from ciphertext readback."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def _kit_replica_contract():
+    """Load the current Kit replica vocabulary. A missing contract is a failure."""
+
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.core.replication.contracts import (
+            NON_DURABLE_REPLICA_STATES,
+            ReplicaState,
+        )
+    except Exception as exc:
+        raise CiphertextDurabilityError("kit_contracts_unavailable") from exc
+    if ReplicaState.QUEUED not in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    if ReplicaState.VERIFIED in NON_DURABLE_REPLICA_STATES:
+        raise CiphertextDurabilityError("kit_contracts_unavailable")
+    return ReplicaState
+
+
+def _reject_public_gateway(value: Any) -> None:
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _reject_public_gateway(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_public_gateway(item)
+
+
+def _kit_call(kit: Any, name: str, *args: Any) -> Any:
+    method = getattr(kit, name, None)
+    if not callable(method):
+        raise CiphertextDurabilityError(f"kit_{name}_unavailable")
+    try:
+        result = method(*args)
+    except CiphertextDurabilityError:
+        raise
+    except Exception as exc:
+        raise CiphertextDurabilityError(f"kit_{name}_failed") from exc
+    _reject_public_gateway(result if not isinstance(result, (bytes, bytearray)) else "")
+    return result
+
+
+def _ciphertext_commit_reference(result: Mapping[str, Any]) -> str:
+    ref = result.get("ref") or result.get("locator")
+    if isinstance(ref, str) and ref.strip() and ref == ref.strip() and len(ref) <= 200:
+        if any(marker in ref.lower() for marker in _GATEWAY_MARKERS):
+            raise CiphertextDurabilityError("public_gateway_rejected")
+        return ref
+    cid = result.get("cid")
+    if isinstance(cid, str) and cid.strip() and "://" not in cid and len(cid) <= 200:
+        return cid
+    raise CiphertextDurabilityError("kit_ref_rejected")
+
+
+def verify_ciphertext_durability(kit: Any, envelope: bytes) -> dict[str, Any]:
+    """Commit, queue, pin, and read back one ciphertext through a Kit owner.
+
+    ``durable`` is true only when ``readback`` returns the same bytes that
+    ``manifest`` accepted. Queued replication and pin stay distinct and
+    non-durable. Public gateway URLs are rejected. A CID is not proof.
+    """
+
+    if not isinstance(envelope, (bytes, bytearray)) or not bytes(envelope).startswith(ENVELOPE_MAGIC):
+        raise CiphertextDurabilityError("ciphertext_required")
+    payload = bytes(envelope)
+    replica_state = _kit_replica_contract()
+    states: list[dict[str, Any]] = []
+
+    def _record(state: str, *, ref: str, kit_state: str) -> None:
+        if state not in DURABILITY_STATES or any(item["state"] == state for item in states):
+            raise CiphertextDurabilityError("durability_state_collision")
+        states.append({
+            "state": state,
+            "ref": ref,
+            "kit_replica_state": kit_state,
+            "durable": False,
+            "counts_as_verified_replica": False,
+        })
+
+    manifest = _kit_call(kit, "manifest", payload)
+    if not isinstance(manifest, Mapping):
+        raise CiphertextDurabilityError("kit_manifest_failed")
+    ref = _ciphertext_commit_reference(manifest)
+    _record(DURABILITY_STATE_LOCAL_COMMIT, ref=ref, kit_state="local_commit")
+
+    queued = _kit_call(kit, "queue_replication", ref)
+    if not isinstance(queued, Mapping):
+        raise CiphertextDurabilityError("kit_queue_replication_failed")
+    _record(
+        DURABILITY_STATE_QUEUED_REPLICATION,
+        ref=ref,
+        kit_state=replica_state.QUEUED.value,
+    )
+
+    pinned = _kit_call(kit, "pin", ref)
+    if not isinstance(pinned, Mapping) or pinned.get("pinned") is not True:
+        raise CiphertextDurabilityError("kit_pin_failed")
+    _record(DURABILITY_STATE_PIN, ref=ref, kit_state="pin")
+
+    loaded = _kit_call(kit, "readback", ref)
+    matched = isinstance(loaded, (bytes, bytearray)) and bytes(loaded) == payload
+    if matched:
+        _record(
+            DURABILITY_STATE_VERIFIED_REPLICA,
+            ref=ref,
+            kit_state=replica_state.VERIFIED.value,
+        )
+        states[-1]["counts_as_verified_replica"] = True
+        states[-1]["durable"] = True
+    observed = [item["state"] for item in states]
+    if observed[:3] != list(DURABILITY_STATES[:3]):
+        raise CiphertextDurabilityError("durability_state_collision")
+    if len(set(observed)) != len(observed):
+        raise CiphertextDurabilityError("durability_state_collision")
+    return {
+        "states": states,
+        "state_names": observed,
+        "durable": matched and observed[-1] == DURABILITY_STATE_VERIFIED_REPLICA,
+        "readback_matched": matched,
+        "ciphertext_sha256": hashlib.sha256(payload).hexdigest(),
+        "byte_length": len(payload),
+        "ref": ref,
+        "public_gateway_consulted": False,
+        "cid_inference": False,
+        "pin_is_durable": False,
+        "queued_replication_is_durable": False,
+        "local_commit_is_durable": False,
+        "code": "" if matched else "readback_mismatch",
+    }
+
+
+# Evidence, annotations, classification revisions, and linkage records share one
+# bound ciphertext path. Actual Kit AES-GCM output preserves the Host header
+# and associated data. Actual Kit filesystem commits and verified disk readback
+# qualify local durability; no remote producer is currently qualified here. A content hash, a queued acknowledgement, a local file, and a
+# caller success flag are not remote durability and are not encryption.
+
+PRIVATE_RECORD_KINDS = (
+    "evidence",
+    "annotation",
+    "classification_revision",
+    "linkage",
+)
+MAX_BOUND_RECOVERY_ATTEMPTS = 3
+_MAX_BOUND_PLAINTEXT = 256 * 1024
+_RECORD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,63}$")
+_FORBIDDEN_BOUND_RECEIPT = frozenset({
+    "success",
+    "cid",
+    "plaintext",
+    "key",
+    "data_key",
+    "master_key",
+    "private_key",
+    "wrapped_key",
+})
+
+
+class BoundPrivateRecordError(PrivateStorageError):
+    """A bound private record could not be sealed, qualified, or recovered."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def qualify_content_address(digest: str) -> dict[str, Any]:
+    """A content hash is an address, not an encrypted or durable record."""
+
+    if not isinstance(digest, str) or not digest.strip():
+        raise BoundPrivateRecordError("content_address_rejected")
+    return {
+        "encrypted": False,
+        "local_durable": False,
+        "remote_durable": False,
+        "counts_toward_desired": False,
+        "queued_can_claim_committed": False,
+        "content_address_is_encryption": False,
+        "plaintext_fallback": False,
+        "code": "content_address_is_not_encryption",
+    }
+
+
+def _require_record_id(record_id: str) -> str:
+    if not isinstance(record_id, str) or _RECORD_ID_RE.fullmatch(record_id) is None:
+        raise BoundPrivateRecordError("record_id_rejected")
+    return record_id
+
+
+def _require_record_kind(kind: str, binding: PrivateArtifactBinding) -> str:
+    if kind not in PRIVATE_RECORD_KINDS:
+        raise BoundPrivateRecordError("record_kind_rejected")
+    if not isinstance(binding, PrivateArtifactBinding) or binding.artifact_kind != kind:
+        raise BoundPrivateRecordError("binding_kind_mismatch")
+    return kind
+
+
+def _bound_root(root: str | Path) -> Path:
+    path = Path(root)
+    if path.is_symlink():
+        raise BoundPrivateRecordError("symlink_rejected")
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    for name in ("journal", "objects", "staging"):
+        child = path / name
+        if child.is_symlink():
+            raise BoundPrivateRecordError("symlink_rejected")
+        child.mkdir(exist_ok=True)
+        os.chmod(child, 0o700)
+    return path
+
+
+def _journal_path(root: Path, record_id: str) -> Path:
+    return root / "journal" / record_id
+
+
+def _staging_path(root: Path, record_id: str) -> Path:
+    return root / "staging" / record_id
+
+
+def _object_path(root: Path, content_ref: str) -> Path:
+    if "/" in content_ref or content_ref.startswith("."):
+        raise BoundPrivateRecordError("content_ref_rejected")
+    return root / "objects" / content_ref
+
+
+def _write_private_file(path: Path, payload: bytes) -> None:
+    if path.is_symlink():
+        raise BoundPrivateRecordError("symlink_rejected")
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    os.chmod(path, 0o600)
+    directory = path.parent
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _read_private_file(path: Path) -> bytes | None:
+    if not path.exists() or path.is_symlink() or not path.is_file():
+        return None
+    return path.read_bytes()
+
+
+def _content_ref(envelope: bytes) -> str:
+    return "ct." + hashlib.sha256(envelope).hexdigest()
+
+
+def _load_journal(path: Path) -> dict[str, Any] | None:
+    raw = _read_private_file(path)
+    if raw is None:
+        return None
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BoundPrivateRecordError("journal_malformed") from exc
+    if not isinstance(document, dict):
+        raise BoundPrivateRecordError("journal_malformed")
+    return document
+
+
+def _store_journal(path: Path, document: Mapping[str, Any]) -> None:
+    _write_private_file(path, json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def _binding_document(binding: PrivateArtifactBinding) -> dict[str, str]:
+    return {
+        "tenant_id": binding.tenant_id,
+        "case_id": binding.case_id,
+        "artifact_kind": binding.artifact_kind,
+        "revision": binding.revision,
+        "principal_id": binding.principal_id,
+    }
+
+
+def _binding_from_document(document: Mapping[str, Any]) -> PrivateArtifactBinding:
+    try:
+        return PrivateArtifactBinding(
+            tenant_id=str(document["tenant_id"]),
+            case_id=str(document["case_id"]),
+            artifact_kind=str(document["artifact_kind"]),
+            revision=str(document["revision"]),
+            principal_id=str(document["principal_id"]),
+        )
+    except (KeyError, TypeError, PrivateArtifactBindingError) as exc:
+        raise BoundPrivateRecordError("journal_malformed") from exc
+
+
+def _seal_kit_bound_envelope(
+    plaintext: bytes,
+    *,
+    key: bytes,
+    key_id: str,
+    binding: PrivateArtifactBinding,
+) -> bytes:
+    """Use actual Kit AES-GCM output in the existing opaque Host envelope."""
+
+    if not isinstance(key_id, str) or not key_id.strip():
+        raise BoundPrivateRecordError("ambient_key_rejected")
+    _prefer_vendored_kit()
+    try:
+        from datetime import datetime, timezone
+
+        from ipfs_kit_py.mcp.enterprise.encryption import (
+            EncryptionAlgorithm,
+            EncryptionKey,
+            EncryptionManager,
+            KeyManager,
+            KeyStorageType,
+            KeyType,
+        )
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_encryption_unavailable") from exc
+    key_bytes = _require_data_key(key)
+    key_id_raw = _require_key_id(key_id)
+    header = ENVELOPE_MAGIC + bytes((SCHEMA_VERSION, len(key_id_raw))) + key_id_raw
+    associated = _envelope_associated_data(binding, header)
+    manager_key = KeyManager(storage_type=KeyStorageType.MEMORY)
+    manager_key._key_metadata[key_id] = EncryptionKey(
+        id=key_id,
+        type=KeyType.DATA,
+        algorithm=EncryptionAlgorithm.AES_256_GCM,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    manager_key._store_key_material(key_id, key_bytes)
+    try:
+        encrypted = EncryptionManager(manager_key).encrypt(
+            plaintext,
+            key_id=key_id,
+            algorithm=EncryptionAlgorithm.AES_256_GCM,
+            additional_authenticated_data=associated,
+        )
+        opened = EncryptionManager(manager_key).decrypt(encrypted)
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_encryption_failed") from exc
+    finally:
+        manager_key._key_cache.pop(key_id, None)
+        manager_key._key_metadata.pop(key_id, None)
+    nonce, ciphertext, tag = encrypted.initialization_vector, encrypted.encrypted_data, encrypted.auth_tag
+    if (opened != plaintext or not isinstance(nonce, bytes) or len(nonce) != NONCE_BYTES
+            or not isinstance(ciphertext, bytes) or len(ciphertext) != len(plaintext)
+            or not isinstance(tag, bytes) or len(tag) != TAG_BYTES
+            or encrypted.additional_authenticated_data != associated):
+        raise BoundPrivateRecordError("kit_encryption_failed")
+    # Persist no rich Kit object, original-size field, key, or binding metadata.
+    envelope = header + nonce + ciphertext + tag
+    if open_private_artifact(envelope, binding=binding, key=key_bytes, expected_key_id=key_id) != plaintext:
+        raise BoundPrivateRecordError("kit_encryption_failed")
+    return envelope
+
+
+def _queued_cannot_claim_committed() -> bool:
+    _prefer_vendored_kit()
+    from ipfs_kit_py.core.wal.contracts import (
+        WALAcknowledgementError,
+        WALAcknowledgementMode,
+        WALRecordState,
+        assert_ack_allows_state,
+    )
+
+    try:
+        assert_ack_allows_state(WALAcknowledgementMode.QUEUED, WALRecordState.COMMITTED)
+    except WALAcknowledgementError:
+        return True
+    return False
+
+
+
+def _receipt(
+    *,
+    record_id: str,
+    kind: str,
+    key_id: str,
+    local_durable: bool,
+    remote_durable: bool,
+    counts_toward_desired: bool,
+    placement_intents: int,
+    recovery_attempts: int,
+    phase: str,
+    code: str,
+) -> dict[str, Any]:
+    if not _queued_cannot_claim_committed():
+        raise BoundPrivateRecordError("queued_claimed_committed")
+    receipt = {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "phase": phase,
+        "local_durable": local_durable,
+        "remote_durable": remote_durable,
+        "counts_toward_desired": counts_toward_desired,
+        "placement_intents": placement_intents,
+        "recovery_attempts": recovery_attempts,
+        "queued_can_claim_committed": False,
+        "local_write_is_remote_durable": False,
+        "content_address_is_encryption": False,
+        "plaintext_fallback": False,
+        "code": code,
+    }
+    leaked = _FORBIDDEN_BOUND_RECEIPT.intersection(receipt)
+    if leaked:
+        raise BoundPrivateRecordError("receipt_leaked")
+    return receipt
+
+
+def _seal_bound_record(
+    plaintext: bytes,
+    *,
+    kind: str,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+) -> tuple[bytes, str]:
+    _require_record_kind(kind, binding)
+    if not isinstance(plaintext, (bytes, bytearray)) or not plaintext or len(plaintext) > _MAX_BOUND_PLAINTEXT:
+        raise BoundPrivateRecordError("plaintext_rejected")
+    if not isinstance(key_id, str) or not key_id.strip() or len(key_id) > 80:
+        raise BoundPrivateRecordError("ambient_key_rejected")
+    envelope = _seal_kit_bound_envelope(bytes(plaintext), key=key, key_id=key_id, binding=binding)
+    if plaintext in envelope:
+        raise BoundPrivateRecordError("plaintext_fallback")
+    return envelope, _content_ref(envelope)
+
+
+def stage_interrupted_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    kind: str,
+    plaintext: bytes,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+) -> dict[str, Any]:
+    """Seal and stage a record without publishing it. Recovery is still bounded."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    journal = _journal_path(directory, record_id)
+    if journal.exists():
+        raise BoundPrivateRecordError("record_exists")
+    envelope, content_ref = _seal_bound_record(
+        plaintext, kind=kind, binding=binding, key=key, key_id=key_id,
+    )
+    _write_private_file(_staging_path(directory, record_id), envelope)
+    _store_journal(journal, {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "content_ref": content_ref,
+        "attempts": 0,
+        "phase": "staged",
+        "binding": _binding_document(binding),
+    })
+    return _receipt(
+        record_id=record_id,
+        kind=kind,
+        key_id=key_id,
+        local_durable=False,
+        remote_durable=False,
+        counts_toward_desired=False,
+        placement_intents=0,
+        recovery_attempts=0,
+        phase="staged",
+        code="staged_not_durable",
+    )
+
+
+def _bound_kit_types():
+    _prefer_vendored_kit()
+    try:
+        from ipfs_kit_py.assurance.local_durable import LiveLocalFilesystemAdapter, LiveLocalResult
+        from ipfs_kit_py.core.operation_contracts import DurabilityMode, OperationState
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_durability_unavailable") from exc
+    return LiveLocalFilesystemAdapter, LiveLocalResult, DurabilityMode, OperationState
+
+
+def _read_kit_bound_envelope(root: Path, content_ref: str) -> bytes:
+    adapter_type, result_type, _durability_mode, states = _bound_kit_types()
+    adapter = None
+    try:
+        # The private content reference is a path locator, never a public CID.
+        _object_path(root, content_ref)
+        adapter = adapter_type.reopen(root)
+        result = adapter.get(content_ref, deadline=time.monotonic() + 5.0)
+        if (type(result) is not result_type or result.state is not states.ACCEPTED
+                or not result.success or _content_ref(result.data) != content_ref
+                or result.resulting_content_cid != adapter_type.content_cid(result.data)):
+            raise BoundPrivateRecordError("record_unavailable")
+        return result.data
+    except BoundPrivateRecordError:
+        raise
+    except Exception as exc:
+        raise BoundPrivateRecordError("record_unavailable") from exc
+    finally:
+        if adapter is not None:
+            adapter.close()
+
+
+def _commit_kit_ciphertext(root: Path, content_ref: str, payload: bytes, *, create: bool) -> str:
+    """Require an actual Kit local commit and verified disk reconstruction."""
+    adapter_type, result_type, durability_mode, states = _bound_kit_types()
+    adapter = None
+    try:
+        adapter = adapter_type(root) if create else adapter_type.reopen(root)
+        deadline = time.monotonic() + 5.0
+        committed = adapter.put(content_ref, payload, deadline=deadline)
+        result = committed.canonical_result
+        durability = result.durability
+        if (type(committed) is not result_type or committed.state is not states.COMMITTED
+                or not committed.success or durability is None
+                or durability.mode is not durability_mode.BACKEND_DURABLE
+                or not durability.backend_ack_id or not result.effect_evidence
+                or set(durability.effect_evidence_ids) != {effect.evidence_id for effect in result.effect_evidence}
+                or any(effect.backend_id != adapter.backend_id for effect in result.effect_evidence)):
+            raise BoundPrivateRecordError("kit_durability_unproven")
+        expected_cid = adapter_type.content_cid(payload)
+        for observed in (committed, adapter.get(content_ref, deadline=deadline), adapter.digest(content_ref, deadline=deadline)):
+            if (type(observed) is not result_type or not observed.success
+                    or observed.resulting_content_cid != expected_cid):
+                raise BoundPrivateRecordError("kit_durability_unproven")
+            if observed is not committed and observed.data != payload:
+                raise BoundPrivateRecordError("kit_durability_unproven")
+    except BoundPrivateRecordError:
+        raise
+    except Exception as exc:
+        raise BoundPrivateRecordError("kit_durability_unproven") from exc
+    finally:
+        if adapter is not None:
+            adapter.close()
+    if _read_kit_bound_envelope(root, content_ref) != payload:
+        raise BoundPrivateRecordError("kit_durability_unproven")
+    return expected_cid
+
+
+def _publish_local(root: Path, record_id: str, content_ref: str) -> bool:
+    staged = _read_private_file(_staging_path(root, record_id))
+    if staged is None or _content_ref(staged) != content_ref:
+        return False
+    try:
+        _commit_kit_ciphertext(root, content_ref, staged, create=True)
+        return True
+    except BoundPrivateRecordError as exc:
+        if exc.code == "kit_durability_unavailable":
+            raise
+        return False
+
+
+class KitLocalCiphertextBackend:
+    """Explicit local Kit byte owner for already sealed Host artifacts.
+
+    The existing EvidenceWorkspace owns catalog, versions, authorization and
+    keys. This adapter adds no catalog, wallet, fallback, network pin or remote
+    claim. Its required root stores only opaque envelopes and Kit metadata.
+    """
+
+    backend_name = "kit-local-ciphertext"
+
+    def __init__(self, root: str | Path, *, create: bool = True) -> None:
+        self._root = Path(root)
+        self._closed = False
+        if self._root.is_symlink():
+            raise BoundPrivateRecordError("symlink_rejected")
+        if create:
+            self._root.mkdir(parents=True, exist_ok=True)
+            os.chmod(self._root, 0o700)
+        adapter_type, _result_type, _durability_mode, _states = _bound_kit_types()
+        try:
+            adapter = adapter_type(self._root) if create else adapter_type.reopen(self._root)
+            adapter.close()
+        except Exception as exc:
+            raise BoundPrivateRecordError("kit_durability_unavailable") from exc
+
+    @classmethod
+    def reopen(cls, root: str | Path) -> "KitLocalCiphertextBackend":
+        return cls(root, create=False)
+
+    @staticmethod
+    def _locator(cid: str) -> str:
+        # Kit's raw CIDv1 uses sha2-256. Derive its private path rather than
+        # assuming the CID itself is a filesystem locator or keeping a map in RAM.
+        try:
+            if not isinstance(cid, str) or not cid.startswith("b"):
+                raise ValueError("not a raw CID")
+            encoded = cid[1:]
+            raw = base64.b32decode(encoded.upper() + "=" * ((-len(encoded)) % 8))
+            canonical = "b" + base64.b32encode(raw).decode("ascii").rstrip("=").lower()
+            if len(raw) != 36 or raw[:4] != b"\x01\x55\x12\x20" or canonical != cid:
+                raise ValueError("unsupported CID")
+        except Exception as exc:
+            raise BoundPrivateRecordError("content_ref_rejected") from exc
+        return "ct." + raw[4:].hex()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise BoundPrivateRecordError("kit_durability_unavailable")
+
+    def add(self, data: bytes, pin: bool = True) -> dict[str, Any]:
+        self._require_open()
+        if not isinstance(data, bytes):
+            raise BoundPrivateRecordError("ciphertext_required")
+        parse_private_envelope(data)
+        cid = _commit_kit_ciphertext(self._root, _content_ref(data), data, create=False)
+        # A genuine local commit never implies an IPFS pin or remote replica.
+        return {"cid": cid, "status": "available", "pinned": False}
+
+    def cat(self, cid: str) -> bytes:
+        self._require_open()
+        payload = _read_kit_bound_envelope(self._root, self._locator(cid))
+        parse_private_envelope(payload)
+        return payload
+
+    def close(self) -> None:
+        self._closed = True
+
+
+def commit_private_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    kind: str,
+    plaintext: bytes,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+    key_id: str,
+    remote_backend: Any | None = None,
+) -> dict[str, Any]:
+    """Qualify a Kit local commit. Arbitrary remote byte echoes stay unqualified."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    journal = _journal_path(directory, record_id)
+    if journal.exists():
+        raise BoundPrivateRecordError("record_exists")
+    envelope, content_ref = _seal_bound_record(
+        plaintext, kind=kind, binding=binding, key=key, key_id=key_id,
+    )
+    _write_private_file(_staging_path(directory, record_id), envelope)
+    document = {
+        "record_id": record_id,
+        "kind": kind,
+        "key_id": key_id,
+        "content_ref": content_ref,
+        "attempts": 1,
+        "phase": "staged",
+        "binding": _binding_document(binding),
+    }
+    _store_journal(journal, document)
+    local_ok = _publish_local(directory, record_id, content_ref)
+    if local_ok:
+        document["phase"] = "verified"
+        _store_journal(journal, document)
+    # No remote producer with an authenticated durability contract is installed
+    # on this API. A queued acknowledgement, put/get echo, caller capability,
+    # or even a second local adapter cannot establish a remote replica. Do not
+    # invoke an unqualified backend or synthesize VERIFIED observations for it.
+    remote_requested = remote_backend is not None
+    code = "remote_unqualified" if remote_requested else ""
+    if not local_ok:
+        code = "readback_mismatch"
+    return _receipt(
+        record_id=record_id,
+        kind=kind,
+        key_id=key_id,
+        local_durable=local_ok,
+        remote_durable=False,
+        counts_toward_desired=bool(local_ok and not remote_requested),
+        placement_intents=0,
+        recovery_attempts=1,
+        phase="verified" if local_ok else "staged",
+        code=code,
+    )
+
+
+def open_private_bound_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    binding: PrivateArtifactBinding,
+    key: bytes,
+) -> bytes:
+    """Open a published record. A missing or staged object is not plaintext."""
+
+    record_id = _require_record_id(record_id)
+    directory = _bound_root(root)
+    document = _load_journal(_journal_path(directory, record_id))
+    if document is None or document.get("phase") != "verified":
+        raise BoundPrivateRecordError("record_unavailable")
+    expected = _binding_from_document(document.get("binding") or {})
+    if _binding_document(expected) != _binding_document(binding):
+        raise BoundPrivateRecordError("binding_mismatch")
+    content_ref = str(document.get("content_ref") or "")
+    envelope = _read_kit_bound_envelope(directory, content_ref)
+    try:
+        return open_private_artifact(
+            envelope,
+            binding=binding,
+            key=key,
+            expected_key_id=str(document.get("key_id") or ""),
+        )
+    except PrivateKeyMaterialError as exc:
+        raise BoundPrivateRecordError("key_unavailable") from exc
+    except PrivateArtifactIntegrityError as exc:
+        raise BoundPrivateRecordError("authentication_failed") from exc
+
+
+def recover_private_bound_records(
+    root: str | Path,
+    *,
+    key: bytes,
+    bindings: Mapping[str, PrivateArtifactBinding],
+    max_attempts: int = MAX_BOUND_RECOVERY_ATTEMPTS,
+) -> dict[str, Any]:
+    """Promote staged ciphertext within a fixed attempt budget. Never invent bytes."""
+
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 8:
+        raise BoundPrivateRecordError("recovery_bound_rejected")
+    directory = _bound_root(root)
+    promoted: list[str] = []
+    exhausted: list[str] = []
+    unavailable: list[str] = []
+    for path in sorted((directory / "journal").iterdir()):
+        if not path.is_file() or path.is_symlink():
+            continue
+        document = _load_journal(path)
+        if document is None:
+            continue
+        record_id = str(document.get("record_id") or "")
+        if document.get("phase") == "verified":
+            continue
+        attempts = document.get("attempts")
+        if isinstance(attempts, bool) or not isinstance(attempts, int):
+            raise BoundPrivateRecordError("journal_malformed")
+        if attempts >= max_attempts:
+            exhausted.append(record_id)
+            continue
+        attempts += 1
+        document["attempts"] = attempts
+        binding = bindings.get(record_id)
+        content_ref = str(document.get("content_ref") or "")
+        staged = _read_private_file(_staging_path(directory, record_id))
+        matched = staged is not None and _content_ref(staged) == content_ref
+        if binding is None or not matched or attempts > max_attempts:
+            _store_journal(path, document)
+            if attempts >= max_attempts:
+                exhausted.append(record_id)
+            else:
+                unavailable.append(record_id)
+            continue
+        stored = _binding_from_document(document.get("binding") or {})
+        if _binding_document(stored) != _binding_document(binding):
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        if not _publish_local(directory, record_id, content_ref):
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        document["phase"] = "verified"
+        _store_journal(path, document)
+        try:
+            open_private_bound_record(directory, record_id=record_id, binding=binding, key=key)
+        except BoundPrivateRecordError:
+            document["phase"] = "staged"
+            _store_journal(path, document)
+            unavailable.append(record_id)
+            continue
+        promoted.append(record_id)
+    return {
+        "promoted": promoted,
+        "exhausted": exhausted,
+        "unavailable": unavailable,
+        "max_attempts": max_attempts,
+        "plaintext_fallback": False,
+        "queued_can_claim_committed": False,
+    }
+
+
+_SCOPE_LEDGER = "scope-ledger.json"
+
+
+def _scope_ledger_path(root: Path) -> Path:
+    return root / _SCOPE_LEDGER
+
+
+def _load_scope_ledger(root: Path) -> dict[str, Any]:
+    path = _scope_ledger_path(root)
+    if not path.exists():
+        return {"revisions": {}}
+    raw = _read_private_bytes(path)
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BoundPrivateRecordError("source_integrity") from exc
+    revisions = document.get("revisions") if isinstance(document, dict) else None
+    if not isinstance(revisions, dict):
+        raise BoundPrivateRecordError("source_integrity")
+    return {"revisions": revisions}
+
+
+def _store_scope_ledger(root: Path, document: Mapping[str, Any]) -> None:
+    _write_private_bytes(_scope_ledger_path(root), json.dumps(document, sort_keys=True).encode("utf-8"), protect_parent=True)
+
+
+def probe_kit_evidence_capability() -> dict[str, Any]:
+    """Ask the pinned Kit local owner and AES-GCM stack before any write."""
+
+    if not cryptography_available():
+        return {"available": False, "code": "missing_capability", "owner": "cryptography.hazmat.primitives.ciphers.aead.AESGCM"}
+    try:
+        _bound_kit_types()
+    except BoundPrivateRecordError:
+        return {"available": False, "code": "missing_capability", "owner": "ipfs_kit_py.assurance.local_durable.LiveLocalFilesystemAdapter"}
+    return {
+        "available": True,
+        "code": "available",
+        "owner": "ipfs_kit_py.assurance.local_durable.LiveLocalFilesystemAdapter",
+        "plaintext_fallback": False,
+    }
+
+
+def commit_scoped_kit_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    kind: str,
+    plaintext: bytes,
+    binding: PrivateArtifactBinding,
+    key: bytes | None,
+    key_id: str,
+    source_sha256: str,
+    key_locked: bool = False,
+) -> dict[str, Any]:
+    """Seal one case-scoped record only after Kit and the source hash agree.
+
+    A locked key, a hash mismatch, or a revision that already names different
+    bytes refuses before a new envelope is published. The ledger stores hashes
+    and record ids, never plaintext.
+    """
+
+    directory = _bound_root(root)
+    if key_locked or key is None:
+        raise BoundPrivateRecordError("key_locked")
+    if not isinstance(plaintext, (bytes, bytearray)) or not plaintext:
+        raise BoundPrivateRecordError("source_integrity")
+    payload = bytes(plaintext)
+    digest = hashlib.sha256(payload).hexdigest()
+    if not isinstance(source_sha256, str) or source_sha256 != digest:
+        raise BoundPrivateRecordError("source_integrity")
+    capability = probe_kit_evidence_capability()
+    if capability["available"] is not True:
+        raise BoundPrivateRecordError("missing_capability")
+    record_id = _require_record_id(record_id)
+    _require_record_kind(kind, binding)
+    ledger = _load_scope_ledger(directory)
+    prior = ledger["revisions"].get(binding.revision)
+    if isinstance(prior, dict):
+        if prior.get("sha256") != digest or prior.get("record_id") != record_id or prior.get("kind") != kind:
+            raise BoundPrivateRecordError("conflicting_revision")
+        opened = open_private_bound_record(directory, record_id=record_id, binding=binding, key=key)
+        if hashlib.sha256(opened).hexdigest() != digest:
+            raise BoundPrivateRecordError("source_integrity")
+        return {
+            "status": "qualified",
+            "code": "replayed",
+            "record_id": record_id,
+            "kind": kind,
+            "revision": binding.revision,
+            "source_sha256": digest,
+            "local_durable": True,
+            "remote_durable": False,
+            "plaintext_fallback": False,
+            "plaintext_persisted": False,
+            "kit_owner": capability["owner"],
+        }
+    receipt = commit_private_bound_record(
+        directory,
+        record_id=record_id,
+        kind=kind,
+        plaintext=payload,
+        binding=binding,
+        key=key,
+        key_id=key_id,
+    )
+    if receipt.get("local_durable") is not True:
+        raise BoundPrivateRecordError(str(receipt.get("code") or "missing_capability"))
+    opened = open_private_bound_record(directory, record_id=record_id, binding=binding, key=key)
+    if opened != payload:
+        raise BoundPrivateRecordError("source_integrity")
+    ledger["revisions"][binding.revision] = {
+        "sha256": digest,
+        "record_id": record_id,
+        "kind": kind,
+        "case_id": binding.case_id,
+        "principal_id": binding.principal_id,
+    }
+    _store_scope_ledger(directory, ledger)
+    return {
+        "status": "qualified",
+        "code": "committed",
+        "record_id": record_id,
+        "kind": kind,
+        "revision": binding.revision,
+        "source_sha256": digest,
+        "local_durable": True,
+        "remote_durable": False,
+        "plaintext_fallback": False,
+        "plaintext_persisted": False,
+        "kit_owner": capability["owner"],
+        "content_address_is_encryption": False,
+    }
+
+
+def open_scoped_kit_record(
+    root: str | Path,
+    *,
+    record_id: str,
+    binding: PrivateArtifactBinding,
+    key: bytes | None,
+    key_locked: bool = False,
+) -> bytes:
+    if key_locked or key is None:
+        raise BoundPrivateRecordError("key_locked")
+    return open_private_bound_record(root, record_id=record_id, binding=binding, key=key)
+
+
+# Cold workflow continuity (CIMP-UX-59).
+# Services, the wallet descriptor, pending questions, evidence annotations and
+# links, source context, the draft, and correspondence are one encrypted
+# revision. A browser cache is not an input. Local authenticated readback is
+# local durability. This module has no qualified remote replica producer, so a
+# local commit is never reported as remote durability.
+
+_WORKFLOW_SCHEMA = "cg-workflow-continuity-v1"
+_WORKFLOW_FIELDS = (
+    "services",
+    "wallet",
+    "pending_questions",
+    "evidence_annotations",
+    "evidence_links",
+    "source_context",
+    "draft",
+    "correspondence",
+)
+_LOCAL_DURABILITY_STATEMENT = (
+    "Durability is local private storage after authenticated ciphertext readback. "
+    "It is not qualified remote storage: no remote replica producer with an "
+    "authenticated durability contract is installed, and a local file, a content "
+    "hash, or a queued acknowledgement is not a remote replica."
+)
+
+
+class WorkflowContinuityError(PrivateStorageError):
+    """Workflow continuity could not be opened. No replacement case is created."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, code=code)
+
+
+def durability_statement(*, local_readback: bool) -> dict[str, Any]:
+    """Say exactly which durability this process proved.
+
+    ``qualified_remote_storage`` stays false. Callers cannot flip it with a flag.
+    """
+
+    proved = local_readback is True
+    return {
+        "durability_scope": "local_private" if proved else "unproven",
+        "local_durable": proved,
+        "remote_durable": False,
+        "qualified_remote_storage": False,
+        "local_copy_establishes_remote_durability": False,
+        "browser_cache_authoritative": False,
+        "content_address_is_encryption": False,
+        "statement": _LOCAL_DURABILITY_STATEMENT if proved else (
+            "Durability is unproven. The last verified local head was left unchanged, "
+            "and remote storage was not qualified."
+        ),
+    }
+
+
+def _workflow_document(workflow: Mapping[str, Any], *, key_id: str) -> dict[str, Any]:
+    if not isinstance(workflow, Mapping):
+        raise WorkflowContinuityError("workflow_rejected")
+    missing = [name for name in _WORKFLOW_FIELDS if name not in workflow]
+    if missing or "browser_cache" in workflow:
+        raise WorkflowContinuityError("workflow_rejected")
+    services = workflow["services"]
+    wallet = workflow["wallet"]
+    if not isinstance(services, list) or not services or not isinstance(wallet, Mapping):
+        raise WorkflowContinuityError("workflow_rejected")
+    rebuilt_services: list[dict[str, str]] = []
+    for item in services:
+        if not isinstance(item, Mapping):
+            raise WorkflowContinuityError("workflow_rejected")
+        service_id = str(item.get("service_id") or "")
+        kind = str(item.get("kind") or "")
+        if not service_id or not kind or "/" in service_id:
+            raise WorkflowContinuityError("workflow_rejected")
+        rebuilt_services.append({
+            "service_id": service_id,
+            "kind": kind,
+            "label": str(item.get("label") or kind),
+        })
+    wallet_id = str(wallet.get("wallet_id") or "")
+    if not wallet_id or str(wallet.get("key_id") or "") != key_id:
+        raise WorkflowContinuityError("wallet_rejected")
+    if "passphrase" in wallet or "key_bytes" in wallet:
+        raise WorkflowContinuityError("wallet_rejected")
+    pending = workflow["pending_questions"]
+    annotations = workflow["evidence_annotations"]
+    links = workflow["evidence_links"]
+    source = workflow["source_context"]
+    draft = workflow["draft"]
+    correspondence = workflow["correspondence"]
+    if not isinstance(pending, list) or not isinstance(annotations, list) or not isinstance(links, list):
+        raise WorkflowContinuityError("workflow_rejected")
+    if not isinstance(source, Mapping) or not isinstance(draft, Mapping) or not isinstance(correspondence, list):
+        raise WorkflowContinuityError("workflow_rejected")
+    if not isinstance(draft.get("text"), str):
+        raise WorkflowContinuityError("workflow_rejected")
+    return {
+        "schema": _WORKFLOW_SCHEMA,
+        "services": rebuilt_services,
+        "wallet": {
+            "wallet_id": wallet_id,
+            "key_id": key_id,
+            "protection": str(wallet.get("protection") or "user_owned"),
+            "case_id": str(wallet.get("case_id") or ""),
+        },
+        "pending_questions": json.loads(json.dumps(list(pending))),
+        "evidence_annotations": json.loads(json.dumps(list(annotations))),
+        "evidence_links": json.loads(json.dumps(list(links))),
+        "source_context": json.loads(json.dumps(dict(source))),
+        "draft": {"text": draft["text"], "revision": str(draft.get("revision") or "0")},
+        "correspondence": json.loads(json.dumps(list(correspondence))),
+    }
+
+
+def _workflow_blobs(document: Mapping[str, Any]) -> tuple[bytes, bytes, bytes]:
+    session = {
+        "schema": document["schema"],
+        "services": document["services"],
+        "wallet": document["wallet"],
+    }
+    facts = {
+        "pending_questions": document["pending_questions"],
+        "evidence_annotations": document["evidence_annotations"],
+        "evidence_links": document["evidence_links"],
+        "source_context": document["source_context"],
+    }
+    proof = {"draft": document["draft"], "correspondence": document["correspondence"]}
+    encoded = tuple(
+        json.dumps(part, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        for part in (session, facts, proof)
+    )
+    return encoded[0], encoded[1], encoded[2]
+
+
+def _workflow_refusal(code: str) -> dict[str, Any]:
+    return {
+        "schema": _WORKFLOW_SCHEMA,
+        "resumed": False,
+        "code": code,
+        "reconstructed_from_browser_cache": False,
+        "browser_cache_ignored": True,
+        "empty_case_created": False,
+        "services": [],
+        "wallet": None,
+        "pending_questions": [],
+        "evidence_annotations": [],
+        "evidence_links": [],
+        "source_context": None,
+        "draft": None,
+        "correspondence": [],
+        "durability": durability_statement(local_readback=False),
+    }
+
+
+def _classify_head_failure(root: Path, key_id: str) -> str:
+    try:
+        envelope, _revision = _head_record(root)
+    except PrivateRevisionError:
+        return "tampered_head"
+    if envelope is None:
+        return "missing_store"
+    try:
+        parsed = parse_private_envelope(envelope)
+    except PrivateArtifactIntegrityError:
+        return "tampered_head"
+    if parsed.get("key_id") != key_id:
+        return "wrong_key"
+    return "tampered_head"
+
+
+def commit_workflow_continuity(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes,
+    key_id: str,
+    workflow: Mapping[str, Any],
+    transaction_id: str | None = None,
+    effect_id: str | None = None,
+    crash_injector: Callable[..., Any] | None = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
+) -> dict[str, Any]:
+    """Seal one workflow revision. The browser is not consulted."""
+
+    if key is None:
+        raise WorkflowContinuityError("missing_key")
+    document = _workflow_document(workflow, key_id=key_id)
+    if document["wallet"]["case_id"] not in {"", case_id}:
+        raise WorkflowContinuityError("wallet_rejected")
+    document["wallet"]["case_id"] = case_id
+    current = read_private_revision(
+        repository,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        key_resolver=key_resolver,
+    )
+    expected = None if current is None else str(current["revision"])
+    session, facts, proof = _workflow_blobs(document)
+    publication = commit_private_revision(
+        repository,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        expected_revision=expected,
+        session=session,
+        fact_graph=facts,
+        proof=proof,
+        transaction_id=transaction_id,
+        effect_id=effect_id,
+        crash_injector=crash_injector,
+        key_resolver=key_resolver,
+    )
+    receipt = publication.as_dict()
+    receipt["durability"] = durability_statement(local_readback=bool(publication.committed))
+    receipt["browser_cache_used"] = False
+    receipt["empty_case_created"] = False
+    return receipt
+
+
+def reconstruct_workflow_continuity(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes | None,
+    key_id: str | None,
+    browser_cache: Any = None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
+) -> dict[str, Any]:
+    """Rebuild services and the wallet descriptor from the encrypted head.
+
+    ``browser_cache`` is discarded. A missing key, a key id that is not the
+    envelope's key id, or a head that fails authentication returns no workflow
+    plaintext and does not create a case.
+    """
+
+    del browser_cache
+    root = Path(repository)
+    if key is None or not key_id:
+        return _workflow_refusal("missing_key")
+    try:
+        opened = read_private_revision(
+            root,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            key=key,
+            key_id=key_id,
+            key_resolver=key_resolver,
+        )
+    except PrivateKeyMaterialError:
+        return _workflow_refusal("missing_key")
+    except PrivateArtifactIntegrityError:
+        return _workflow_refusal(_classify_head_failure(root, key_id))
+    except PrivateRevisionError as exc:
+        code = str(exc.code or "")
+        if code in {"corrupt_manifest", "journal_corrupt"}:
+            return _workflow_refusal("tampered_head")
+        if code == "authentication_failed":
+            return _workflow_refusal(_classify_head_failure(root, key_id))
+        if code in {"recovery_required", "missing_object"}:
+            return _workflow_refusal("recovery_required")
+        return _workflow_refusal("unproven")
+    if opened is None:
+        return _workflow_refusal("missing_store")
+    try:
+        session = json.loads(opened["session"])
+        facts = json.loads(opened["fact_graph"])
+        proof = json.loads(opened["proof"])
+    except (UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+        return _workflow_refusal("tampered_head")
+    if not isinstance(session, dict) or session.get("schema") != _WORKFLOW_SCHEMA:
+        return _workflow_refusal("tampered_head")
+    wallet = session.get("wallet") if isinstance(session.get("wallet"), dict) else None
+    services = session.get("services") if isinstance(session.get("services"), list) else None
+    if wallet is None or services is None or wallet.get("key_id") != key_id or wallet.get("case_id") != case_id:
+        return _workflow_refusal("tampered_head")
+    if not isinstance(facts, dict) or not isinstance(proof, dict):
+        return _workflow_refusal("tampered_head")
+    rebuilt = []
+    for item in services:
+        if not isinstance(item, dict) or not item.get("service_id"):
+            return _workflow_refusal("tampered_head")
+        rebuilt.append({
+            "service_id": item["service_id"],
+            "kind": item.get("kind"),
+            "label": item.get("label"),
+            "source": "encrypted_store",
+        })
+    draft = proof.get("draft") if isinstance(proof.get("draft"), dict) else None
+    return {
+        "schema": _WORKFLOW_SCHEMA,
+        "resumed": True,
+        "code": "resumed",
+        "revision": opened["revision"],
+        "reconstructed_from_browser_cache": False,
+        "browser_cache_ignored": True,
+        "empty_case_created": False,
+        "services": rebuilt,
+        "wallet": {
+            "wallet_id": wallet.get("wallet_id"),
+            "key_id": wallet.get("key_id"),
+            "protection": wallet.get("protection"),
+            "case_id": case_id,
+            "source": "encrypted_store",
+        },
+        "pending_questions": list(facts.get("pending_questions") or []),
+        "evidence_annotations": list(facts.get("evidence_annotations") or []),
+        "evidence_links": list(facts.get("evidence_links") or []),
+        "source_context": facts.get("source_context"),
+        "draft": draft,
+        "correspondence": list(proof.get("correspondence") or []),
+        "durability": durability_statement(local_readback=True),
+    }
+
+
+def recover_workflow_continuity(
+    repository: str | Path,
+    *,
+    tenant_id: str,
+    case_id: str,
+    principal_id: str,
+    key: bytes | None,
+    key_id: str | None,
+    key_resolver: Callable[[str], bytes | None] | None = None,
+) -> dict[str, Any]:
+    """Replay the Kit WAL, then open whatever head that recovery left visible."""
+
+    if key is None or not key_id:
+        refusal = _workflow_refusal("missing_key")
+        refusal["wal_recovery"] = None
+        return refusal
+    try:
+        publication = recover_private_revision(
+            repository,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            principal_id=principal_id,
+            key=key,
+            key_id=key_id,
+            key_resolver=key_resolver,
+        )
+    except PrivateRevisionError as exc:
+        refusal = _workflow_refusal("tampered_head" if exc.code == "journal_corrupt" else "unproven")
+        refusal["wal_recovery"] = {"state": exc.state, "code": exc.code, "committed": False}
+        return refusal
+    view = reconstruct_workflow_continuity(
+        repository,
+        tenant_id=tenant_id,
+        case_id=case_id,
+        principal_id=principal_id,
+        key=key,
+        key_id=key_id,
+        key_resolver=key_resolver,
+    )
+    view["wal_recovery"] = publication.as_dict()
+    view["durability"] = durability_statement(local_readback=view.get("resumed") is True)
+    return view

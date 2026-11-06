@@ -73,7 +73,8 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     if not any(key in record for key in ('schema_version', 'repo_root', 'plan_id', 'state_dir')):
         return None
     from . import improvement_recovery as recovery
-    from .improvement_plan import BOARD_RELATIVE
+    from .improvement_plan import load_spec
+    from .campaign import campaign_artifacts
     from .improvement_runner import recorded_worktree_root
     if record.get('schema_version') != 'complaint-improvement-launcher@1':
         raise ValueError('full launcher ownership record required')
@@ -88,8 +89,11 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
     repo = Path(str(record.get('repo_root') or ''))
     spec = Path(str(record.get('spec_path') or ''))
     if (not repo.is_absolute() or repo.resolve() != repo or record.get('state_dir') != str(state_dir)
-            or not spec.is_absolute() or spec.resolve() != spec or not spec.is_relative_to(repo)
-            or record.get('board_path') != str(repo / BOARD_RELATIVE)):
+            or not spec.is_absolute() or spec.resolve() != spec or not spec.is_relative_to(repo)):
+        raise ValueError('launcher repository/epoch paths differ')
+    artifacts = campaign_artifacts(load_spec(spec))
+    artifacts.validate_source(repo, spec)
+    if record.get('board_path') != str(repo / artifacts.board_relative):
         raise ValueError('launcher repository/epoch paths differ')
     plan = recovery._plan_id(repo, spec)
     if record.get('plan_id') != plan or record.get('provider') != 'grok_cli' or record.get('model') != 'grok-4.7' or record.get('allow_fallback') is not False:
@@ -115,6 +119,7 @@ def _context(state_dir: Path, record: Mapping[str, Any]) -> dict[str, Any] | Non
         raise ValueError('launcher start time is in the future')
     return {'repo_root': str(repo), 'plan_id': plan, 'state_dir': str(state_dir),
             'worktree_root': str(worktree_root), 'worktree_root_binding': root_binding,
+            'board_namespace': artifacts.board_namespace, 'protected_paths': artifacts.protected_paths,
             'started_at': started, 'owner_token_sha256': hashlib.sha256(token.encode()).hexdigest(),
             'launcher_sha256': hashlib.sha256(raw).hexdigest()}
 
@@ -175,15 +180,19 @@ def _managed_native_command(record: Mapping[str, Any], context: Mapping[str, Any
     entrypoint = Path(context['repo_root']) / 'integrations/ipfs_accelerate/improvement_runner.py'
     prefix = (record['argv'][0], str(entrypoint), '--interval', '10.0',
         '--todo-path', record['board_path'], '--state-dir', str(state_dir),
-        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', 'complaint-intake-improvement',
+        '--task-prefix', runner.TASK_PREFIX, '--board-namespace', context['board_namespace'],
         '--state-prefix', runner.STATE_PREFIX, '--max-task-attempts', '3',
         '--task-source-kind', 'legacy-markdown', '--authority-mode', 'legacy_markdown',
-        '--validation-max-workers', '1', '--merge-target-branch', record['merge_target'],
+        '--validation-max-workers', '1',
+        )
+    protected = tuple(part for relative in context['protected_paths']
+                      for part in ('--implementation-protected-path', relative))
+    execution = ('--merge-target-branch', record['merge_target'],
         '--merge-queue-dir', str(state_dir / 'merge-queue'), '--implement',
         '--implementation-timeout', str(float(runner.TIMEOUT_SECONDS)),
         '--worktree-root', context['worktree_root'],
         )
-    return prefix + tuple(part for relative in submodules for part in ('--worktree-submodule-path', relative)) + (
+    return prefix + protected + execution + tuple(part for relative in submodules for part in ('--worktree-submodule-path', relative)) + (
         '--task-shard-count', '1', '--task-shard-index', '0')
 
 
@@ -206,6 +215,12 @@ def fence_owned_orphan_native_child(state_dir: Path, record: Mapping[str, Any]) 
     identity_path = pid_path.with_suffix('.identity.json')
     if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
         return {'status': 'markers_absent', 'fenced': False}
+    if not os.path.lexists(pid_path) and os.path.lexists(identity_path):
+        proof = _missing_marker_session_closed(state_dir, record, context)
+        if proof.get('historical_native_identity') is None:
+            raise ValueError('identity-only native closure is unproved')
+        return {'status': 'historical_identity_already_closed', 'fenced': False,
+            'identity_preserved': True, 'current_launch_child_authority': False}
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
 
     launcher_path = state_dir / 'launcher.json'
@@ -728,11 +743,21 @@ def _retained_native_observation(state_dir: Path, record: Mapping[str, Any],
         'native_public_result_provenance_requires_external_operator_review': True}
 
 
-def _failed_preflight_without_daemon(heartbeat: Mapping[str, Any], record: Mapping[str, Any],
-                                     context: Mapping[str, Any]) -> bool:
-    """Recognize Native's preflight failure before its first managed launch."""
-    if heartbeat.get('status') != 'agentic_maintenance_failed':
+def _preflight_without_daemon(heartbeat: Mapping[str, Any], record: Mapping[str, Any],
+                              context: Mapping[str, Any], maintenance_receipt: bytes | None = None) -> bool:
+    """Recognize a terminal Native preflight before its first managed launch."""
+    status = heartbeat.get('status')
+    if status not in {'agentic_maintenance_failed', 'agentic_maintenance_completed'}:
         return False
+    completed = status == 'agentic_maintenance_completed'
+    outcome = 'completed' if completed else 'failed'
+    expected_phase = heartbeat.get('last_agentic_maintenance_phase') if completed else 'worktree_reconciliation'
+    # Native returns a blocked protected-path guard as a completed maintenance
+    # pass, before the Host rejects startup. It has not assigned a new managed
+    # run or spawned a daemon. Its exact terminal receipt and all ordinary
+    # absence/custody checks are still required below.
+    if completed and expected_phase not in {'supervisor_check_event', 'implementation_protected_path_guard'}:
+        raise ValueError('completed preflight phase is not a recognized no-daemon boundary')
     parent, birth = record['identity'], heartbeat.get('supervisor_process_birth')
     maintenance = heartbeat.get('supervisor_maintenance')
     if (not isinstance(birth, Mapping) or not isinstance(maintenance, Mapping)
@@ -744,25 +769,133 @@ def _failed_preflight_without_daemon(heartbeat: Mapping[str, Any], record: Mappi
             or type(heartbeat.get('worker_descendant_count')) is not int
             or heartbeat.get('active_worker_count') != 0 or heartbeat.get('active_worker_pids') != []
             or heartbeat.get('worker_descendant_count') != 0
-            or heartbeat.get('last_agentic_maintenance_status') != 'failed'
-            or heartbeat.get('last_agentic_maintenance_phase') != 'worktree_reconciliation'
+            or heartbeat.get('last_agentic_maintenance_status') != outcome
+            or heartbeat.get('last_agentic_maintenance_phase') != expected_phase
             or maintenance.get('schema') != 'ipfs_accelerate_py/agent-supervisor/supervisor-maintenance@1'
-            or maintenance.get('phase') != 'failed'
+            or maintenance.get('phase') != outcome
             or not context['started_at'] <= _timestamp(maintenance.get('started_at'))
                 <= _timestamp(maintenance.get('finished_at')) <= _timestamp(heartbeat.get('updated_at')) <= time.time()):
-        raise ValueError('failed-preflight heartbeat does not prove the owned no-daemon phase')
+        raise ValueError('preflight heartbeat does not prove the owned no-daemon phase')
+    if completed:
+        if not isinstance(maintenance_receipt, bytes):
+            raise ValueError('completed preflight requires its Native maintenance receipt')
+        receipt = json.loads(maintenance_receipt)
+        expected = {
+            'schema': 'ipfs_accelerate_py/agent-supervisor/supervisor-maintenance-receipt@1',
+            'repo_root': context['repo_root'], 'state_dir': context['state_dir'],
+            'state_path': str(Path(context['state_dir']) / 'complaint_intake_task_state.json'),
+            'state_prefix': 'complaint_intake', 'supervisor_pid': parent['pid'],
+            'process_birth': dict(birth), 'phase': expected_phase, 'status': 'completed',
+            'maintenance_started_at': maintenance['started_at'],
+            'updated_at': heartbeat['updated_at'], 'completed_at': maintenance['finished_at'],
+        }
+        if (receipt != expected or maintenance.get('timeout_seconds') != 900
+                or _timestamp(maintenance.get('deadline_at')) - _timestamp(maintenance['started_at']) != 900):
+            raise ValueError('completed preflight Native receipt differs from its owned heartbeat')
     run_id = heartbeat.get('run_id')
     # Native assigns a fresh run ID only after its preflight returns. A retained
     # earlier run ID is historical data and supplies no child birth authority.
     if run_id and (not isinstance(run_id, str) or not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', run_id)
             or datetime.strptime(run_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).timestamp()
                 >= math.floor(context['started_at'])):
-        raise ValueError('failed-preflight heartbeat contains a current managed run')
+        raise ValueError('preflight heartbeat contains a current managed run')
     starts, _digest = _events(Path(context['state_dir']), context['started_at'],
         worktree_root=Path(context['worktree_root']))
     if starts:
-        raise ValueError('failed-preflight launch contains a paid implementation start')
+        raise ValueError('preflight launch contains a paid implementation start')
     return True
+
+
+def _historical_preflight_identity(raw: bytes, record: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any]:
+    """Negative scope only: an older dead identity is never this launch's child."""
+    from . import improvement_runner as runner
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_runtime as native
+    payload = json.loads(raw)
+    identity = native.SupervisedChildIdentity.from_dict(payload)
+    if identity is None or identity.to_dict() != payload:
+        raise ValueError('historical native identity is invalid')
+    parent, birth = record['identity'], identity.process_birth
+    state_dir = Path(context['state_dir'])
+    repo = Path(context['repo_root'])
+    scope = {'repo_root': str(repo), 'state_dir': str(state_dir), 'state_prefix': runner.STATE_PREFIX,
+        'todo_path': record['board_path'], 'daemon_entrypoint': str(repo / 'integrations/ipfs_accelerate/improvement_runner.py')}
+    if (dict(identity.owner_scope) != scope or identity.command != _managed_native_command(record, context)
+            or birth.boot_id != parent['boot_id']
+            or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != parent['boot_id']
+            or not 0 < birth.start_time_ticks < parent['start_ticks']
+            or not 0 < _timestamp(identity.created_at) < context['started_at']
+            or birth.pid in {parent['pid'], birth.parent_pid} or birth.parent_pid == parent['pid']
+            or native.supervised_child_identity_liveness(identity) is not native.OwnerLiveness.DEAD
+            or not native._supervised_child_identity_session_quiesced(identity)):
+        raise ValueError('historical native identity is not an older quiescent launch')
+    for pid in (birth.pid, birth.parent_pid, parent['pid']):
+        if (Path('/proc') / str(pid)).exists():
+            raise ValueError('historical native numeric PID is present')
+    return {'identity_sha256': hashlib.sha256(raw).hexdigest(), 'identity_record_id': identity.record_id,
+        'historical_daemon_pid': birth.pid, 'historical_parent_pid': birth.parent_pid,
+        'minimum_owned_start_ticks': birth.start_time_ticks, 'native_session_quiesced': True,
+        'current_launch_child_authority': False, 'signals_sent': False}
+
+
+def _owned_attempt_budget_terminal(heartbeat: Mapping[str, Any]) -> bool:
+    """A dead supervisor's own exhausted-frontier stop, with no restart authority."""
+    if not isinstance(heartbeat, Mapping) or heartbeat.get('status') != 'task_attempt_budget_exhausted':
+        return False
+    if (heartbeat.get('daemon_pid') is not None
+            or heartbeat.get('last_recycle_reason') != 'task_attempt_budget_exhausted'
+            or heartbeat.get('attempt_budget_terminal_pending') is not False
+            or heartbeat.get('active_worker_count') not in (0, None)
+            or heartbeat.get('active_worker_pids') not in ([], None)
+            or heartbeat.get('worker_descendant_count') not in (0, None)):
+        return False
+    guard = heartbeat.get('attempt_budget_terminal_guard')
+    blocker = heartbeat.get('selection_blocker')
+    tasks = blocker.get('limited_tasks') if isinstance(blocker, Mapping) else None
+    if (not isinstance(guard, Mapping) or not isinstance(blocker, Mapping) or not isinstance(tasks, list)
+            or not tasks or guard.get('safe') is not True
+            or guard.get('generation_restart_authorized') is not False
+            or guard.get('operator_successor_required') is not True
+            or guard.get('task_completion_authority') is not False
+            or guard.get('local_implementation_in_progress') is not False
+            or guard.get('local_active_task_id') not in ('', None)
+            or guard.get('attempt_budget_consumed') is not False
+            or guard.get('provider_invocation_consumed') is not False
+            or blocker.get('reason') != 'task_attempt_budget_exhausted'
+            or blocker.get('completion_authority') is not False
+            or blocker.get('max_task_attempts') != 3
+            or blocker.get('operator_successor_required') is not True):
+        return False
+    return all(isinstance(task, Mapping) and isinstance(task.get('task_id'), str) and task.get('task_id')
+        and task.get('attempt_count') == 3 for task in tasks)
+
+
+def _control_plane_reload_exit(heartbeat: Mapping[str, Any]) -> bool:
+    """A dead supervisor that stopped to reload a changed source, with no daemon."""
+    if not isinstance(heartbeat, Mapping):
+        return False
+    loaded = heartbeat.get('control_plane_source_revision')
+    current = heartbeat.get('control_plane_current_source_revision')
+    return bool(
+        heartbeat.get('status') == 'control_plane_reload_required'
+        and heartbeat.get('last_recycle_reason') == 'control_plane_source_changed'
+        and heartbeat.get('daemon_pid') is None
+        and heartbeat.get('daemon_pid_alive') is False
+        and heartbeat.get('active_worker_count') in (0, None)
+        and heartbeat.get('active_worker_pids') in ([], None)
+        and heartbeat.get('control_plane_update_pending') is True
+        and heartbeat.get('control_plane_reload_deferred') is False
+        and heartbeat.get('control_plane_reload_attempt_budget_consumed') is False
+        and heartbeat.get('control_plane_reload_provider_invocation_consumed') is False
+        and isinstance(loaded, str) and isinstance(current, str)
+        and re.fullmatch(r'[0-9a-f]{40}', loaded) is not None
+        and re.fullmatch(r'[0-9a-f]{40}', current) is not None
+        and loaded != current
+        and isinstance(heartbeat.get('control_plane_source_id'), str)
+        and isinstance(heartbeat.get('control_plane_current_source_id'), str)
+        and _TASK_CID.fullmatch(heartbeat['control_plane_source_id']) is not None
+        and _TASK_CID.fullmatch(heartbeat['control_plane_current_source_id']) is not None
+        and heartbeat['control_plane_source_id'] != heartbeat['control_plane_current_source_id']
+    )
 
 
 def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
@@ -783,26 +916,39 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
     # This is the public Native identity path recipe, without loading an
     # absent identity or calling a Native constructor or lifecycle operation.
     identity_path = pid_path.with_suffix('.identity.json')
-    def missing_markers():
-        for path in (pid_path, identity_path):
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                continue
-            except OSError as exc:
-                raise ValueError('native marker absence is unavailable') from exc
-            raise ValueError('both canonical native markers must be absent')
+    def markers():
+        if os.path.lexists(pid_path):
+            raise ValueError('canonical native PID marker must be absent')
+        if not os.path.lexists(identity_path):
+            return None
+        first = identity_path.lstat()
+        raw = _owned_bytes(identity_path, 65536, legacy_group_write=True)
+        last = identity_path.lstat()
+        fields = ('st_dev', 'st_ino', 'st_uid', 'st_nlink', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        key = tuple(getattr(first, name) for name in fields)
+        if key != tuple(getattr(last, name) for name in fields):
+            raise ValueError('historical native identity changed during read')
+        return raw, key
     def custody():
         launch = _owned_bytes(launcher_path)
         heartbeat = _owned_bytes(heartbeat_path, legacy_group_write=True)
         if json.loads(launch) != record or hashlib.sha256(launch).hexdigest() != context['launcher_sha256']:
             raise ValueError('missing-marker launcher custody changed')
-        return launch, heartbeat
-    missing_markers()
+        maintenance = (_owned_bytes(state_dir / 'complaint_intake_supervisor_maintenance_receipt.json', legacy_group_write=True)
+            if json.loads(heartbeat).get('status') == 'agentic_maintenance_completed' else None)
+        return launch, heartbeat, maintenance
+    marker_snapshot = markers()
     before = custody()
     heartbeat = json.loads(before[1])
     repo = Path(context['repo_root'])
-    preflight_without_daemon = _failed_preflight_without_daemon(heartbeat, record, context)
+    budget_terminal = _owned_attempt_budget_terminal(heartbeat)
+    reload_exit = _control_plane_reload_exit(heartbeat)
+    preflight_without_daemon = _preflight_without_daemon(heartbeat, record, context, before[2])
+    historical_identity = None
+    if marker_snapshot is not None:
+        if not preflight_without_daemon:
+            raise ValueError('identity-only marker requires a current owned no-daemon preflight')
+        historical_identity = _historical_preflight_identity(marker_snapshot[0], record, context)
     if preflight_without_daemon and retained_native_child_proof is not None:
         raise ValueError('failed preflight cannot borrow a historical child identity')
     daemon = heartbeat.get('daemon_pid')
@@ -820,18 +966,23 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         'state_prefix': runner.STATE_PREFIX, 'task_prefix': runner.TASK_PREFIX}
     source_revision = heartbeat.get('control_plane_source_revision')
     if (heartbeat.get('schema') != 'ipfs_accelerate_py.agent_supervisor.todo_implementation_supervisor.supervisor'
-        or heartbeat.get('status') not in {'running', 'termination_blocked', 'agentic_maintenance_failed'}
+        or heartbeat.get('status') not in {'running', 'termination_blocked', 'agentic_maintenance_failed', 'agentic_maintenance_completed', 'task_attempt_budget_exhausted', 'control_plane_reload_required'}
+        or (heartbeat.get('status') == 'task_attempt_budget_exhausted' and not budget_terminal)
+        or (heartbeat.get('status') == 'control_plane_reload_required' and not reload_exit)
         or heartbeat.get('supervisor_pid') != parent['pid']
-        or (not preflight_without_daemon and (type(daemon) is not int or daemon <= 1 or daemon == parent['pid']))
+        or ((budget_terminal or reload_exit) and daemon is not None)
+        or (not preflight_without_daemon and not budget_terminal and not reload_exit and (type(daemon) is not int or daemon <= 1 or daemon == parent['pid']))
         or heartbeat.get('max_task_attempts') != 3
         or any(heartbeat.get(key) != value for key, value in expected_paths.items())
         or not context['started_at'] <= _timestamp(heartbeat.get('updated_at')) <= time.time()
         or heartbeat.get('control_plane_source_schema') != 'ipfs_accelerate_py.agent_supervisor.control_plane_source@1'
         or not isinstance(source_revision, str) or not re.fullmatch(r'[0-9a-f]{40}', source_revision)
-        or heartbeat.get('control_plane_current_source_revision') != source_revision
+        or (not reload_exit and heartbeat.get('control_plane_current_source_revision') != source_revision)
+        or (reload_exit and heartbeat.get('control_plane_current_source_revision') == source_revision)
         or not isinstance(heartbeat.get('control_plane_source_id'), str)
         or not _TASK_CID.fullmatch(heartbeat['control_plane_source_id'])
-        or heartbeat.get('control_plane_current_source_id') != heartbeat['control_plane_source_id']):
+        or (not reload_exit and heartbeat.get('control_plane_current_source_id') != heartbeat['control_plane_source_id'])
+        or (reload_exit and heartbeat.get('control_plane_current_source_id') == heartbeat['control_plane_source_id'])):
         raise ValueError('missing-marker heartbeat is not bound to the full launch scope')
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     if boot != parent['boot_id']:
@@ -841,7 +992,11 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         or not math.floor(context['started_at']) <= datetime.strptime(run_id, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).timestamp() <= _timestamp(heartbeat['updated_at'])
         or heartbeat.get('log_path') != str(state_dir / f'{runner.STATE_PREFIX}_managed_daemon_{run_id}.log')):
         raise ValueError('missing-marker heartbeat run paths differ')
-    old_ids = {parent['pid']} if preflight_without_daemon else {parent['pid'], daemon}
+    old_ids = {parent['pid']} if preflight_without_daemon or budget_terminal or reload_exit else {parent['pid'], daemon}
+    minimum_start_ticks = parent['start_ticks']
+    if historical_identity is not None:
+        old_ids.update((historical_identity['historical_daemon_pid'], historical_identity['historical_parent_pid']))
+        minimum_start_ticks = min(minimum_start_ticks, historical_identity['minimum_owned_start_ticks'])
     worktree_root = Path(context['worktree_root'])
     def absent():
         for pid in old_ids:
@@ -859,7 +1014,7 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         absent()
         prelaunch_exclusions = 0
         foreign_cwd_proofs = []
-        for process in _complete_process_inventory(parent['start_ticks']):
+        for process in _complete_process_inventory(minimum_start_ticks):
             prelaunch_exclusions += int(process.get('prelaunch_scope_excluded') is True)
             if process.get('foreign_cwd_proof') is not None:
                 foreign_cwd_proofs.append(process['foreign_cwd_proof'])
@@ -882,29 +1037,242 @@ def _missing_marker_session_closed(state_dir: Path, record: Mapping[str, Any],
         raise ValueError('retained native observation changed during first census')
     if custody() != before:
         raise ValueError('missing-marker custody changed during process inventory')
-    missing_markers()
+    if markers() != marker_snapshot or (historical_identity is not None and
+            _historical_preflight_identity(marker_snapshot[0], record, context) != historical_identity):
+        raise ValueError('historical native identity changed during first census')
     second_exclusions = scan()
     if retained is not None and _retained_native_observation(state_dir, record, context, retained_native_child_proof) != retained:
         raise ValueError('retained native observation changed during second census')
     if custody() != before or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != boot:
         raise ValueError('missing-marker custody changed during second process inventory')
-    missing_markers()
-    return {'source': ('owned_preflight_failure_and_double_complete_proc_inventory' if preflight_without_daemon
+    if markers() != marker_snapshot or (historical_identity is not None and
+            _historical_preflight_identity(marker_snapshot[0], record, context) != historical_identity):
+        raise ValueError('historical native identity changed during second census')
+    return {'source': ('owned_control_plane_reload_and_double_complete_proc_inventory' if reload_exit
+            else 'owned_attempt_budget_terminal_and_double_complete_proc_inventory' if budget_terminal
+            else 'owned_completed_preflight_native_receipt_and_double_complete_proc_inventory'
+            if preflight_without_daemon and before[2] is not None
+            else 'owned_preflight_failure_and_double_complete_proc_inventory' if preflight_without_daemon
             else 'owned_historical_heartbeat_and_double_complete_proc_inventory'),
+        'maintenance_receipt_sha256': hashlib.sha256(before[2]).hexdigest() if before[2] is not None else None,
         'preflight_without_managed_daemon': preflight_without_daemon,
         'retained_native_observation': retained,
         'proc_census_complete': True, 'observations': 2, 'recorded_pids_absent': True,
         'scope_birth_policy': 'same_uid_birth_at_or_after_owned_launcher_requires_argv_and_cwd',
-        'minimum_owned_start_ticks': parent['start_ticks'],
+        'minimum_owned_start_ticks': minimum_start_ticks,
         'prelaunch_scope_exclusions': [first_exclusions, second_exclusions],
         'foreign_cwd_policy': 'fresh_root_broker_login_scope_unknown_cwd@1',
         'foreign_cwd_observations': foreign_cwd_observations,
         'all_births_group_and_session_checked': True,
-        'matching_processes': 0, 'canonical_markers_absent': True,
+        'matching_processes': 0, 'canonical_markers_absent': marker_snapshot is None,
+        'canonical_pid_marker_absent': True, 'canonical_identity_marker_absent': marker_snapshot is None,
+        'historical_native_identity': historical_identity, 'historical_identity_preserved': marker_snapshot is not None,
         'sealed_native_identity_used': retained is not None, 'daemon_birth_ticks_claimed': retained is not None,
         'heartbeat_status_preserved': heartbeat['status'],
         'heartbeat_sha256': hashlib.sha256(before[1]).hexdigest(),
         'signals_sent': False, 'completion_authority': False, 'attempt_refunded': False}
+
+
+def _preheartbeat_closed(state_dir: Path, record: Mapping[str, Any],
+                         context: Mapping[str, Any], *, fresh_start: bool) -> dict[str, Any]:
+    """Observe a never-heartbeated launch through complete negative evidence.
+
+    An unclosed starting record needs no invented stop time or borrowed receipt.
+    A previously stopped record additionally retains its public-stop provenance.
+    Old Native metadata supplies historical scope only; both modes require two
+    fresh complete censuses and unchanged owned evidence on every call.
+
+    As with the ordinary runner, the private owned launcher is trusted output
+    of start(), which freshly proves the preceding launch closed before writing
+    this starting record. This census proves the current launch's descendants
+    absent, including escaped descendants; it does not certify arbitrary work
+    predating that admission. Older births still receive group/session checks.
+    """
+    from . import improvement_runner as runner
+    from .improvement_recovery import _campaign_process_argv
+    source = ('owned_dead_preheartbeat_start_and_double_complete_proc_inventory' if fresh_start
+              else 'owned_preheartbeat_stop_and_double_complete_proc_inventory')
+    parent = record['identity']
+    started = context['started_at']
+    stopped = None if fresh_start else _timestamp(record.get('stopped_at'))
+    boot_path = Path('/proc/sys/kernel/random/boot_id')
+    boot = boot_path.read_text().strip()
+    if (parent['boot_id'] != boot
+            or (fresh_start and (record.get('status') != 'starting' or 'stopped_at' in record))
+            or (not fresh_start and (record.get('status') != 'stopped' or not started <= stopped <= time.time()))):
+        raise ValueError('preheartbeat stop epoch is unverified')
+    names = {'launcher.json': 65536, RECEIPT_NAME: 2_000_000,
+        'complaint_intake_supervisor_status.json': 2_000_000,
+        'complaint_intake_supervisor.pid': 64,
+        'complaint_intake_events.jsonl': MAX_EVENTS_BYTES,
+        'complaint_intake_supervisor_events.jsonl': MAX_EVENTS_BYTES}
+    markers = [state_dir / name for name in ('complaint_intake_managed_daemon.pid',
+        'complaint_intake_managed_daemon.identity.json')]
+    fields = ('st_dev', 'st_ino', 'st_uid', 'st_nlink', 'st_mode', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+
+    def custody():
+        if any(os.path.lexists(path) for path in markers):
+            raise ValueError('preheartbeat stop requires absent Native markers')
+        result = {}
+        for name, maximum in names.items():
+            path = state_dir / name
+            try:
+                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except FileNotFoundError:
+                if os.path.lexists(path):
+                    raise ValueError('preheartbeat evidence alias is unavailable')
+                result[name] = None
+                continue
+            try:
+                first = os.fstat(descriptor)
+                legacy = name not in {'launcher.json', RECEIPT_NAME}
+                if (not stat.S_ISREG(first.st_mode) or first.st_uid != os.getuid() or first.st_nlink != 1
+                        or first.st_mode & (0o002 if legacy else 0o022)
+                        or not 0 <= first.st_size <= maximum
+                        or (first.st_size == 0 and not name.endswith('.jsonl'))):
+                    raise ValueError('preheartbeat evidence ownership is unverified')
+                raw = os.read(descriptor, maximum + 1)
+                identity = tuple(getattr(first, key) for key in fields)
+                if len(raw) != first.st_size or any(tuple(getattr(value, key) for key in fields) != identity
+                        for value in (os.fstat(descriptor), path.lstat())):
+                    raise ValueError('preheartbeat evidence changed while reading')
+                result[name] = (raw, identity)
+            finally:
+                os.close(descriptor)
+        return result
+
+    before = custody()
+    launch, retained = before['launcher.json'], before[RECEIPT_NAME]
+    if (launch is None or (not fresh_start and retained is None) or json.loads(launch[0]) != record
+            or hashlib.sha256(launch[0]).hexdigest() != context['launcher_sha256']):
+        raise ValueError('preheartbeat launcher custody differs')
+    serialized_sha = lambda value: hashlib.sha256((json.dumps(value, indent=2, sort_keys=True) + '\n').encode()).hexdigest()
+    starting = {key: value for key, value in record.items() if key != 'stopped_at'}
+    starting['status'] = 'starting'
+    starting_sha = serialized_sha(starting)
+    binding = _retained_launch_binding(record, context)
+    shutdown = None
+    if not fresh_start:
+        shutdown = json.loads(retained[0])
+        if not isinstance(shutdown, dict) or not runner._shutdown_verified(record, shutdown, Path(context['repo_root']), state_dir):
+            raise ValueError('preheartbeat public stop receipt is unverified')
+    if not fresh_start and shutdown.get('launcher_sha256') != starting_sha:
+        # Ordinary repeated stop records the stopped launcher before updating
+        # stopped_at. Preserve its previously observed provenance, then repeat
+        # all live observations rather than treating that proof as authority.
+        previous = shutdown.get('process_closure')
+        if (not isinstance(previous, dict) or previous.get('source') != source
+                or previous.get('starting_launcher_sha256') != starting_sha
+                or previous.get('launch_binding') != binding
+                or previous.get('signals_sent') is not False
+                or previous.get('completion_authority') is not False
+                or previous.get('attempt_refunded') is not False):
+            raise ValueError('preheartbeat starting receipt differs')
+        previous_stopped = _timestamp(previous.get('observed_stopped_at'))
+        prior_record = dict(record, stopped_at=previous_stopped)
+        if (not started <= previous_stopped <= stopped
+                or shutdown.get('launcher_sha256') != serialized_sha(prior_record)):
+            raise ValueError('preheartbeat repeated stop provenance differs')
+
+    old_ids = {parent['pid']}
+    heartbeat_entry = before['complaint_intake_supervisor_status.json']
+    supervisor_marker = before['complaint_intake_supervisor.pid']
+    if heartbeat_entry is None:
+        if supervisor_marker is not None:
+            raise ValueError('preheartbeat supervisor marker lacks historical ownership')
+    else:
+        heartbeat = json.loads(heartbeat_entry[0])
+        native_state = str(state_dir / f'{runner.STATE_PREFIX}_task_state.json')
+        paths = {'repo_root': context['repo_root'], 'todo_path': record['board_path'],
+            'state_path': native_state, 'current_status_path': native_state, 'progress_path': native_state,
+            'child_pid_path': str(markers[0]),
+            'supervisor_lock_path': str(state_dir / f'{runner.STATE_PREFIX}_supervisor.lock'),
+            'state_prefix': runner.STATE_PREFIX, 'task_prefix': runner.TASK_PREFIX}
+        cleanup = heartbeat.get('managed_daemon_cleanup') if isinstance(heartbeat, dict) else None
+        old_pid = heartbeat.get('supervisor_pid') if isinstance(heartbeat, dict) else None
+        if (not isinstance(heartbeat, dict) or not isinstance(cleanup, dict)
+                or heartbeat.get('schema') != 'ipfs_accelerate_py.agent_supervisor.todo_implementation_supervisor.supervisor'
+                or heartbeat.get('status') != 'stopped' or any(heartbeat.get(key) != value for key, value in paths.items())
+                or not _timestamp(heartbeat.get('updated_at')) < started
+                or type(old_pid) is not int or old_pid <= 1 or old_pid == parent['pid']
+                or heartbeat.get('daemon_pid') is not None or heartbeat.get('supervisor_pid_alive') is not False
+                or heartbeat.get('daemon_pid_alive') is not False or heartbeat.get('active_worker_count') != 0
+                or heartbeat.get('active_worker_pids') != [] or heartbeat.get('worker_descendant_count') != 0
+                or cleanup.get('quiesced') is not True or cleanup.get('remaining_pid') is not None
+                or cleanup.get('pid_path') != str(markers[0]) or cleanup.get('identity_path') != str(markers[1])):
+            raise ValueError('preheartbeat historical scope is unverified')
+        old_ids.add(old_pid)
+        if cleanup.get('pid') is not None:
+            if type(cleanup['pid']) is not int or cleanup['pid'] <= 1 or cleanup['pid'] == parent['pid']:
+                raise ValueError('preheartbeat historical child scope differs')
+            old_ids.add(cleanup['pid'])
+        if supervisor_marker is not None and supervisor_marker[0] != f'{old_pid}\n'.encode('ascii'):
+            raise ValueError('preheartbeat historical supervisor marker differs')
+
+    for name in ('complaint_intake_events.jsonl', 'complaint_intake_supervisor_events.jsonl'):
+        entry = before[name]
+        raw = entry[0] if entry is not None else b''
+        if heartbeat_entry is None and raw:
+            raise ValueError('first heartbeat absence cannot hide Native history')
+        if raw and not raw.endswith(b'\n'):
+            raise ValueError('preheartbeat Native event stream is incomplete')
+        for line in raw.splitlines():
+            event = json.loads(line)
+            if not isinstance(event, dict) or _timestamp(event.get('timestamp')) >= started:
+                raise ValueError('preheartbeat stop has subsequent Native events')
+    task_events = before['complaint_intake_events.jsonl']
+    event_sha = hashlib.sha256(task_events[0]).hexdigest() if task_events is not None else ''
+    if not fresh_start and shutdown.get('event_log_sha256') != event_sha:
+        raise ValueError('preheartbeat retained event history changed')
+    worktree_root, repo = Path(context['worktree_root']), Path(context['repo_root'])
+    def scoped(value, root):
+        return isinstance(value, str) and Path(value).is_absolute() and Path(value).is_relative_to(root)
+    def absent():
+        for pid in old_ids:
+            try:
+                (Path('/proc') / str(pid)).lstat()
+            except FileNotFoundError:
+                continue
+            raise ValueError('preheartbeat historical numeric PID remains present')
+    exclusions, foreign = [], []
+    for _ in range(2):
+        absent()
+        inventory = _complete_process_inventory(parent['start_ticks'])
+        for process in inventory:
+            if process['pid'] in old_ids or process['process_group'] in old_ids or process['session'] in old_ids:
+                raise ValueError('preheartbeat historical group or session remains present')
+            if process['uid'] != os.getuid() or process['pid'] == os.getpid():
+                continue
+            argv = list(process['argv'])
+            if (any(scoped(value, worktree_root) for value in argv) or scoped(process['cwd'], worktree_root)
+                    or (_campaign_process_argv(argv, repo_root=repo, state_dir=state_dir)
+                        and any(scoped(value, state_dir) for value in argv))):
+                raise ValueError('preheartbeat matching campaign process remains present')
+        absent()
+        if custody() != before or boot_path.read_text().strip() != boot:
+            raise ValueError('preheartbeat custody changed during process inventory')
+        exclusions.append(sum(value.get('prelaunch_scope_excluded') is True for value in inventory))
+        foreign.append([value['foreign_cwd_proof'] for value in inventory if value.get('foreign_cwd_proof') is not None])
+    return {'source': source, 'starting_launcher_sha256': starting_sha, 'launch_binding': binding,
+        **({'observed_stopped_at': stopped} if not fresh_start else {}),
+        'historical_heartbeat_only': heartbeat_entry is not None,
+        'observations': 2, 'proc_census_complete': True, 'recorded_pids_absent': True,
+        'matching_processes': 0, 'canonical_markers_absent': True, 'event_log_sha256': event_sha,
+        'minimum_owned_start_ticks': parent['start_ticks'], 'prelaunch_scope_exclusions': exclusions,
+        'foreign_cwd_observations': foreign, 'signals_sent': False,
+        'completion_authority': False, 'attempt_refunded': False}
+
+
+def _preheartbeat_stop_closed(state_dir: Path, record: Mapping[str, Any],
+                              context: Mapping[str, Any]) -> dict[str, Any]:
+    """Reobserve an actual public stop without weakening its retained lineage."""
+    return _preheartbeat_closed(state_dir, record, context, fresh_start=False)
+
+
+def _preheartbeat_start_closed(state_dir: Path, record: Mapping[str, Any],
+                               context: Mapping[str, Any]) -> dict[str, Any]:
+    """Prove a dead starting launch closed without manufacturing a stop receipt."""
+    return _preheartbeat_closed(state_dir, record, context, fresh_start=True)
 
 
 def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[str, Any], supplied: bool,
@@ -919,16 +1287,25 @@ def _parent_closed(state_dir: Path, record: Mapping[str, Any], context: Mapping[
         if retained_native_child_proof is not None:
             raise ValueError('retained native observation never grants live fencing authority')
         return
-    heartbeat = _object(state_dir / 'complaint_intake_supervisor_status.json', legacy_group_write=True)
+    preheartbeat = (_preheartbeat_start_closed if record.get('status') == 'starting'
+                    and 'stopped_at' not in record else _preheartbeat_stop_closed)
+    try:
+        heartbeat = _object(state_dir / 'complaint_intake_supervisor_status.json', legacy_group_write=True)
+    except FileNotFoundError:
+        if retained_native_child_proof is not None:
+            raise ValueError('preheartbeat closure cannot borrow retained Native child authority')
+        return preheartbeat(state_dir, record, context)
     if (heartbeat.get('repo_root') != context['repo_root'] or heartbeat.get('supervisor_pid') != birth['pid']
             or _timestamp(heartbeat.get('updated_at')) < context['started_at']):
-        raise ValueError('historical campaign lacks current owned shutdown evidence')
+        if retained_native_child_proof is not None:
+            raise ValueError('preheartbeat closure cannot borrow retained Native child authority')
+        return preheartbeat(state_dir, record, context)
     if heartbeat.get('status') == 'stopped' and (heartbeat.get('managed_daemon_cleanup') or {}).get('quiesced') is True:
         return
-    if heartbeat.get('status') in {'running', 'termination_blocked', 'agentic_maintenance_failed'}:
+    if heartbeat.get('status') in {'running', 'termination_blocked', 'agentic_maintenance_failed', 'agentic_maintenance_completed', 'control_plane_reload_required'} or _owned_attempt_budget_terminal(heartbeat):
         pid_path = state_dir / f'{runner.STATE_PREFIX}_managed_daemon.pid'
         identity_path = pid_path.with_suffix('.identity.json')
-        if not os.path.lexists(pid_path) and not os.path.lexists(identity_path):
+        if not os.path.lexists(pid_path):
             if retained_native_child_proof is None and heartbeat.get('daemon_pid') is None:
                 try:
                     (state_dir / RECEIPT_NAME).lstat()

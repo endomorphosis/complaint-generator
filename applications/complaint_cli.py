@@ -101,7 +101,7 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 EXIT_OK = 0
 EXIT_EOF_PAUSE = 1
 EXIT_INTERRUPTED = 130
-TERMINAL_COMMANDS = ("/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
+TERMINAL_COMMANDS = ("/help", "/status", "/why", "/research", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy")
 _UNKNOWN_ANSWERS = {
     "unknown", "i don't know", "i do not know", "idk", "not sure", "unsure", "n/a", "na",
 }
@@ -112,6 +112,7 @@ Terminal controls (a command is never stored as an answer):
   /privacy  select /privacy local or /privacy grok for this case; remote Grok receives submitted prompts
   /status   show the pending question, objective, graph revision, stop reason, and unknown/skipped answers
   /why      explain why the pending question matters; the question stays pending
+  /research run bounded legal-source acquisition for the current gap; it is not an answer and does not establish the complaint
   /skip     record the pending question as skipped; it does not satisfy the legal requirement
   /edit     replace the last recorded answer: /edit new text
   /pause    persist a recoverable pause and keep the pending inquiry
@@ -125,7 +126,8 @@ Input:
   End a line with \\ to continue a multiline answer.
   NO_COLOR, COMPLAINT_CLI_NO_COLOR, or TERM=dumb disables color.
   COMPLAINT_CLI_ASCII=1 prints ASCII only. COLUMNS wraps narrow terminals.
-  A stale concurrent answer is rejected and is not saved.
+  A stale concurrent answer, edit, or research request is rejected and is not saved.
+  EOF, Ctrl-C, and /quit keep the pending inquiry and any claimed operation.
 """.strip()
 
 
@@ -142,7 +144,17 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         mediator = super()._mediator_for_shared_interview(user_id, case_id)
         from backends.llm_router_backend import load_terminal_router_backend
         if not hasattr(mediator, "_terminal_router_backend"):
-            backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            try:
+                backend = load_terminal_router_backend(str(Path(__file__).resolve().parents[1] / "config.llm_router.json"))
+            except ImportError as exc:
+                # The interview still resumes from the encrypted session. A missing
+                # router package is not a live model and is not legal completion.
+                mediator._terminal_router_backend = None
+                mediator._terminal_router_unavailable = {
+                    "error_type": type(exc).__name__,
+                    "live_model_identity_verified": False,
+                }
+                return mediator
             mediator.backends = [backend]
             mediator._terminal_router_backend = backend
         return mediator
@@ -154,28 +166,47 @@ class TerminalComplaintWorkspaceService(ComplaintWorkspaceService):
         backend = getattr(mediator, "_terminal_router_backend", None)
         if backend is not None:
             from copy import deepcopy
-            projection = state.get("shared_interview") or {}
-            previous = state.get("router_trace") or {}
-            stored = list(previous.get("receipts") or [])
-            known = {(item.get("router_receipt") or {}).get("request_id") for item in stored}
-            # Only real calls/errors enter history. Cold resume preserves the
-            # original invocation association rather than inventing a dispatch.
+            from complaint_phases.knowledge_graph import KnowledgeGraph
+            from mediator.hook_runtime import graph_revision_token, merge_router_trace, public_router_trace_entry
+
+            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            previous = state.get("router_trace") if isinstance(state.get("router_trace"), dict) else {}
+            graph_payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else None
+            accepted_revision = ""
+            if graph_payload is not None:
+                try:
+                    accepted_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+                except Exception:
+                    accepted_revision = ""
+            intake_by_request = {}
+            intake = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+            for operation in intake.get("receipts") or []:
+                if isinstance(operation, dict) and type(operation.get("request_id")) is str:
+                    intake_by_request[operation["request_id"]] = operation
+            entries = []
             for item in backend.task_receipts:
-                if item.get("request_id") and item["request_id"] in known:
+                if not isinstance(item, dict):
                     continue
-                if item in [entry.get("router_receipt") for entry in stored]:
-                    continue
-                entry = {"router_receipt": deepcopy(item),
-                         "interview_session_id": projection.get("session_id"),
-                         "interview_revision": projection.get("session_revision")}
-                stored.append(entry)
-                if item.get("request_id"):
-                    known.add(item["request_id"])
-            if backend.task_receipts:
-                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(),
-                                         "receipts": stored[-32:]}
-            elif not previous:
-                state["router_trace"] = {"diagnostics": backend.sanitized_session_diagnostics(), "receipts": []}
+                operation = intake_by_request.get(item.get("request_id")) or {}
+                purpose = item.get("purpose_id") or operation.get("purpose") or operation.get("operation")
+                entry = public_router_trace_entry(
+                    item,
+                    purpose=purpose,
+                    case_id=_state_case_id(state, user_id),
+                    session_id=projection.get("session_id") or operation.get("session_id") or "",
+                    accepted_graph_revision=operation.get("accepted_graph_revision") or accepted_revision,
+                    interview_session_id=projection.get("session_id") or "",
+                    interview_revision=projection.get("session_revision") if type(projection.get("session_revision")) is int else 0,
+                )
+                if entry is not None:
+                    entries.append(entry)
+            # Duplicate receipts are ignored. An empty backend does not invent one.
+            if entries or not previous:
+                state["router_trace"] = merge_router_trace(
+                    previous,
+                    entries,
+                    diagnostics=backend.sanitized_session_diagnostics(),
+                )
             receipt["router_diagnostics"] = deepcopy((state.get("router_trace") or {}).get("diagnostics") or {})
         return receipt
 
@@ -229,7 +260,7 @@ INTAKE_OPERATOR_EXAMPLES = (
         "model": "grok-4.7",
         "backend_id": "llm-router-grok-4.7",
         "config_path": "config.llm_router.json",
-        "controls": ["/help", "/status", "/why", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
+        "controls": ["/help", "/status", "/why", "/research", "/skip", "/edit", "/pause", "/resume", "/quit", "/privacy local", "/privacy grok"],
         "notes": "Save is /pause or a recoverable exit. Resume is the same command with the same USER_ID, then /resume.",
     },
     {
@@ -612,6 +643,7 @@ def answer_fingerprint(state: dict[str, Any], inquiry: Optional[dict]) -> dict[s
         "history_len": len(state.get("intake_history") or []),
         "narrative_revision": int(narrative.get("revision") or 0),
         "objective_id": _objective_id(state, inquiry),
+        "graph_revision_token": _shared_graph_revision_token(state),
     }
 
 
@@ -651,6 +683,9 @@ def stale_answer_rejection(user_id: str, shown: dict[str, Any]) -> Optional[str]
     compared = ("inquiry_id", "question_revision", "session_revision", "history_len", "narrative_revision")
     if any(current.get(key) != shown.get(key) for key in compared):
         return "stale_question"
+    shown_token = str(shown.get("graph_revision_token") or "")
+    if shown_token and shown_token != str(current.get("graph_revision_token") or ""):
+        return "stale_question"
     return None
 
 
@@ -663,6 +698,11 @@ def _pause_and_exit(user_id: Optional[str], reason: str, code: int, inquiry: Opt
             if reason in {"eof", "interrupted"} and controls.get("paused") and controls.get("stop_reason"):
                 stored_reason = str(controls.get("stop_reason"))
             remember_pending_inquiry(state, inquiry, stop_reason=stored_reason, paused=True)
+            research = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
+            pending_operation = research.get("pending_operation")
+            if isinstance(pending_operation, dict):
+                controls = _controls(state)
+                controls["pending_operation"] = dict(pending_operation)
             save_terminal_state(state)
         except Exception:
             terminal_echo("Recoverable pause could not be saved. The pending inquiry was not submitted.")
@@ -706,6 +746,22 @@ def _status_text(state: dict[str, Any]) -> str:
     prompt = str(pending.get("prompt") or pending.get("question") or "").strip()
     if prompt:
         lines.append(prompt)
+    trace = state.get("router_trace") if isinstance(state.get("router_trace"), dict) else {}
+    associations = [
+        item for item in (trace.get("receipts") or [])
+        if isinstance(item, dict) and item.get("invocation_label") in {"real", "fake"} and item.get("request_id")
+    ]
+    lines.append(f"invocations={len(associations)}")
+    for item in associations:
+        lines.append(
+            "invocation"
+            f" label={item.get('invocation_label')}"
+            f" purpose={item.get('purpose') or ''}"
+            f" request={item.get('request_id') or ''}"
+            f" case={item.get('case_id') or ''}"
+            f" session={item.get('session_id') or ''}"
+            f" accepted_graph_revision={item.get('accepted_graph_revision') or ''}"
+        )
     return "\n".join(lines)
 
 
@@ -733,32 +789,42 @@ def _record_non_answer(state: dict[str, Any], inquiry: dict, kind: str, answer: 
     })
 
 
-def _apply_edit(state: dict[str, Any], replacement: str) -> str:
-    replacement = replacement.strip()
-    if not replacement:
-        return "Edit needs replacement text. The pending question is unchanged."
-    answers = state.setdefault("intake_answers", {})
-    history = state.setdefault("intake_history", [])
-    target = None
-    for item in reversed(history):
-        if isinstance(item, dict) and item.get("question_id") and item.get("disposition") not in {"skipped"}:
-            target = item
-            break
-    if target is None and not answers:
-        return "Nothing to edit yet. The pending question is unchanged."
-    question_id = str((target or {}).get("question_id") or next(iter(answers), ""))
-    previous = str(answers.get(question_id) or (target or {}).get("answer") or "")
-    if question_id:
-        answers[question_id] = replacement
-    if isinstance(target, dict):
-        target["answer"] = replacement
-        target["edited"] = True
-    _controls(state).setdefault("edits", []).append({
-        "question_id": question_id,
-        "previous": previous,
-        "replacement": replacement,
-    })
-    return "Edited the last recorded answer. The pending question is unchanged."
+def _shared_graph_revision_token(state: dict[str, Any]) -> str:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else None
+    if payload is None:
+        return ""
+    try:
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        return graph_revision_token(KnowledgeGraph.from_dict(payload))
+    except Exception:
+        return ""
+
+
+def _apply_edit(
+    state: dict[str, Any],
+    replacement: str,
+    *,
+    user_id: str,
+    expected_graph_revision: Optional[str] = None,
+    expected_session_revision: Optional[int] = None,
+) -> str:
+    """Correct the last accepted answer through the shared factual graph.
+
+    The saved session is the authority. This does not rewrite the caller's
+    history list in place; a later save of that stale dict would drop the graph.
+    """
+
+    del state
+    receipt = service.apply_terminal_graph_edit(
+        user_id,
+        replacement,
+        expected_graph_revision=expected_graph_revision,
+        expected_session_revision=expected_session_revision,
+    )
+    return str(receipt.get("message") or "Edit was not applied. The pending question is unchanged.")
 
 
 def read_original_complaint_input(stream=None, *, interactive: Optional[bool] = None, first_line: Optional[str] = None) -> str:
@@ -928,7 +994,19 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
         _require_readable_session(payload)
         trace = (payload.get("session") or {}).get("router_trace") or {}
         if trace.get("diagnostics"):
-            terminal_echo("Router diagnostics: " + json.dumps(trace["diagnostics"], sort_keys=True))
+            from complaint_phases.denoiser import redact_diagnostic_value
+
+            terminal_echo(
+                "Router diagnostics: "
+                + json.dumps(redact_diagnostic_value(trace["diagnostics"]), sort_keys=True)
+            )
+        if isinstance(payload.get("diagnostic_receipt"), dict):
+            from complaint_phases.denoiser import redact_diagnostic_value
+
+            terminal_echo(
+                "Why diagnostic receipt: "
+                + json.dumps(redact_diagnostic_value(payload["diagnostic_receipt"]), sort_keys=True)
+            )
         inquiry = dict(payload.get("inquiry") or {})
         try:
             state = _sync_controls_from_payload(user_id, payload, inquiry or None)
@@ -983,6 +1061,22 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
         if command == "/why":
             payload = service.run_intake_chat_turn(user_id, message="/why", question_id=str(inquiry.get("question_id") or "") or None)
             continue
+        if command == "/research":
+            rejection = stale_answer_rejection(user_id, shown)
+            if rejection:
+                terminal_echo("Stale concurrent research rejected. The pending inquiry was kept.")
+                continue
+            shown_session = shown.get("session_revision")
+            try:
+                payload = service.run_intake_chat_turn(
+                    user_id,
+                    message="/research",
+                    expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
+                    expected_session_revision=shown_session if isinstance(shown_session, int) else None,
+                )
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+            continue
         if command == "/pause":
             paused = True
             fresh = load_terminal_state(user_id)
@@ -1029,10 +1123,34 @@ def chat(user_id: str = "demo-user", max_turns: int = 0, privacy_mode: str = "")
             if not replacement:
                 terminal_echo("Usage: /edit replacement text. Nothing was changed.")
                 continue
-            fresh = load_terminal_state(user_id)
-            terminal_echo(_apply_edit(fresh, replacement))
-            remember_pending_inquiry(fresh, inquiry, paused=False)
-            save_terminal_state(fresh)
+            shown_session = shown.get("session_revision")
+            try:
+                receipt = service.apply_terminal_graph_edit(
+                    user_id,
+                    replacement,
+                    expected_graph_revision=str(shown.get("graph_revision_token") or "") or None,
+                    expected_session_revision=shown_session if isinstance(shown_session, int) else None,
+                )
+            except KeyboardInterrupt:
+                _pause_and_exit(user_id, "interrupted", EXIT_INTERRUPTED, inquiry)
+            terminal_echo(str(receipt.get("message") or "Edit was not applied. The pending question is unchanged."))
+            pending_after = receipt.get("pending_inquiry") if isinstance(receipt.get("pending_inquiry"), dict) else None
+            if receipt.get("status") == "applied" and pending_after:
+                inquiry = {
+                    **dict(inquiry or {}),
+                    "question_id": pending_after.get("inquiry_id") or inquiry.get("question_id"),
+                    "inquiry_id": pending_after.get("inquiry_id") or inquiry.get("inquiry_id"),
+                    "prompt": pending_after.get("question") or inquiry.get("prompt"),
+                    "question": pending_after.get("question") or inquiry.get("question"),
+                    "revision": pending_after.get("revision", inquiry.get("revision")),
+                    "target_id": pending_after.get("target_id") or inquiry.get("target_id"),
+                    "objective_id": pending_after.get("objective_id") or inquiry.get("objective_id"),
+                }
+            try:
+                fresh = load_terminal_state(user_id)
+                shown = dict(_controls(fresh).get("fingerprint") or {})
+            except Exception:
+                pass
             continue
         if str(inquiry.get("question_id") or "") == "original_complaint":
             try:

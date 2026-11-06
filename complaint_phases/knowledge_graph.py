@@ -38,6 +38,19 @@ def _utc_now_isoformat() -> str:
 logger = logging.getLogger(__name__)
 
 _LOCAL_BUILDER_ID = re.compile(r"^(?:entity|ent|rel)_\d+$")
+_ENTITY_FIELDS = ("id", "type", "name", "attributes", "confidence", "source", "provenance")
+_RELATIONSHIP_FIELDS = ("id", "source_id", "target_id", "relation_type", "attributes", "confidence", "source", "provenance")
+_INFERENCE_SOURCES = {"model", "inference", "llm", "ai"}
+_NON_USER_CLASSES = {"extraction_hypothesis", "legal_text", "supporting_evidence"}
+
+
+def _graph_record_fields(record: Mapping[str, Any], fields: Sequence[str]) -> Dict[str, Any]:
+    """Copy only the graph record fields. Extra caller keys stay on the caller."""
+    payload: Dict[str, Any] = {}
+    for key in fields:
+        if key in record:
+            payload[key] = copy.deepcopy(record[key])
+    return payload
 _INACTIVE_ASSERTION_STATES = frozenset({"superseded", "retracted"})
 _UNSETTLED_ASSERTION_STATES = frozenset({"superseded", "retracted", "conflict"})
 _SUPPORT_RELATION_TYPES = frozenset({
@@ -49,10 +62,76 @@ _SUPPORT_RELATION_TYPES = frozenset({
     "has_impact",
     "seeks_remedy",
 })
+_PROOF_ID_KEYS = ("fact_id", "entity_id", "support_entity_id", "invalidated_entity_id", "proof_cache_entity_id")
+_PROOF_LIST_KEYS = ("fact_ids", "entity_ids", "support_refs", "support_entity_ids", "proof_cache_fact_ids")
+
+
+def _listed_reference_ids(value: Any) -> Set[str]:
+    found: Set[str] = set()
+    if isinstance(value, str):
+        if value:
+            found.add(value)
+        return found
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item:
+                found.add(item)
+        return found
+    if isinstance(value, Mapping):
+        for key in _PROOF_ID_KEYS:
+            item = value.get(key)
+            if isinstance(item, str) and item:
+                found.add(item)
+        for key in _PROOF_LIST_KEYS:
+            found.update(_listed_reference_ids(value.get(key)))
+    return found
+
+
+def _proof_cache_cites(attributes: Mapping[str, Any], entity_id: str) -> bool:
+    if not isinstance(attributes, Mapping) or not entity_id:
+        return False
+    if entity_id in _listed_reference_ids(attributes.get("proof_cache")):
+        return True
+    if entity_id in _listed_reference_ids(attributes.get("proof_cache_fact_ids")):
+        return True
+    if attributes.get("proof_cache_support_ref") == entity_id or attributes.get("proof_cache_entity_id") == entity_id:
+        return True
+    return False
+
+
+def _invalidate_proof_cache(attributes: Dict[str, Any], entity_id: str, reason: str) -> Dict[str, Any]:
+    updated = dict(attributes)
+    identity = updated.get("proof_cache_identity")
+    if identity:
+        updated["rejected_proof_cache_identity"] = identity
+    updated["proof_cache_reusable"] = False
+    cache = updated.get("proof_cache")
+    if isinstance(cache, Mapping):
+        cache_copy = dict(cache)
+        cache_copy["reusable"] = False
+        cache_copy["satisfied"] = False
+        cache_copy["invalidation_reason"] = reason
+        cache_copy["invalidated_entity_id"] = entity_id
+        updated["proof_cache"] = cache_copy
+    return updated
 
 
 class AnswerEventConflict(ValueError):
     """The same scoped answer-event id was reused with a different payload."""
+
+
+class FactualReviewError(ValueError):
+    """Fail-closed factual proposal or review refusal. ``code`` is stable."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
+_FACTUAL_REVIEW_ACTORS = frozenset({"user", "lawyer"})
+_FACTUAL_REVIEW_ACTIONS = frozenset({"propose", "admit", "supersede", "retract", "contradict"})
+_MAX_FACTUAL_REVIEW_CHARS = 2000
+_FACTUAL_REVIEW_EXTRACTOR = "cimp-gui-22-v1"
 
 
 def answer_event_payload(
@@ -126,6 +205,7 @@ _CALLER_CONTEXT_FIELDS = (
     "source_kind",
     "source_id",
     "message_id",
+    "answer_id",
     "document_id",
     "assertion_status",
     "extractor_version",
@@ -194,24 +274,25 @@ def _is_exact_int(value: Any) -> bool:
 
 
 def _normalize_span_payload(raw: Any, source_text: str) -> Optional[Dict[str, Any]]:
-    """Normalize a span to UTF-8 byte offsets. Character spans must say so."""
+    """Keep the caller's span coordinates. Do not retarget them onto this text.
+
+    Character offsets stay character offsets. Conversion happens only inside
+    resolve_source_span when the span names this exact source generation.
+    """
+    del source_text
     if not isinstance(raw, Mapping):
         return None
     start = raw.get("start")
     end = raw.get("end")
-    if not _is_exact_int(start) or not _is_exact_int(end):
-        return {"start": start, "end": end, "text": raw.get("text")}
-    unit = _clean_context_text(raw.get("unit")).lower() or "byte"
-    if unit in {"char", "chars", "character", "characters"}:
-        if not isinstance(source_text, str):
-            return {"start": start, "end": end, "text": raw.get("text")}
-        if start < 0 or end < start or end > len(source_text):
-            return {"start": start, "end": end, "text": raw.get("text"), "unit": "char"}
-        start = len(source_text[:start].encode("utf-8"))
-        end = len(source_text[:end].encode("utf-8"))
     payload: Dict[str, Any] = {"start": start, "end": end}
     if "text" in raw and raw.get("text") is not None:
         payload["text"] = raw.get("text")
+    unit = _clean_context_text(raw.get("unit")).lower()
+    if unit:
+        payload["unit"] = unit
+    generation = _clean_context_text(raw.get("source_generation"))
+    if generation:
+        payload["source_generation"] = generation
     return payload
 
 
@@ -260,18 +341,21 @@ def _record_type_for_extraction(record: Mapping[str, Any]) -> str:
     )
     origin = _clean_context_text(record.get("origin") or attributes.get("origin") or "").lower()
     entity_type = _clean_context_text(record.get("type") or record.get("entity_type") or "").lower()
+    explicit_class = _clean_context_text(
+        record.get("factual_record_class") or attributes.get("factual_record_class") or ""
+    )
     if explicit in _NON_USER_RECORD_TYPES:
         return explicit
-    if origin in {"model", "llm"}:
-        return "model_suggestion"
     if entity_type == "claim" or explicit == "claim":
         return "inferred_claim_label"
-    if entity_type in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
+    if explicit_class == "legal_text" or entity_type in {"legal", "authority", "statute", "regulation", "case_law", "legal_text"}:
         return "legal_text"
+    if explicit_class == "extraction_hypothesis" or origin in {"model", "llm"}:
+        return "model_suggestion"
     label = _clean_context_text(record.get("name") or "").lower()
     if label in _PLACEHOLDER_LABELS:
         return "model_suggestion"
-    if entity_type == "evidence":
+    if entity_type == "evidence" and explicit_class != "supporting_evidence":
         return "model_suggestion"
     if origin in {"heuristic", "heuristic_label"} and entity_type != "fact" and entity_type != "date" and entity_type != "person" and entity_type != "organization":
         return "model_suggestion"
@@ -280,6 +364,26 @@ def _record_type_for_extraction(record: Mapping[str, Any]) -> str:
         if relation_origin in {"heuristic", "model", "llm"}:
             return "model_suggestion"
     return ""
+
+
+def _factual_record_class(record: Mapping[str, Any], forced_type: str, relation_type: str) -> str:
+    """Keep user facts, hypotheses, relationships, and evidence on separate classes."""
+    attributes = record.get("attributes") if isinstance(record.get("attributes"), Mapping) else {}
+    explicit = _clean_context_text(
+        record.get("factual_record_class") or attributes.get("factual_record_class") or ""
+    )
+    allowed = {"user_fact", "extraction_hypothesis", "relationship", "supporting_evidence", "legal_text"}
+    if explicit in allowed:
+        return explicit
+    if forced_type == "legal_text":
+        return "legal_text"
+    if forced_type in {"model_suggestion", "inferred_claim_label"}:
+        return "extraction_hypothesis"
+    if relation_type:
+        return "relationship"
+    if _clean_context_text(record.get("type") or record.get("entity_type")).lower() == "evidence":
+        return "supporting_evidence"
+    return "user_fact"
 
 
 def _subject_key_for_record(record: Mapping[str, Any], span_text: str) -> str:
@@ -330,11 +434,15 @@ def envelope_for_extracted_record(
         extra.append("ambiguous_source_context")
     spans = _candidate_spans(record, source_text)
     selected_span: Optional[Dict[str, Any]] = None
+    forced_type = _record_type_for_extraction(record)
+    origin_norm = _clean_context_text(record.get("origin") or "").lower()
+    # A model claim cannot fill a missing or foreign span by searching the source.
+    model_supplied = bool(forced_type) or origin_norm in {"model", "llm"}
     if len(spans) > 1:
         extra.append("ambiguous_source_span")
     elif len(spans) == 1:
         selected_span = spans[0]
-    else:
+    elif not model_supplied:
         description = _clean_context_text(attributes.get("description") or "")
         if description:
             lookup = locate_unique_byte_span(source_text, description)
@@ -354,10 +462,14 @@ def envelope_for_extracted_record(
     if not record.get("relation_type"):
         entity_type = _clean_context_text(record.get("type") or record.get("entity_type"))
         supported_text = record.get("name") if entity_type in {"person", "organization", "location", "date"} else attributes.get("description") or record.get("name") or ""
+        display_name = _clean_context_text(record.get("name") or "")
+        # A legal or classifier prefix can sit on a real span. The displayed
+        # name stays a candidate until it is itself exact user source text.
+        name_is_user_text = bool(display_name) and " ".join(display_name.split()) in " ".join(source_text.split())
         if (not isinstance(supported_text, str) or not supported_text.strip()
-                or " ".join(supported_text.split()) != " ".join(span_text.split())):
+                or " ".join(supported_text.split()) != " ".join(span_text.split())
+                or not name_is_user_text):
             extra.append("unsupported_extracted_content")
-    forced_type = _record_type_for_extraction(record)
     relation_type = _clean_context_text(record.get("relation_type") or "")
     if relation_type and _clean_context_text(record.get("origin") or "").lower() in {"heuristic", "model", "llm"}:
         forced_type = forced_type or "model_suggestion"
@@ -389,6 +501,8 @@ def envelope_for_extracted_record(
         actor=_clean_context_text(context.get("actor")),
         name=_clean_context_text(context.get("name")),
         event_date=_clean_context_text(context.get("event_date")),
+        answer_id=_clean_context_text(context.get("answer_id")),
+        factual_record_class=_factual_record_class(record, forced_type, relation_type),
         extra_deficiencies=extra,
     )
 
@@ -493,6 +607,12 @@ def record_answer_graph_revision(
     span = provenance.get("source_span")
     envelope = None
     entity = None
+    # Unknown, refused, skipped, and deferred answers stay on the revision
+    # ledger. They are not complainant facts.
+    non_fact_status = str(value_status or "").strip().lower() in {
+        "unknown", "refused", "skipped", "deferred", "invalidated",
+    }
+    answer_identity = str(context.get("answer_id") or event_id or "")
     if isinstance(span, Mapping) and not provenance.get("deficiency"):
         envelope = build_user_assertion_envelope(
             source_text=source_text,
@@ -500,18 +620,15 @@ def record_answer_graph_revision(
             source_id=str(context.get("source_id") or event_id or "answer"),
             message_id=str(context.get("message_id") or context.get("source_id") or event_id or "answer"),
             document_id=str(context.get("document_id") or ""),
-            assertion_status=str(context.get("assertion_status") or "asserted"),
+            assertion_status=str(value_status if non_fact_status else (context.get("assertion_status") or "asserted")),
             extractor_version=str(context.get("extractor_version") or DEFAULT_USER_ASSERTION_EXTRACTOR_VERSION),
             source_hash=str(context.get("source_hash") or ""),
             source_span=span,
             role="answer",
             subject_key=f"answer|{event_id}|{epistemic_class}|{value_status}",
+            answer_id=answer_identity,
+            factual_record_class="user_fact" if not non_fact_status else "",
         )
-    # Unknown, refused, skipped, and deferred answers stay on the revision
-    # ledger. They are not complainant facts.
-    non_fact_status = str(value_status or "").strip().lower() in {
-        "unknown", "refused", "skipped", "deferred", "invalidated",
-    }
     if envelope is not None and envelope.is_asserted_user_fact and not non_fact_status:
         entity = Entity(
             id=f"answer_{len(graph.entities) + 1}",
@@ -551,6 +668,9 @@ def record_answer_graph_revision(
         "question": dict(question) if isinstance(question, Mapping) else {},
         "entity_id": entity.id if entity is not None else "",
         "stable_id": envelope.stable_id if envelope is not None and envelope.is_asserted_user_fact else "",
+        "answer_id": answer_identity,
+        "message_id": str(context.get("message_id") or ""),
+        "source_kind": str(context.get("source_kind") or "user_statement"),
         "support_changes": [dict(item) for item in (support_changes or [])],
         "audit_retained": True,
         "provenance": {
@@ -703,7 +823,11 @@ def _validated_graph_provenance(provenance, *, record_type="", name="", attribut
                 assertion_status="unverified", deficiencies=("relationship_binding_mismatch",))
     elif envelope.is_asserted_user_fact:
         text = name if record_type in {"person", "organization", "location", "date"} else attrs.get("description") or name
-        if not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split()):
+        display_name = " ".join(str(name or "").split())
+        source_text = " ".join(str(envelope.source_text or "").split())
+        name_is_user_text = bool(display_name) and display_name in source_text
+        if (not isinstance(text, str) or " ".join(text.split()) != " ".join(envelope.source_span_text.split())
+                or not name_is_user_text):
             envelope = replace(envelope, record_type="unverified_candidate", source_kind="unverified",
                 assertion_status="unverified", deficiencies=("unsupported_extracted_content",))
     result["user_assertion"] = envelope.as_dict()
@@ -722,8 +846,12 @@ class Entity:
     provenance: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.provenance = _validated_graph_provenance(self.provenance, record_type=self.type,
-            name=self.name, attributes=self.attributes, source=self.source)
+        # Copy before validation. Envelope checks replace nested proof and must
+        # not write back into the caller's serialized JSON.
+        self.attributes = copy.deepcopy(self.attributes) if isinstance(self.attributes, dict) else {}
+        self.provenance = _validated_graph_provenance(
+            copy.deepcopy(self.provenance) if isinstance(self.provenance, Mapping) else {},
+            record_type=self.type, name=self.name, attributes=self.attributes, source=self.source)
     
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -745,9 +873,11 @@ class Relationship:
     provenance: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.provenance = _validated_graph_provenance(self.provenance, record_type=self.relation_type,
-            attributes=self.attributes, source=self.source, relationship=True,
-            graph_source_id=self.source_id, graph_target_id=self.target_id)
+        self.attributes = copy.deepcopy(self.attributes) if isinstance(self.attributes, dict) else {}
+        self.provenance = _validated_graph_provenance(
+            copy.deepcopy(self.provenance) if isinstance(self.provenance, Mapping) else {},
+            record_type=self.relation_type, attributes=self.attributes, source=self.source,
+            relationship=True, graph_source_id=self.source_id, graph_target_id=self.target_id)
     
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -1214,7 +1344,66 @@ class KnowledgeGraph:
         ledger.setdefault("assertion_states", {})
         ledger.setdefault("conflicts", [])
         ledger.setdefault("reopened_questions", [])
+        ledger.setdefault("inquiry_targets", [])
+        ledger.setdefault("proposals", [])
         return ledger
+
+    def factual_review_revision(self) -> str:
+        """Expected-revision token for proposals and admitted graph revisions.
+
+        Reading the token does not create a ledger. Proposal status is part of
+        the token so a hypothesis is a real revision even before admission.
+        """
+        ledger = self.metadata.get("factual_ledger") if isinstance(self.metadata, dict) else None
+        if not isinstance(ledger, Mapping):
+            ledger = {}
+        revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+        proposals = ledger.get("proposals") if isinstance(ledger.get("proposals"), list) else []
+        material = {
+            "revisions": [
+                {
+                    "revision_index": item.get("revision_index"),
+                    "event_id": item.get("event_id"),
+                    "action": item.get("action"),
+                }
+                for item in revisions if isinstance(item, Mapping)
+            ],
+            "proposals": [
+                {
+                    "proposal_id": item.get("proposal_id"),
+                    "status": item.get("status"),
+                    "event_id": item.get("event_id"),
+                }
+                for item in proposals if isinstance(item, Mapping)
+            ],
+        }
+        encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return "fr_" + hashlib.sha256(encoded).hexdigest()
+
+    def register_inquiry_target(
+        self,
+        *,
+        inquiry_id: str,
+        entity_id: str,
+        question: str,
+        stable_id: str = "",
+    ) -> Dict[str, Any]:
+        """Record an inquiry bound to one factual target. Unrelated inquiries stay put."""
+        if not inquiry_id or not entity_id:
+            raise ValueError("inquiry target requires an id and a factual entity")
+        targets = self.factual_ledger()["inquiry_targets"]
+        for existing in targets:
+            if isinstance(existing, Mapping) and existing.get("inquiry_id") == inquiry_id:
+                return copy.deepcopy(dict(existing))
+        record = {
+            "inquiry_id": inquiry_id,
+            "entity_id": entity_id,
+            "stable_id": stable_id,
+            "question": question,
+            "status": "open",
+        }
+        targets.append(record)
+        return copy.deepcopy(record)
 
     def begin_answer_event(self, event_id: str, payload: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         """Return the stored event when the payload matches. A changed payload fails."""
@@ -1410,6 +1599,372 @@ class KnowledgeGraph:
         self.invalidate_dependents(previous.id, reason="retracted", event_id=event_id)
         return revision
 
+    def apply_factual_review(
+        self,
+        *,
+        actor_role: str,
+        actor_principal_id: str,
+        authority_granted: bool,
+        expected_revision: str,
+        action: str,
+        text: str = "",
+        source_text: str = "",
+        message_id: str = "",
+        target_stable_id: str = "",
+        proposal_id: str = "",
+        origin: str = "actor",
+        event_id: str = "",
+        case_id: str = "",
+        record_class: str = "",
+    ) -> Dict[str, Any]:
+        """Apply one constrained user or lawyer factual review.
+
+        Generated suggestions stay hypotheses until ``admit``. Supersession,
+        contradiction, and retraction keep the original source envelope.
+        Retraction invalidates support edges and proof caches that cite the
+        target. A missing explicit authority grant or a stale expected
+        revision changes nothing.
+        """
+        role = str(actor_role or "").strip().lower()
+        principal = str(actor_principal_id or "").strip()
+        if authority_granted is not True or not principal:
+            raise FactualReviewError("actor_authority_required")
+        if role not in _FACTUAL_REVIEW_ACTORS:
+            raise FactualReviewError("actor_not_permitted")
+        selected = str(action or "").strip().lower()
+        if selected not in _FACTUAL_REVIEW_ACTIONS:
+            raise FactualReviewError("unknown_action")
+        bound_case = str((self.metadata or {}).get("case_id") or "")
+        if case_id and bound_case and str(case_id) != bound_case:
+            raise FactualReviewError("cross_case_id")
+        if str(record_class or "") == "legal_text":
+            raise FactualReviewError("constrained_record")
+        normalized_origin = "model" if str(origin or "").strip().lower() in {"model", "llm", "generated"} else "actor"
+        stable_event = str(event_id or "").strip()
+        review_payload = answer_event_payload(
+            question={"action": selected, "proposal_id": proposal_id, "target_stable_id": target_stable_id},
+            answer={"text": text, "source_text": source_text, "message_id": message_id, "origin": normalized_origin},
+            factual_action=selected,
+            supersedes_stable_id=target_stable_id if selected == "supersede" else None,
+            retracts_stable_id=target_stable_id if selected == "retract" else None,
+            contradicts_stable_id=target_stable_id if selected == "contradict" else None,
+        )
+        if stable_event:
+            try:
+                prior = self.begin_answer_event(stable_event, review_payload)
+            except AnswerEventConflict:
+                raise FactualReviewError("event_conflict") from None
+            if isinstance(prior, Mapping) and isinstance(prior.get("review_result"), Mapping):
+                replay = copy.deepcopy(dict(prior["review_result"]))
+                replay["idempotent_replay"] = True
+                replay["graph_mutated"] = False
+                return replay
+        if str(expected_revision or "") != self.factual_review_revision():
+            raise FactualReviewError("stale_graph_revision")
+        if selected == "propose":
+            result = self._propose_factual_hypothesis(
+                text=text, origin=normalized_origin, role=role, principal=principal,
+                event_id=stable_event, case_id=bound_case or str(case_id or ""),
+            )
+        elif selected == "admit":
+            result = self._admit_factual_proposal(
+                proposal_id=proposal_id, source_text=source_text or text, message_id=message_id,
+                role=role, principal=principal, event_id=stable_event,
+            )
+        elif selected == "supersede":
+            result = self._revise_factual_assertion(
+                kind="supersede", target_stable_id=target_stable_id, source_text=source_text or text,
+                message_id=message_id, role=role, principal=principal, event_id=stable_event,
+            )
+        elif selected == "retract":
+            result = self._revise_factual_assertion(
+                kind="retract", target_stable_id=target_stable_id, source_text=source_text or text,
+                message_id=message_id, role=role, principal=principal, event_id=stable_event,
+            )
+        else:
+            result = self._contradict_factual_assertion(
+                target_stable_id=target_stable_id, source_text=source_text or text, message_id=message_id,
+                role=role, principal=principal, event_id=stable_event,
+            )
+        result["graph_revision"] = self.factual_review_revision()
+        result["idempotent_replay"] = False
+        result["graph_mutated"] = True
+        if stable_event:
+            self.finish_answer_event(stable_event, review_payload, review_result=result)
+        return copy.deepcopy(result)
+
+    def _proposal_records(self) -> List[Dict[str, Any]]:
+        records = self.factual_ledger()["proposals"]
+        return records if isinstance(records, list) else []
+
+    def _constrained_statement(self, text: str) -> str:
+        if not isinstance(text, str):
+            raise FactualReviewError("constrained_text")
+        statement = " ".join(text.split())
+        if not statement or len(statement) > _MAX_FACTUAL_REVIEW_CHARS or "\x00" in text:
+            raise FactualReviewError("constrained_text")
+        return statement
+
+    def _review_envelope(self, text: str, message_id: str) -> UserAssertionEnvelope:
+        statement = self._constrained_statement(text)
+        identity = str(message_id or "").strip()
+        if not identity:
+            raise FactualReviewError("source_required")
+        from integrations.ipfs_datasets.types import source_byte_hash
+        envelope = build_user_assertion_envelope(
+            source_text=statement,
+            source_kind="user_statement",
+            source_id=identity,
+            message_id=identity,
+            assertion_status="asserted",
+            extractor_version=_FACTUAL_REVIEW_EXTRACTOR,
+            source_hash=source_byte_hash(statement),
+            source_span={"start": 0, "end": len(statement.encode("utf-8")), "text": statement, "unit": "byte"},
+            factual_record_class="user_fact",
+        )
+        if not envelope.is_asserted_user_fact:
+            raise FactualReviewError("source_not_user_fact")
+        return envelope
+
+    def _entity_for_envelope(self, envelope: UserAssertionEnvelope, *, entity_id: str) -> Entity:
+        text = envelope.source_span_text
+        return Entity(
+            id=entity_id,
+            type="fact",
+            name=text,
+            attributes={"description": text, "factual_record_class": "user_fact"},
+            confidence=1.0,
+            source="complaint",
+            provenance={"user_assertion": envelope.as_dict(), "case_id": self.metadata.get("case_id")},
+        )
+
+    def _stamp_actor(self, revision: Mapping[str, Any], *, role: str, principal: str) -> Dict[str, Any]:
+        stamped = dict(revision)
+        stamped["actor_role"] = role
+        stamped["actor_principal_id"] = principal
+        stamped["actor_authority"] = role
+        revisions = self.factual_ledger()["revisions"]
+        if revisions and isinstance(revisions[-1], dict) and revisions[-1].get("revision_index") == stamped.get("revision_index"):
+            revisions[-1].update({
+                "actor_role": role,
+                "actor_principal_id": principal,
+                "actor_authority": role,
+            })
+        return stamped
+
+    def _propose_factual_hypothesis(
+        self, *, text: str, origin: str, role: str, principal: str, event_id: str, case_id: str,
+    ) -> Dict[str, Any]:
+        statement = self._constrained_statement(text)
+        proposal_id = "proposal-" + hashlib.sha256(
+            f"{origin}|{role}|{principal}|{statement}|{event_id}".encode("utf-8")
+        ).hexdigest()[:24]
+        entity_id = "hypothesis-" + proposal_id
+        entity = Entity(
+            id=entity_id,
+            type="fact",
+            name=statement,
+            attributes={
+                "description": statement,
+                "factual_record_class": "extraction_hypothesis",
+                "origin": origin,
+                "hypothesis": True,
+                "admitted": False,
+                "proposal_id": proposal_id,
+            },
+            confidence=0.2 if origin == "model" else 0.4,
+            source="inference" if origin == "model" else "complaint",
+            provenance={"source_id": proposal_id, "case_id": case_id, "origin": origin},
+        )
+        self.add_entity(entity)
+        record = {
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "status": "hypothesis",
+            "origin": origin,
+            "text": statement,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "event_id": event_id,
+            "admitted_stable_id": "",
+            "source_history_retained": True,
+        }
+        self._proposal_records().append(record)
+        revision = self._stamp_actor(self.append_revision({
+            "action": "propose",
+            "event_id": event_id,
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "origin": origin,
+            "status": "hypothesis",
+        }), role=role, principal=principal)
+        return {
+            "status": "hypothesis",
+            "action": "propose",
+            "proposal_id": proposal_id,
+            "entity_id": entity_id,
+            "admitted": False,
+            "hypothesis": True,
+            "origin": origin,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision["revision_index"],
+            "source_history_retained": True,
+        }
+
+    def _find_proposal(self, proposal_id: str) -> Dict[str, Any]:
+        identity = str(proposal_id or "").strip()
+        if not identity:
+            raise FactualReviewError("proposal_required")
+        for record in self._proposal_records():
+            if isinstance(record, dict) and record.get("proposal_id") == identity:
+                return record
+        raise FactualReviewError("proposal_missing")
+
+    def _admit_factual_proposal(
+        self, *, proposal_id: str, source_text: str, message_id: str, role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        proposal = self._find_proposal(proposal_id)
+        if proposal.get("status") != "hypothesis":
+            raise FactualReviewError("proposal_not_hypothesis")
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id="admitted-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        self.register_assertion(entity, envelope, status="active", event_id=event_id)
+        hypothesis = self.entities.get(str(proposal.get("entity_id") or ""))
+        if hypothesis is not None:
+            attributes = dict(hypothesis.attributes or {})
+            attributes["admitted"] = False
+            attributes["hypothesis"] = True
+            attributes["admission_status"] = "cited_by_admission"
+            attributes["admitted_entity_id"] = entity.id
+            hypothesis.attributes = attributes
+        proposal["status"] = "admitted"
+        proposal["admitted_stable_id"] = envelope.stable_id
+        proposal["admitted_entity_id"] = entity.id
+        revision = self._stamp_actor(self.append_revision({
+            "action": "admit",
+            "event_id": event_id,
+            "proposal_id": proposal["proposal_id"],
+            "new_stable_id": envelope.stable_id,
+            "new_entity_id": entity.id,
+            "previous_entity_id": proposal.get("entity_id"),
+            "hypothesis_retained": True,
+            "new_envelope": copy.deepcopy(envelope.as_dict()),
+        }), role=role, principal=principal)
+        return {
+            "status": "admitted",
+            "action": "admit",
+            "proposal_id": proposal["proposal_id"],
+            "entity_id": entity.id,
+            "hypothesis_entity_id": proposal.get("entity_id"),
+            "stable_id": envelope.stable_id,
+            "admitted": True,
+            "hypothesis": False,
+            "hypothesis_retained": True,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision["revision_index"],
+            "source_history_retained": True,
+        }
+
+    def _revise_factual_assertion(
+        self, *, kind: str, target_stable_id: str, source_text: str, message_id: str,
+        role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        identity = str(target_stable_id or "").strip()
+        if not identity:
+            raise FactualReviewError("target_required")
+        previous = self.entity_for_stable_id(identity)
+        if previous is None:
+            raise FactualReviewError("unknown_target")
+        preserved = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id=f"{kind}-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        try:
+            if kind == "retract":
+                revision = self.retract_assertion(identity, entity, envelope, event_id=event_id)
+            else:
+                revision = self.supersede_assertion(identity, entity, envelope, event_id=event_id)
+        except FactualReviewError:
+            self.entities.pop(entity.id, None)
+            raise
+        except KeyError:
+            self.entities.pop(entity.id, None)
+            raise FactualReviewError("unknown_target") from None
+        except ValueError:
+            self.entities.pop(entity.id, None)
+            raise FactualReviewError("revision_refused") from None
+        revision = self._stamp_actor(revision, role=role, principal=principal)
+        still = self.entities.get(previous.id)
+        retained = isinstance((still.provenance or {}).get("user_assertion"), Mapping) if still is not None else False
+        if isinstance(preserved, Mapping) and retained:
+            retained = (still.provenance or {}).get("user_assertion", {}).get("stable_id") == preserved.get("stable_id")
+        return {
+            "status": "retracted" if kind == "retract" else "superseded",
+            "action": kind,
+            "target_stable_id": identity,
+            "stable_id": envelope.stable_id,
+            "entity_id": entity.id,
+            "previous_entity_id": previous.id,
+            "admitted": True,
+            "hypothesis": False,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision.get("revision_index"),
+            "source_history_retained": retained,
+            "invalidated_support": kind == "retract",
+        }
+
+    def _contradict_factual_assertion(
+        self, *, target_stable_id: str, source_text: str, message_id: str, role: str, principal: str, event_id: str,
+    ) -> Dict[str, Any]:
+        identity = str(target_stable_id or "").strip()
+        if not identity:
+            raise FactualReviewError("target_required")
+        previous = self.entity_for_stable_id(identity)
+        if previous is None:
+            raise FactualReviewError("unknown_target")
+        if self.entity_activity(previous.id) in _INACTIVE_ASSERTION_STATES:
+            raise FactualReviewError("revision_refused")
+        preserved = copy.deepcopy((previous.provenance or {}).get("user_assertion"))
+        envelope = self._review_envelope(source_text, message_id)
+        entity = self._entity_for_envelope(envelope, entity_id="contradict-" + envelope.stable_id[:20])
+        self.add_entity(entity)
+        self.register_assertion(entity, envelope, status="active", event_id=event_id)
+        try:
+            revision = self.record_assertion_conflict(
+                identity, envelope.stable_id, event_id=event_id,
+                left_entity_id=previous.id, right_entity_id=entity.id,
+            )
+        except ValueError:
+            raise FactualReviewError("revision_refused") from None
+        revision = self._stamp_actor(revision, role=role, principal=principal)
+        still = self.entities.get(previous.id)
+        retained = isinstance(preserved, Mapping) and still is not None and isinstance(
+            (still.provenance or {}).get("user_assertion"), Mapping)
+        return {
+            "status": "conflict",
+            "action": "contradict",
+            "target_stable_id": identity,
+            "stable_id": envelope.stable_id,
+            "entity_id": entity.id,
+            "previous_entity_id": previous.id,
+            "admitted": False,
+            "hypothesis": False,
+            "unresolved": True,
+            "actor_role": role,
+            "actor_principal_id": principal,
+            "actor_authority": role,
+            "revision_index": revision.get("revision_index"),
+            "source_history_retained": retained,
+        }
+
     def record_assertion_conflict(
         self,
         left_stable_id: str,
@@ -1453,23 +2008,37 @@ class KnowledgeGraph:
         return revision
 
     def invalidate_dependents(self, entity_id: str, *, reason: str, event_id: str = "") -> List[str]:
-        """Mark support that depended on an assertion stale and reopen a question."""
+        """Mark support that depended on an assertion stale and reopen its inquiries.
+
+        Only support edges and proof-cache references that cite this entity are
+        invalidated. Contradiction edges, unrelated identities, and inquiries
+        bound to other targets stay as they are.
+        """
         if not entity_id:
             return []
         invalidated: List[str] = []
         for relationship in self.relationships.values():
-            if entity_id not in {relationship.source_id, relationship.target_id}:
-                continue
-            if relationship.relation_type not in _SUPPORT_RELATION_TYPES:
-                continue
             attributes = dict(relationship.attributes or {})
+            cites_support = entity_id in {relationship.source_id, relationship.target_id}
+            cache_cites = _proof_cache_cites(attributes, entity_id)
+            if relationship.relation_type == "contradicts":
+                if cache_cites:
+                    relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                continue
+            if relationship.relation_type not in _SUPPORT_RELATION_TYPES or not cites_support:
+                if cache_cites:
+                    relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                    invalidated.append(relationship.id)
+                continue
             attributes["activity_status"] = "invalidated"
             attributes["effective"] = False
             attributes["invalidation_reason"] = reason
             attributes["invalidated_entity_id"] = entity_id
-            relationship.attributes = attributes
+            relationship.attributes = _invalidate_proof_cache(attributes, entity_id, reason) if cache_cites or attributes.get("proof_cache") else attributes
             invalidated.append(relationship.id)
         for entity in self.entities.values():
+            if entity.id == entity_id:
+                continue
             attributes = dict(entity.attributes or {})
             changed = False
             for key in ("satisfied_requirements", "resolved_gaps", "satisfied_fact_bundle", "event_support_refs"):
@@ -1478,9 +2047,62 @@ class KnowledgeGraph:
                     continue
                 attributes[key] = [item for item in values if item != entity_id]
                 changed = True
+            if _proof_cache_cites(attributes, entity_id):
+                attributes = _invalidate_proof_cache(attributes, entity_id, reason)
+                changed = True
             if changed:
                 attributes["support_invalidated"] = True
                 entity.attributes = attributes
+                if entity.id not in invalidated:
+                    invalidated.append(entity.id)
+        self._reopen_affected_inquiries(entity_id, reason=reason, event_id=event_id)
+        linked = getattr(self, "_dependency_graph", None)
+        if linked is not None:
+            from complaint_phases.dependency_graph import DependencyGraphBuilder
+            DependencyGraphBuilder().invalidate_factual_dependents(
+                linked, entity_id, reason=reason, event_id=event_id,
+            )
+        return invalidated
+
+    def _reopen_affected_inquiries(self, entity_id: str, *, reason: str, event_id: str) -> None:
+        questions = self.factual_ledger()["reopened_questions"]
+        stable_ids = {
+            str(state.get("stable_id") or "")
+            for state in self.factual_ledger().get("assertion_states", {}).values()
+            if isinstance(state, Mapping) and state.get("entity_id") == entity_id
+        }
+        reopened_any = False
+        for inquiry in self.factual_ledger().get("inquiry_targets") or []:
+            if not isinstance(inquiry, dict):
+                continue
+            target_entity = str(inquiry.get("entity_id") or "")
+            target_stable = str(inquiry.get("stable_id") or "")
+            affected = target_entity == entity_id or (target_stable and target_stable in stable_ids)
+            if not affected:
+                continue
+            inquiry["status"] = "reopened"
+            inquiry["invalidation_reason"] = reason
+            inquiry["event_id"] = event_id
+            reopened_any = True
+            question = {
+                "type": "clarification",
+                "question": inquiry.get("question") or (
+                    "The earlier statement is no longer active support. "
+                    "What is the current fact, and which source should be used?"
+                ),
+                "context": {
+                    "regenerated": True,
+                    "invalidated_entity_id": entity_id,
+                    "invalidation_reason": reason,
+                    "event_id": event_id,
+                    "inquiry_id": inquiry.get("inquiry_id"),
+                },
+                "candidate_source": "factual_revision",
+            }
+            if question not in questions:
+                questions.append(question)
+        if reopened_any:
+            return
         question = {
             "type": "clarification",
             "question": (
@@ -1495,10 +2117,8 @@ class KnowledgeGraph:
             },
             "candidate_source": "factual_revision",
         }
-        questions = self.factual_ledger()["reopened_questions"]
         if question not in questions:
             questions.append(question)
-        return invalidated
 
     def effective_fact_entities(self) -> List[Entity]:
         """Facts still eligible as current support. Superseded and retracted facts stay stored."""
@@ -1862,7 +2482,9 @@ class KnowledgeGraph:
             if isinstance(item, Mapping)
         )
         for eid, edata in entity_records:
-            entity = Entity(**edata)
+            if not isinstance(edata, Mapping):
+                continue
+            entity = Entity(**_graph_record_fields(edata, _ENTITY_FIELDS))
             graph.entities[str(eid or entity.id)] = entity
 
         raw_relationships = data.get('relationships', {})
@@ -1872,7 +2494,9 @@ class KnowledgeGraph:
             if isinstance(item, Mapping)
         )
         for rid, rdata in relationship_records:
-            rel = Relationship(**rdata)
+            if not isinstance(rdata, Mapping):
+                continue
+            rel = Relationship(**_graph_record_fields(rdata, _RELATIONSHIP_FIELDS))
             graph.relationships[str(rid or rel.id)] = rel
         
         return graph
@@ -1884,7 +2508,8 @@ class KnowledgeGraph:
             data = json.load(f)
         logger.info(f"Knowledge graph loaded from {filepath}")
         return cls.from_dict(data)
-    
+
+
     def _update_metadata(self):
         """Update timestamps and invalidate the previous immutable snapshot."""
         revision = int(self.metadata.get('revision', 0) or 0) + 1
@@ -2034,6 +2659,169 @@ class KnowledgeGraph:
         
         return max(connection_counts.items(), key=lambda x: x[1])[0]
 
+
+
+def _caller_json_fingerprint(payload: Mapping[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _source_provenance(envelope: Optional[UserAssertionEnvelope], *, verified: bool) -> Dict[str, Any]:
+    if envelope is None:
+        return {"verified": False, "source_id": "", "source_identity": "", "extractor_version": "",
+            "source_hash": "", "source_generation": "", "source_span": None}
+    return {
+        "verified": verified,
+        "source_id": envelope.source_id,
+        "source_identity": envelope.source_identity,
+        "extractor_version": envelope.extractor_version,
+        "source_hash": envelope.source_hash,
+        "source_generation": envelope.source_generation or "",
+        "contract_version": envelope.contract_version,
+        "source_span": {
+            "start": envelope.source_span_start,
+            "end": envelope.source_span_end,
+            "text": envelope.source_span_text,
+            "unit": "byte",
+        },
+    }
+
+
+def _entity_envelope(entity: Entity) -> Optional[UserAssertionEnvelope]:
+    try:
+        return assertion_from_provenance(entity.provenance)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _inference_or_role_only(entity: Entity, envelope: Optional[UserAssertionEnvelope]) -> bool:
+    source = str(entity.source or "").lower()
+    if source in _INFERENCE_SOURCES:
+        return True
+    if envelope is not None and (
+        envelope.factual_record_class in {"extraction_hypothesis", "legal_text"}
+        or envelope.record_type in {"model_suggestion", "inferred_claim_label", "legal_text"}
+        or envelope.source_kind in _INFERENCE_SOURCES
+    ):
+        return True
+    return False
+
+
+def _explicit_adoption(entity: Entity, envelope: Optional[UserAssertionEnvelope], graph: "KnowledgeGraph") -> bool:
+    """A boolean, role label, or cached authority flag is not an adoption."""
+    if envelope is None or not envelope.is_asserted_user_fact:
+        return False
+    if envelope.factual_record_class != "supporting_evidence":
+        return False
+    attrs = entity.attributes if isinstance(entity.attributes, dict) else {}
+    if attrs.get("adoption") == "explicit" and attrs.get("adoption_assertion_id") == envelope.stable_id:
+        return True
+    for relationship in graph.relationships.values():
+        rel_attrs = relationship.attributes if isinstance(relationship.attributes, dict) else {}
+        if relationship.relation_type not in {"supports", "adopted_evidence"}:
+            continue
+        if rel_attrs.get("adoption") != "explicit":
+            continue
+        if rel_attrs.get("adoption_assertion_id") != envelope.stable_id:
+            continue
+        if entity.id not in {relationship.source_id, relationship.target_id}:
+            continue
+        return True
+    return False
+
+
+def _annotate_item(item: Dict[str, Any], graph: "KnowledgeGraph") -> Dict[str, Any]:
+    entity = graph.entities.get(str(item.get("graph_entity_id") or ""))
+    envelope = _entity_envelope(entity) if entity is not None else None
+    verified = bool(envelope is not None and envelope.is_asserted_user_fact and not _inference_or_role_only(entity, envelope))
+    annotated = dict(item)
+    annotated["source_provenance"] = _source_provenance(envelope, verified=verified)
+    annotated["explicitly_adopted_evidence"] = bool(entity is not None and _explicit_adoption(entity, envelope, graph))
+    if not verified or _inference_or_role_only(entity, envelope):
+        annotated["authority_is_user_fact"] = False
+        annotated["admitted_user_fact"] = False
+    if annotated["explicitly_adopted_evidence"]:
+        annotated["authority_is_user_fact"] = False
+        annotated["admitted_user_fact"] = False
+    return annotated
+
+
+def project_current_factual_graph(caller_json: Mapping[str, Any], *, case_id: str) -> Dict[str, Any]:
+    """Project one case graph through the pinned factual KG adapter.
+
+    Hydration copies the caller document. Cached authority booleans, role
+    labels, and model inferences stay out of user assertions and verified facts.
+    Explicitly adopted evidence keeps source, version, and span provenance.
+    """
+    from mediator.integrations.graph_tools import project_factual_kg
+
+    if not isinstance(caller_json, Mapping):
+        raise TypeError("knowledge graph data must be a mapping")
+    fingerprint = _caller_json_fingerprint(caller_json)
+    graph = KnowledgeGraph.from_dict(caller_json)
+    if _caller_json_fingerprint(caller_json) != fingerprint:
+        raise RuntimeError("graph hydration mutated caller JSON")
+    projected = project_factual_kg(graph, case_id=case_id)
+    if _caller_json_fingerprint(caller_json) != fingerprint:
+        raise RuntimeError("graph projection mutated caller JSON")
+
+    user_statements = []
+    withheld = list(projected.get("unresolved") or [])
+    for item in projected.get("user_statements") or []:
+        annotated = _annotate_item(item, graph)
+        entity = graph.entities.get(str(annotated.get("graph_entity_id") or ""))
+        envelope = _entity_envelope(entity) if entity is not None else None
+        real_user = (
+            envelope is not None
+            and envelope.is_asserted_user_fact
+            and envelope.factual_record_class not in _NON_USER_CLASSES
+            and not _inference_or_role_only(entity, envelope)
+            and annotated.get("provenance_status") == "verified"
+        )
+        if real_user:
+            user_statements.append(annotated)
+        else:
+            withheld.append({**annotated, "reason": "not_a_user_assertion"})
+
+    adopted = []
+    evidence_revisions = []
+    for item in projected.get("evidence_revisions") or []:
+        annotated = _annotate_item(item, graph)
+        if annotated.get("explicitly_adopted_evidence") and annotated["source_provenance"]["verified"]:
+            adopted.append(annotated)
+        evidence_revisions.append(annotated)
+
+    corrections = [dict(item) for item in projected.get("revisions") or []
+        if item.get("action") in {"supersede", "retract"}]
+    contradictions = [dict(item) for item in projected.get("unresolved_conflicts") or []]
+    seen = {
+        str(item.get("graph_entity_id") or "")
+        for bucket in (user_statements, adopted, evidence_revisions, projected.get("hypotheses") or [], projected.get("allegations") or [])
+        for item in bucket
+    }
+    for entity in graph.entities.values():
+        if entity.id in seen:
+            continue
+        envelope = _entity_envelope(entity)
+        withheld.append({
+            "graph_entity_id": entity.id,
+            "reason": "not_a_user_assertion",
+            "admitted_user_fact": False,
+            "authority_is_user_fact": False,
+            "explicitly_adopted_evidence": False,
+            "source_provenance": _source_provenance(envelope, verified=False),
+        })
+    result = dict(projected)
+    result.update({
+        "user_statements": user_statements,
+        "adopted_evidence": adopted,
+        "evidence_revisions": evidence_revisions,
+        "corrections": corrections,
+        "contradictions": contradictions,
+        "unresolved": withheld,
+        "projection_kind": "current_factual_graph",
+        "caller_json_mutated": False,
+    })
+    return result
 
 class KnowledgeGraphBuilder:
     """
@@ -2352,6 +3140,7 @@ class KnowledgeGraphBuilder:
         )
 
         from integrations.ipfs_datasets.graphs import (
+            legal_candidate_role_handoff,
             legal_namespace_kind,
             mint_graph_record_id,
             prepare_private_extraction,
@@ -2364,12 +3153,18 @@ class KnowledgeGraphBuilder:
         private_relationships: List[Mapping[str, Any]] = []
         # Explicit record projection is also used by the standalone adapter.
         # It must not recurse or repeat the owned extractor invocation.
-        if include_local_heuristics and extracted_entities is None and extracted_relationships is None and not legal_passage:
+        if legal_passage:
+            graph.metadata["factual_candidate_roles"] = legal_candidate_role_handoff()
+        elif include_local_heuristics and extracted_entities is None and extracted_relationships is None:
             extraction = prepare_private_extraction(source_text, caller_context)
             graph.metadata["private_extraction"] = {
-                key: extraction[key] for key in ("status", "diagnostic", "diagnostics", "provenance", "bounded")
+                key: extraction[key]
+                for key in ("status", "diagnostic", "diagnostics", "provenance", "bounded", "factual_candidate_roles")
                 if key in extraction
             }
+            graph.metadata["factual_candidate_roles"] = extraction.get("factual_candidate_roles") or {}
+            if extraction["status"] != "available":
+                graph.metadata["private_extraction"]["local_fallback"] = True
             if extraction["status"] == "available":
                 private_entities = extraction["entities"]
                 private_relationships = extraction["relationships"]
@@ -2416,7 +3211,9 @@ class KnowledgeGraphBuilder:
             carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
-            attributes = entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {}
+            attributes = dict(entity_data.get("attributes") if isinstance(entity_data.get("attributes"), Mapping) else {})
+            if envelope.factual_record_class:
+                attributes["factual_record_class"] = envelope.factual_record_class
             upstream_unverified = attributes.get("upstream_extraction") is True and not entity_is_legal and not envelope.is_asserted_user_fact
             if upstream_unverified:
                 # Legacy support consumers inspect entity.type. Keeping a model
@@ -2529,7 +3326,9 @@ class KnowledgeGraphBuilder:
             carried_extractor = _merge_provenance(preserved_extractor, raw_extractor)
             if carried_extractor:
                 provenance_payload["extractor"] = carried_extractor
-            attributes = rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {}
+            attributes = dict(rel_data.get("attributes") if isinstance(rel_data.get("attributes"), Mapping) else {})
+            if envelope.factual_record_class:
+                attributes["factual_record_class"] = envelope.factual_record_class
             upstream_support_suggestion = (attributes.get("upstream_extraction") is True
                 and not envelope.is_asserted_user_fact
                 and relation_type in (_SUPPORT_RELATION_TYPES | {"has_fact"}))

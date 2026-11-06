@@ -1067,6 +1067,367 @@ def intake_legal_selection(
     }
 
 
+_ACQUISITION_QUERY_TERM_CAP = 12
+_ACQUISITION_TARGET_CAP = 16
+_ACQUISITION_RESULT_CAP = 25
+_ACQUISITION_TIMEOUT_CAP_SECONDS = 30.0
+
+
+def _explicit_jurisdiction_token(value: Any) -> str:
+    """Normalize an already-explicit code. Ambiguous text is left unchanged."""
+    text = " ".join(str(value or "").split())
+    prefixed = re.fullmatch(r"US-([A-Za-z]{2})", text)
+    if not prefixed:
+        return text
+    code = prefixed.group(1).upper()
+    if code in set(_EXPLICIT_STATE_NAMES.values()):
+        return code
+    return text
+
+
+def _supported_claim_record(record: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """A selected claim is supported only when the intake registry names it."""
+    from complaint_phases.intake_claim_registry import CLAIM_INTAKE_REQUIREMENTS, normalize_claim_type
+
+    claim_type = _text(record.get("claim_type") or record.get("type"))
+    normalized = normalize_claim_type(claim_type)
+    if not normalized or normalized == "unknown" or normalized not in CLAIM_INTAKE_REQUIREMENTS:
+        return None
+    registry = CLAIM_INTAKE_REQUIREMENTS[normalized]
+    return {
+        "claim_type": normalized,
+        "name": _text(record.get("name") or record.get("label") or registry.get("label") or normalized),
+        "requirement_elements": [
+            {
+                "requirement_id": _text(element.get("element_id")),
+                "label": _text(element.get("label")),
+            }
+            for element in (registry.get("elements") or [])
+            if isinstance(element, Mapping) and _text(element.get("element_id"))
+        ],
+    }
+
+
+def _classified_role(context: Mapping[str, Any], role: str) -> Dict[str, Any]:
+    return classify_legal_date(context.get(role), role=role)
+
+
+def _public_query_terms(
+    *groups: Any,
+    narrative: str,
+) -> List[str]:
+    """Keep short public-law terms. The case narrative is not a query."""
+    narrative_text = " ".join(str(narrative or "").split())
+    terms: List[str] = []
+    seen = set()
+    for group in groups:
+        values = group if isinstance(group, (list, tuple)) else [group]
+        for value in values:
+            text = _text(value)
+            if not text or len(text) > 80:
+                continue
+            if narrative_text and (text == narrative_text or (len(text) > 40 and text in narrative_text)):
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            terms.append(text)
+            if len(terms) >= _ACQUISITION_QUERY_TERM_CAP:
+                return terms
+    return terms
+
+
+def _closed_corpus_plan(jurisdiction: str, authority_families: Optional[Iterable[Any]]) -> Dict[str, Any]:
+    """Search flags follow the explicit jurisdiction. Unknown stays closed."""
+    program: Dict[str, Any] = {"jurisdiction": jurisdiction}
+    families = [_text(family) for family in (authority_families or []) if _text(family)]
+    if families:
+        program["authority_families"] = families
+    plan = legal_requirement_search_plan(program, state=jurisdiction if jurisdiction != UNKNOWN_LEGAL_CONTEXT else None)
+    plan["default_applied"] = False
+    plan["guessed_jurisdiction"] = False
+    return plan
+
+
+def build_bounded_legal_acquisition_request(
+    legal_context: Optional[Mapping[str, Any]],
+    claim_candidates: Optional[Iterable[Any]],
+    *,
+    requirements: Optional[Iterable[Any]] = None,
+    query_terms: Optional[Iterable[Any]] = None,
+    narrative: Any = None,
+    authority_families: Optional[Iterable[Any]] = None,
+    jurisdiction_default: Any = None,
+    corpus_default: Any = None,
+    max_results: int = 5,
+    timeout_seconds: float = 5.0,
+    storage_available: Optional[bool] = None,
+    context_questions: Optional[Iterable[Any]] = None,
+) -> Dict[str, Any]:
+    """Bind a citation fetch to explicit jurisdiction, law date, and claims.
+
+    A missing, ambiguous, or uncertain gate returns a targeted inquiry. This
+    function does not choose Oregon, federal law, or a corpus, and it does not
+    copy a law-query date into the factual chronology. The raw case narrative
+    is not stored on the request and is not required to name a public-law query.
+    """
+    source = dict(legal_context) if isinstance(legal_context, Mapping) else empty_legal_context()
+    if "jurisdiction" in source:
+        source["jurisdiction"] = _explicit_jurisdiction_token(source.get("jurisdiction"))
+    selection = intake_legal_selection(source, claim_candidates)
+    jurisdiction = str(selection.get("jurisdiction") or UNKNOWN_LEGAL_CONTEXT)
+    applicable = _classified_role(source, DATE_ROLE_APPLICABLE_LAW)
+    event_date = _classified_role(source, DATE_ROLE_EVENT)
+    filing_date = _classified_role(source, DATE_ROLE_FILING_REFERENCE)
+    retrieval_date = _classified_role(source, DATE_ROLE_CORPUS_RETRIEVAL)
+    law_query_date = applicable.get("precise_date") if _resolved_legal_date(applicable) else None
+    event_resolved = _resolved_legal_date(event_date)
+    chronology_gap = not event_resolved
+
+    supported: List[Dict[str, Any]] = []
+    unsupported: List[str] = []
+    for item in selection.get("claim_candidates") or []:
+        if not isinstance(item, Mapping):
+            continue
+        record = _supported_claim_record(item)
+        if record is None:
+            label = _text(item.get("claim_type") or item.get("name")) or "unspecified"
+            if label not in unsupported:
+                unsupported.append(label)
+            continue
+        supported.append(record)
+    for item in claim_candidates or []:
+        if isinstance(item, str):
+            probe = {"claim_type": item}
+        elif isinstance(item, Mapping):
+            probe = item
+        else:
+            continue
+        if _supported_claim_record(probe) is None:
+            label = _text(probe.get("claim_type") if isinstance(probe, Mapping) else probe) or "unspecified"
+            if label and label.lower() != "unknown" and label not in unsupported:
+                unsupported.append(label)
+
+    requirement_targets: List[Dict[str, str]] = []
+    requirement_terms: List[str] = []
+    supported_types = {item["claim_type"] for item in supported}
+    explicit_requirements = list(requirements or [])
+    for item in explicit_requirements:
+        if not isinstance(item, Mapping):
+            continue
+        claim_type = _text(item.get("claim_type") or item.get("type"))
+        supported_record = _supported_claim_record({"claim_type": claim_type}) if claim_type else None
+        normalized = supported_record["claim_type"] if supported_record else ""
+        if not normalized or normalized not in supported_types:
+            label = claim_type or "unspecified"
+            if label not in unsupported:
+                unsupported.append(label)
+            continue
+        requirement_id = _text(item.get("requirement_id") or item.get("element_id") or item.get("name"))
+        if not requirement_id:
+            continue
+        requirement_targets.append({
+            "claim_type": normalized,
+            "requirement_id": requirement_id,
+            "label": _text(item.get("label") or item.get("name") or requirement_id),
+            "target_kind": "caller_requirement",
+        })
+        requirement_terms.extend([
+            _text(item.get("citation")),
+            _text(item.get("public_query") or item.get("query")),
+            _text(item.get("label") or item.get("name")),
+        ])
+    if not requirement_targets:
+        for claim in supported:
+            for element in claim["requirement_elements"]:
+                requirement_targets.append({
+                    "claim_type": claim["claim_type"],
+                    "requirement_id": element["requirement_id"],
+                    "label": element["label"] or element["requirement_id"],
+                    "target_kind": "claim_requirement",
+                })
+                if len(requirement_targets) >= _ACQUISITION_TARGET_CAP:
+                    break
+    requirement_targets = requirement_targets[:_ACQUISITION_TARGET_CAP]
+    claim_targets = [
+        {"claim_type": claim["claim_type"], "name": claim["name"], "target_kind": "claim"}
+        for claim in supported[:_ACQUISITION_TARGET_CAP]
+    ]
+    claim_terms = [claim["name"] or claim["claim_type"].replace("_", " ") for claim in supported]
+    public_terms = _public_query_terms(query_terms or [], requirement_terms, claim_terms, narrative=str(narrative or ""))
+
+    reasons = list(selection.get("unresolved_reasons") or [])
+    if applicable.get("raw_text") and not law_query_date and "uncertain_applicable_law_date" not in reasons:
+        reasons = [("uncertain_applicable_law_date" if reason == "missing_applicable_law_date" else reason) for reason in reasons]
+        if "uncertain_applicable_law_date" not in reasons:
+            reasons.append("uncertain_applicable_law_date")
+    if unsupported and not supported and "unsupported_claim" not in reasons:
+        reasons.append("unsupported_claim")
+    if supported and not public_terms and "missing_public_law_query_terms" not in reasons:
+        reasons.append("missing_public_law_query_terms")
+    ready = bool(selection.get("ready_to_select") and supported and law_query_date and public_terms and jurisdiction != UNKNOWN_LEGAL_CONTEXT)
+
+    questions: List[Dict[str, Any]] = []
+    seen_questions = set()
+
+    def _add_question(item: Mapping[str, Any]) -> None:
+        field = _text(item.get("field") or item.get("question_id"))
+        reason = _text(item.get("reason"))
+        prompt = _text(item.get("prompt") or item.get("question"))
+        if not prompt:
+            return
+        key = (field, reason, prompt)
+        if key in seen_questions:
+            return
+        seen_questions.add(key)
+        questions.append({
+            "question_id": _text(item.get("question_id")) or f"legal_acquisition.{field or 'context'}",
+            "field": field,
+            "prompt": prompt,
+            "reason": reason,
+        })
+
+    if not ready:
+        for item in selection.get("questions") or []:
+            if isinstance(item, Mapping):
+                copied = dict(item)
+                if copied.get("reason") == "missing_applicable_law_date" and applicable.get("raw_text") and not law_query_date:
+                    copied["reason"] = "uncertain_applicable_law_date"
+                    copied["prompt"] = (
+                        "Which exact day should select the version of the law? "
+                        "An uncertain date or range is kept as stated and is not treated as that day."
+                    )
+                _add_question(copied)
+        for item in context_questions or []:
+            if isinstance(item, Mapping):
+                _add_question(item)
+        if supported and not public_terms:
+            _add_question({
+                "question_id": "legal_acquisition.query_terms",
+                "field": "query_terms",
+                "reason": "missing_public_law_query_terms",
+                "prompt": "Which public-law terms should be used to fetch the citation? The case narrative is not used as the query.",
+            })
+    if unsupported:
+        listed = ", ".join(unsupported)
+        _add_question({
+            "question_id": "legal_acquisition.claim_candidates",
+            "field": "claim_candidates",
+            "reason": "unsupported_claim",
+            "prompt": (
+                f"Which supported claim should be acquired? {listed} is not a selected supported claim, "
+                "so no jurisdiction or corpus was chosen for it."
+            ),
+        })
+    if chronology_gap:
+        _add_question({
+            "question_id": "legal_context.event_dates",
+            "field": "event_date",
+            "reason": "missing_event_dates",
+            "prompt": (
+                "What dates or date ranges are relevant to the events? "
+                "The date used to select a version of the law does not fill this chronology gap."
+            ),
+        })
+
+    try:
+        bounded_results = max(1, min(int(max_results), _ACQUISITION_RESULT_CAP))
+    except (TypeError, ValueError):
+        bounded_results = 5
+    try:
+        bounded_timeout = max(0.1, min(float(timeout_seconds), _ACQUISITION_TIMEOUT_CAP_SECONDS))
+    except (TypeError, ValueError):
+        bounded_timeout = 5.0
+    corpus_plan = _closed_corpus_plan(jurisdiction if ready else UNKNOWN_LEGAL_CONTEXT, authority_families if ready else None)
+    if not ready:
+        for flag in (
+            "search_us_code",
+            "search_federal_register",
+            "search_state_laws",
+            "search_state_administrative_rules",
+            "search_case_law",
+        ):
+            corpus_plan[flag] = False
+        corpus_plan["jurisdiction"] = UNKNOWN_LEGAL_CONTEXT if jurisdiction == UNKNOWN_LEGAL_CONTEXT else jurisdiction
+        corpus_plan["state_code"] = ""
+        corpus_plan["context_status"] = UNKNOWN_LEGAL_CONTEXT
+
+    dates = {
+        DATE_ROLE_EVENT: event_date,
+        DATE_ROLE_APPLICABLE_LAW: applicable,
+        DATE_ROLE_FILING_REFERENCE: filing_date,
+        DATE_ROLE_CORPUS_RETRIEVAL: retrieval_date,
+    }
+    rejected_defaults = {}
+    if _text(jurisdiction_default):
+        rejected_defaults["jurisdiction_default"] = _text(jurisdiction_default)
+    if _text(corpus_default):
+        rejected_defaults["corpus_default"] = _text(corpus_default)
+
+    if storage_available is False:
+        execution_status = "unavailable"
+    elif ready:
+        execution_status = "not_executed"
+    else:
+        execution_status = "blocked"
+
+    request = None
+    if ready:
+        families = list(corpus_plan.get("authority_families") or [])
+        request = {
+            "request_id": "acq:" + ":".join([jurisdiction, str(law_query_date), "+".join(claim["claim_type"] for claim in claim_targets)]),
+            "jurisdiction": jurisdiction,
+            "law_query_date": law_query_date,
+            "dates": dates,
+            "claim_targets": claim_targets,
+            "requirement_targets": requirement_targets,
+            "public_law_query_terms": public_terms,
+            "program": {
+                "program_type": "bounded_legal_acquisition",
+                "query_text": " ".join(public_terms),
+                "jurisdiction": jurisdiction,
+                "authority_families": families,
+                "retrieval_mode": RETRIEVAL_MODE_OFFLINE,
+                "contains_private_facts": False,
+            },
+            "corpus_plan": corpus_plan,
+            "bounds": {
+                "max_results": bounded_results,
+                "timeout_seconds": bounded_timeout,
+                "max_query_terms": _ACQUISITION_QUERY_TERM_CAP,
+                "max_targets": _ACQUISITION_TARGET_CAP,
+            },
+            "contains_private_narrative": False,
+        }
+    return {
+        "ready": ready,
+        "request": request,
+        "questions": questions,
+        "inquiry": questions,
+        "jurisdiction": jurisdiction if ready or jurisdiction != UNKNOWN_LEGAL_CONTEXT else UNKNOWN_LEGAL_CONTEXT,
+        "selection_status": selection.get("selection_status"),
+        "unresolved_reasons": [] if ready else list(dict.fromkeys(reasons)),
+        "unsupported_claims": unsupported,
+        "dates": dates,
+        "law_query_date": law_query_date,
+        "factual_chronology_gap": chronology_gap,
+        "law_query_date_satisfies_factual_chronology": False,
+        "corpus_plan": corpus_plan,
+        "rejected_defaults": rejected_defaults,
+        "execution": {
+            "attempted": False,
+            "status": execution_status,
+            "backend_invoked": False,
+            "results_claimed": False,
+            "results": None,
+            "storage_available": storage_available,
+        },
+        "narrative_required": False,
+        "contains_private_narrative": False,
+    }
+
+
 def legal_requirement_search_plan(
     program: Optional[Dict[str, Any]],
     *,
@@ -3627,6 +3988,862 @@ def _finish_live_call(
     )
 
 
+CANONICAL_CORPUS_PARAMETER_APIS = {
+    CORPUS_FAMILY_US_CODE: "search_us_code_corpus_from_parameters",
+    CORPUS_FAMILY_STATE_STATUTE: "search_state_law_corpus_from_parameters",
+    CORPUS_FAMILY_STATE_ADMIN: "search_state_law_corpus_from_parameters",
+    CORPUS_FAMILY_FEDERAL_REGISTER: "search_federal_register_corpus_from_parameters",
+    CORPUS_FAMILY_COURT_RULE: "search_court_rules_corpus_from_parameters",
+}
+_ACQUISITION_BYTE_CAP = 1048576
+_OWNED_SOURCE_FIELDS = ("source_text", "locator", "version", "retrieval")
+
+
+def _acquisition_binding(payload: Any) -> Dict[str, Any]:
+    """Accept either a bound acquisition result or its inner request."""
+    if not isinstance(payload, Mapping):
+        return {"ready": False, "request": None, "execution": {"storage_available": None, "status": "blocked"}}
+    if "ready" in payload and "request" in payload:
+        execution = payload.get("execution") if isinstance(payload.get("execution"), Mapping) else {}
+        return {
+            "ready": payload.get("ready") is True and isinstance(payload.get("request"), Mapping),
+            "request": payload.get("request") if isinstance(payload.get("request"), Mapping) else None,
+            "execution": dict(execution),
+            "questions": list(payload.get("questions") or []),
+        }
+    program = payload.get("program") if isinstance(payload.get("program"), Mapping) else {}
+    ready = bool(payload.get("jurisdiction") and payload.get("law_query_date") and program.get("query_text"))
+    return {"ready": ready, "request": dict(payload) if ready else None, "execution": {}, "questions": []}
+
+
+def _selected_corpus_families(request: Mapping[str, Any]) -> List[tuple]:
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    families = {
+        str(family or "").strip()
+        for family in (plan.get("authority_families") or [])
+        if str(family or "").strip()
+    }
+    selected = [
+        (CORPUS_FAMILY_US_CODE, bool(plan.get("search_us_code"))),
+        (CORPUS_FAMILY_STATE_STATUTE, bool(plan.get("search_state_laws"))),
+        (CORPUS_FAMILY_FEDERAL_REGISTER, bool(plan.get("search_federal_register"))),
+        (CORPUS_FAMILY_STATE_ADMIN, bool(plan.get("search_state_administrative_rules"))),
+        (CORPUS_FAMILY_COURT_RULE, _plan_searches_court_rules(dict(plan), families)),
+    ]
+    return [(family, CANONICAL_CORPUS_PARAMETER_APIS[family]) for family, enabled in selected if enabled]
+
+
+def _parameter_record(request: Mapping[str, Any], family: str, api_name: str, *, max_results: int, timeout_seconds: float, max_bytes: int) -> Dict[str, Any]:
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    program = request.get("program") if isinstance(request.get("program"), Mapping) else {}
+    state_code = str(plan.get("state_code") or "")
+    jurisdiction = str(request.get("jurisdiction") or plan.get("jurisdiction") or "")
+    parameters: Dict[str, Any] = {
+        "collection_name": "local-private-legal-fixture" if program.get("retrieval_mode") != RETRIEVAL_MODE_LIVE else str(program.get("collection_name") or ""),
+        "query_text": str(program.get("query_text") or ""),
+        "top_k": max_results,
+        "auto_setup_venv": False,
+        "chunk_lookup_enabled": False,
+        "download_corpus": False,
+        "initialize_common_crawl": False,
+        "law_query_date": request.get("law_query_date"),
+        "timeout_seconds": timeout_seconds,
+        "max_bytes": max_bytes,
+        "source_family": family,
+    }
+    if family in {CORPUS_FAMILY_STATE_STATUTE, CORPUS_FAMILY_STATE_ADMIN} or (family == CORPUS_FAMILY_COURT_RULE and state_code):
+        parameters["state"] = state_code
+    if family == CORPUS_FAMILY_COURT_RULE:
+        parameters["jurisdiction"] = "federal" if jurisdiction == "federal" else "state"
+    elif jurisdiction:
+        parameters["jurisdiction"] = jurisdiction
+    return {
+        "parameter_api": api_name,
+        "parameters": parameters,
+        "allowed_backend": api_name,
+    }
+
+
+def _local_cache_from_rows(request: Mapping[str, Any], local_rows: Optional[Mapping[str, Any]], offline_cache: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    cache: Dict[str, Any] = dict(offline_cache or {})
+    if not isinstance(local_rows, Mapping):
+        return cache
+    program = request.get("program") if isinstance(request.get("program"), Mapping) else {}
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    query = str(program.get("query_text") or "")
+    jurisdiction = str(request.get("jurisdiction") or "")
+    state_code = str(plan.get("state_code") or "")
+    resolved = resolve_explicit_jurisdiction(jurisdiction)
+    jurisdiction_key = "" if resolved == UNKNOWN_LEGAL_CONTEXT else resolved
+    for family, rows in local_rows.items():
+        family_name = str(family or "")
+        if family_name not in CANONICAL_CORPUS_PARAMETER_APIS or not isinstance(rows, list):
+            continue
+        cache[_cache_key(family_name, query, jurisdiction_key, state_code)] = list(rows)
+    return cache
+
+
+def _owned_source_candidate(row: Mapping[str, Any], *, law_query_date: Any, max_bytes: int) -> tuple:
+    """Keep a row only when owned text, locator, version, and retrieval are present.
+
+    A snippet, score, or caller applicability flag is not a candidate and is not proof.
+    """
+    passage = row.get("source_passage") if isinstance(row.get("source_passage"), str) else ""
+    passage_status = str(row.get("passage_status") or "")
+    locator = ""
+    locator_kind = ""
+    if row.get("uri_status") == "source" and isinstance(row.get("uri"), str) and row.get("uri"):
+        locator = row["uri"]
+        locator_kind = "uri"
+    elif row.get("citation_status") == "source" and isinstance(row.get("citation"), str) and row.get("citation"):
+        locator = row["citation"]
+        locator_kind = "citation"
+    version = row.get("corpus_version") if isinstance(row.get("corpus_version"), str) else ""
+    if passage_status != "full_text" or not passage:
+        reason = "snippet_not_owned" if row.get("snippet") or passage_status == "snippet_only" else "source_text_missing"
+        return None, reason
+    if not locator:
+        return None, "locator_missing"
+    if not version.strip():
+        return None, "missing_edition"
+    encoded = passage.encode("utf-8")
+    if len(encoded) > max_bytes:
+        return None, "byte_bound_exceeded"
+    retrieval = {
+        "retrieved_at": row.get("retrieved_at"),
+        "retrieval_mode": row.get("retrieval_mode"),
+        "source_family": row.get("source_family"),
+        "content_hash": row.get("content_hash"),
+        "content_hash_scope": row.get("content_hash_scope"),
+        "provenance_status": row.get("provenance_status"),
+        "corpus_id": row.get("corpus_id"),
+        "jurisdiction_status": row.get("jurisdiction_status"),
+        "effective_date": row.get("effective_date"),
+        "effective_date_status": row.get("effective_date_status"),
+    }
+    candidate = {
+        "source_text": passage,
+        "source_byte_length": len(encoded),
+        "locator": locator,
+        "locator_kind": locator_kind,
+        "version": version.strip(),
+        "retrieval": retrieval,
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "applicable": False,
+        "verified": False,
+        "support_eligible": False,
+        "proof": False,
+        "relevance_is_not_proof": True,
+        "law_query_date": law_query_date,
+        "edition_selected": False,
+    }
+    return candidate, "candidate"
+
+
+def _operation_status(envelope_status: str, reasons: List[str], owned: List[Dict[str, Any]]) -> str:
+    if owned:
+        return "candidates"
+    if "missing_edition" in reasons and envelope_status in {"success", "partial_success", "empty", "candidates"}:
+        return "missing_edition"
+    if "byte_bound_exceeded" in reasons:
+        return "unavailable"
+    if envelope_status == "timeout":
+        return "timeout"
+    if envelope_status in {"unavailable", "error"}:
+        return envelope_status
+    if envelope_status in {"success", "partial_success"} and not owned:
+        if reasons and all(reason in {"snippet_not_owned", "source_text_missing", "locator_missing"} for reason in reasons):
+            return "incomplete"
+        return "empty"
+    return envelope_status or "empty"
+
+
+def _resume_for(operations: List[Dict[str, Any]], *, blocked: str = "") -> Dict[str, Any]:
+    reasons = [str(item.get("status") or "") for item in operations]
+    if blocked == "cancelled":
+        return {"resumable": False, "next_action": "awaiting_user", "worker_stalled": False, "completed_operations": [], "pending_statuses": ["cancelled"]}
+    if blocked == "blocked":
+        return {"resumable": True, "next_action": "resolve_legal_context", "worker_stalled": False, "completed_operations": [], "pending_statuses": ["blocked"]}
+    pending = [item for item in operations if item.get("status") in {"unavailable", "timeout", "missing_edition", "error", "incomplete", "refused"}]
+    completed = [str(item.get("source_family") or "") for item in operations if item.get("status") in {"candidates", "empty"}]
+    if any(item.get("status") == "timeout" for item in operations):
+        action = "retry_timeout"
+    elif any(item.get("status") == "missing_edition" for item in operations):
+        action = "supply_edition"
+    elif any(item.get("status") in {"unavailable", "error"} for item in operations):
+        action = "retry_unavailable"
+    elif any(item.get("status") == "incomplete" for item in operations):
+        action = "supply_owned_source_text"
+    elif any(item.get("status") == "refused" for item in operations):
+        action = "resolve_purpose_gate"
+    else:
+        action = "none"
+    return {
+        "resumable": bool(pending) or action != "none",
+        "next_action": action,
+        "worker_stalled": False,
+        "completed_operations": completed,
+        "pending_statuses": [str(item.get("status") or "") for item in pending] or reasons,
+    }
+
+
+def _roll_up_status(operations: List[Dict[str, Any]]) -> str:
+    statuses = [str(item.get("status") or "") for item in operations]
+    if any(status == "candidates" for status in statuses):
+        return "candidates"
+    for status in ("timeout", "unavailable", "error", "missing_edition", "incomplete", "refused", "empty"):
+        if status in statuses:
+            return status
+    return "empty"
+
+
+def acquire_bounded_canonical_legal_sources(
+    binding: Any,
+    *,
+    owner_id: str,
+    case_id: str,
+    purpose: str = "public_law_citation",
+    data_class: str = "public_legal_source_graph",
+    provider_kind: str = "legal_corpus",
+    policy_reader: Optional[Any] = None,
+    provider_loader: Optional[Any] = None,
+    allowed_backends: Optional[Iterable[str]] = None,
+    deadline_seconds: Optional[float] = None,
+    max_results: Optional[int] = None,
+    max_bytes: int = 65536,
+    retrieval_mode: Optional[str] = None,
+    offline_cache: Optional[Dict[str, Any]] = None,
+    local_rows: Optional[Mapping[str, Any]] = None,
+    index_path: Optional[str] = None,
+    query_vector: Optional[List[float]] = None,
+    collection_name: Optional[str] = None,
+    privacy_policy_accepted: bool = False,
+    contains_private_facts: bool = False,
+    cancelled: bool = False,
+) -> Dict[str, Any]:
+    """Acquire owned legal-source candidates for one explicit acquisition request.
+
+    Local cache and index reads do not infer embeddings and do not download a
+    corpus. A live parameter-API call is dispatched only after the purpose and
+    data-class gate allows it. Search hits are not applicability or proof.
+    """
+    unpacked = _acquisition_binding(binding)
+    request = unpacked.get("request") if isinstance(unpacked.get("request"), Mapping) else None
+    execution = unpacked.get("execution") if isinstance(unpacked.get("execution"), Mapping) else {}
+    base = {
+        "owner_id": str(owner_id or ""),
+        "case_id": str(case_id or ""),
+        "purpose": purpose if type(purpose) is str else "",
+        "data_class": data_class if type(data_class) is str else "",
+        "candidates": [],
+        "operations": [],
+        "model_inference_used": False,
+        "commoncrawl_initialized": False,
+        "corpus_download_started": False,
+        "backend_invoked": False,
+        "remote_dispatched": False,
+        "applicability": UNKNOWN_LEGAL_CONTEXT,
+        "proof": False,
+        "contains_private_narrative": False,
+        "live_model_identity_verified": False,
+    }
+    if cancelled:
+        base.update(status="cancelled", error_code="cancelled", gate={"status": "not_required", "code": "cancelled"}, resume=_resume_for([], blocked="cancelled"))
+        return base
+    if execution.get("storage_available") is False or execution.get("status") == "unavailable":
+        base.update(status="unavailable", error_code="storage_unavailable", gate={"status": "not_required", "code": "storage_unavailable"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}], blocked=""))
+        return base
+    if not unpacked.get("ready") or request is None:
+        base.update(status="blocked", error_code="legal_context_not_ready", gate={"status": "not_required", "code": "legal_context_not_ready"},
+            questions=list(unpacked.get("questions") or []), resume=_resume_for([], blocked="blocked"))
+        return base
+
+    try:
+        bounded_results = int(request.get("bounds", {}).get("max_results", 5) if max_results is None else max_results)
+    except (TypeError, ValueError):
+        bounded_results = 0
+    if type(bounded_results) is not int or isinstance(bounded_results, bool) or not 1 <= bounded_results <= _BOUNDED_RESULT_CAP:
+        base.update(status="unavailable", error_code="invalid_result_limit", gate={"status": "not_required", "code": "invalid_result_limit"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    try:
+        timeout_value = float(request.get("bounds", {}).get("timeout_seconds", 5.0) if deadline_seconds is None else deadline_seconds)
+    except (TypeError, ValueError):
+        timeout_value = 0.0
+    if not math.isfinite(timeout_value) or timeout_value <= 0 or timeout_value > _BOUNDED_TIMEOUT_CAP_SECONDS:
+        base.update(status="unavailable", error_code="invalid_timeout", gate={"status": "not_required", "code": "invalid_timeout"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    if type(max_bytes) is not int or isinstance(max_bytes, bool) or not 1 <= max_bytes <= _ACQUISITION_BYTE_CAP:
+        base.update(status="unavailable", error_code="invalid_byte_bound", gate={"status": "not_required", "code": "invalid_byte_bound"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+
+    mode = str(retrieval_mode or (request.get("program") or {}).get("retrieval_mode") or RETRIEVAL_MODE_OFFLINE).strip().lower()
+    if mode not in BOUNDED_RETRIEVAL_MODES:
+        base.update(status="unavailable", error_code="retrieval_mode_required", gate={"status": "not_required", "code": "retrieval_mode_required"},
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    allowed = {str(item) for item in allowed_backends} if allowed_backends is not None else set(CANONICAL_CORPUS_PARAMETER_APIS.values())
+    families = _selected_corpus_families(request)
+    gate: Dict[str, Any] = {"status": "not_required", "code": "local_first", "policy_read": False, "provider_loader_called": False}
+    if mode == RETRIEVAL_MODE_LIVE:
+        from mediator.hook_runtime import prepare_remote_hook_query
+
+        if policy_reader is None:
+            gate = {"status": "refused", "code": "consent_missing", "policy_read": False, "provider_loader_called": False}
+        else:
+            gate = prepare_remote_hook_query(
+                policy_reader=policy_reader,
+                provider_loader=provider_loader,
+                owner_id=str(owner_id or ""),
+                case_id=str(case_id or ""),
+                purpose=purpose,
+                provider_kind=provider_kind,
+                data_class=data_class,
+                tools=False,
+                citation=str((request.get("program") or {}).get("query_text") or ""),
+                complaint_text=None,
+            )
+        if gate.get("status") != "available" or gate.get("effectful") is not True:
+            refused = "unavailable" if gate.get("status") == "unavailable" else "refused"
+            base.update(status=refused, error_code=str(gate.get("code") or "consent_missing"), gate={
+                "status": gate.get("status"), "code": gate.get("code"), "policy_read": gate.get("policy_read"),
+                "provider_loader_called": gate.get("provider_loader_called"),
+            }, remote_dispatched=False, resume=_resume_for([{"status": refused, "source_family": ""}]))
+            return base
+    elif query_vector:
+        base.update(status="unavailable", error_code="local_inference_refused", gate=gate,
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+
+    explicit_local = local_rows is not None or isinstance(offline_cache, dict) or bool(index_path)
+    if mode != RETRIEVAL_MODE_LIVE and not explicit_local:
+        base.update(status="unavailable", error_code="offline_asset_missing", gate=gate, remote_dispatched=False,
+            resume=_resume_for([{"status": "unavailable", "source_family": ""}]))
+        return base
+    cache = _local_cache_from_rows(request, local_rows, offline_cache if isinstance(offline_cache, dict) else None)
+    law_query_date = request.get("law_query_date")
+    plan = request.get("corpus_plan") if isinstance(request.get("corpus_plan"), Mapping) else {}
+    query = str((request.get("program") or {}).get("query_text") or "")
+    operations: List[Dict[str, Any]] = []
+    candidates: List[Dict[str, Any]] = []
+    for family, api_name in families:
+        record = _parameter_record(request, family, api_name, max_results=bounded_results, timeout_seconds=timeout_value, max_bytes=max_bytes)
+        operation: Dict[str, Any] = {
+            "source_family": family,
+            "parameter_api": api_name,
+            "parameters": record["parameters"],
+            "backend_allowed": api_name in allowed,
+            "backend_invoked": False,
+            "model_inference_used": False,
+            "commoncrawl_initialized": False,
+            "corpus_download_started": False,
+            "deadline_seconds": timeout_value,
+            "max_results": bounded_results,
+            "max_bytes": max_bytes,
+            "withheld": [],
+            "candidate_count": 0,
+        }
+        if api_name not in allowed:
+            operation.update(status="unavailable", error_code="backend_not_allowed")
+            operations.append(operation)
+            continue
+        lookup_mode = RETRIEVAL_MODE_CACHE if mode != RETRIEVAL_MODE_LIVE else RETRIEVAL_MODE_LIVE
+        if mode == RETRIEVAL_MODE_OFFLINE and index_path and family == CORPUS_FAMILY_US_CODE and not local_rows:
+            lookup_mode = RETRIEVAL_MODE_OFFLINE
+        try:
+            envelope = lookup_bounded_legal_corpus(
+                source_family=family,
+                query=query,
+                retrieval_mode=lookup_mode,
+                jurisdiction=str(request.get("jurisdiction") or ""),
+                state=str(plan.get("state_code") or "") or None,
+                court_jurisdiction=record["parameters"].get("jurisdiction") if family == CORPUS_FAMILY_COURT_RULE else None,
+                max_results=bounded_results,
+                timeout_seconds=timeout_value,
+                offline_cache=cache if lookup_mode != RETRIEVAL_MODE_LIVE else None,
+                index_path=index_path if lookup_mode == RETRIEVAL_MODE_OFFLINE else None,
+                collection_name=collection_name,
+                query_vector=query_vector if lookup_mode == RETRIEVAL_MODE_LIVE else None,
+                contains_private_facts=contains_private_facts if lookup_mode == RETRIEVAL_MODE_LIVE else False,
+                privacy_policy_accepted=privacy_policy_accepted if lookup_mode == RETRIEVAL_MODE_LIVE else False,
+                live_backend="corpus",
+            )
+        except Exception:
+            envelope = {"status": "unavailable", "error_code": "backend_unavailable", "results": []}
+        operation["backend_invoked"] = True
+        base["backend_invoked"] = True
+        if lookup_mode == RETRIEVAL_MODE_LIVE:
+            base["remote_dispatched"] = True
+            operation["model_inference_used"] = False
+        reasons: List[str] = []
+        owned: List[Dict[str, Any]] = []
+        for row in envelope.get("results") or []:
+            if not isinstance(row, Mapping):
+                reasons.append("source_text_missing")
+                operation["withheld"].append({"reason": "source_text_missing"})
+                continue
+            candidate, reason = _owned_source_candidate(row, law_query_date=law_query_date, max_bytes=max_bytes)
+            if candidate is None:
+                reasons.append(reason)
+                operation["withheld"].append({"reason": reason, "passage_status": row.get("passage_status"), "provenance_status": row.get("provenance_status")})
+                continue
+            candidate["parameter_api"] = api_name
+            candidate["source_family"] = family
+            owned.append(candidate)
+        status = _operation_status(str(envelope.get("status") or ""), reasons, owned)
+        if status == "unavailable" and "byte_bound_exceeded" in reasons and not owned:
+            error_code = "byte_bound_exceeded"
+        else:
+            error_code = str(envelope.get("error_code") or "")
+        if status == "missing_edition":
+            error_code = "missing_edition"
+        operation.update(status=status, error_code=error_code, envelope_status=str(envelope.get("status") or ""), candidate_count=len(owned))
+        candidates.extend(owned[:bounded_results])
+        operations.append(operation)
+        if len(candidates) >= bounded_results:
+            candidates = candidates[:bounded_results]
+            break
+    if not families:
+        base.update(status="empty", error_code="", operations=[], candidates=[], gate=gate, resume=_resume_for([{"status": "empty", "source_family": ""}]))
+        return base
+    base["model_inference_used"] = any(bool(item.get("model_inference_used")) for item in operations)
+    base.update(
+        status=_roll_up_status(operations),
+        error_code=next((str(item.get("error_code") or "") for item in operations if item.get("status") == _roll_up_status(operations) and item.get("error_code")), ""),
+        candidates=candidates,
+        operations=operations,
+        gate={"status": gate.get("status"), "code": gate.get("code"), "policy_read": bool(gate.get("policy_read")), "provider_loader_called": bool(gate.get("provider_loader_called"))},
+        resume=_resume_for(operations),
+        result_count=len(candidates),
+        bounds={"max_results": bounded_results, "timeout_seconds": timeout_value, "max_bytes": max_bytes},
+    )
+    return base
+
+
+_TREATMENT_LAYER_KEYS = ("authority_treatment_edges", "treatment_records", "treatment_summary")
+_TREATMENT_TYPE_ALIASES = ("relation_type", "treatment_type", "type", "treatment", "effect", "disposition")
+_ADVERSE_TREATMENT_LABELS = frozenset({
+    "adverse", "superseded", "superseding", "repealed", "repealing", "repeal",
+})
+_TREATMENT_CANONICAL = {
+    "superseding": "superseded",
+    "repealing": "repealed",
+    "repeal": "repealed",
+}
+_OPEN_INTERVAL_END = "9999-12-31"
+
+
+def _iso_law_day(value: Any) -> str:
+    """Accept a calendar day. A retrieval timestamp is not an applicable-law day."""
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if len(text) != 10 or "T" in text:
+        return ""
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return ""
+
+
+def _mapping_layers(record: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    layers = [record]
+    for key in ("metadata", "provenance", "retrieval"):
+        nested = record.get(key)
+        if isinstance(nested, Mapping):
+            layers.append(nested)
+    return layers
+
+
+def retain_acquired_treatment_records(record: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Keep canonical and metadata treatment rows.
+
+    An empty list or an empty type alias does not erase an adverse,
+    superseding, or repealing row stored on another layer.
+    """
+    if not isinstance(record, Mapping):
+        return []
+    retained: List[Dict[str, Any]] = []
+    seen = set()
+    for container in _mapping_layers(record):
+        for key in _TREATMENT_LAYER_KEYS:
+            rows = container.get(key)
+            if key == "treatment_summary" and isinstance(rows, Mapping):
+                rows = rows.get("records")
+            if not rows:
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                labels = []
+                for alias in _TREATMENT_TYPE_ALIASES:
+                    value = row.get(alias)
+                    if isinstance(value, str) and value.strip():
+                        label = value.strip()
+                        if label not in labels:
+                            labels.append(label)
+                if not labels:
+                    continue
+                for label in labels:
+                    canonical = _TREATMENT_CANONICAL.get(label.lower(), label)
+                    signature = (
+                        canonical.lower(),
+                        str(row.get("source_authority_id") or row.get("treated_by_authority_id") or ""),
+                        str(row.get("target_authority_id") or row.get("treated_authority_id") or row.get("target_id") or ""),
+                        str(row.get("treatment_id") or row.get("edge_id") or ""),
+                        str(row.get("explanation") or row.get("treatment_explanation") or ""),
+                    )
+                    if signature in seen:
+                        continue
+                    seen.add(signature)
+                    kept = {key: value for key, value in row.items() if key not in _TREATMENT_TYPE_ALIASES or row.get(key) not in ("", None)}
+                    kept["treatment_type"] = label
+                    kept["relation_type"] = canonical
+                    kept["layer_retained"] = True
+                    if label.lower() in _ADVERSE_TREATMENT_LABELS or canonical.lower() in _ADVERSE_TREATMENT_LABELS:
+                        kept["adverse_treatment_retained"] = True
+                    retained.append(kept)
+    return retained
+
+
+def _explicit_applicable_law_day(legal_context: Any) -> str:
+    if not isinstance(legal_context, Mapping):
+        return ""
+    dated = legal_context.get("applicable_law_date")
+    if isinstance(dated, Mapping):
+        if dated.get("role") not in (None, "", DATE_ROLE_APPLICABLE_LAW):
+            return ""
+        if dated.get("is_uncertain"):
+            return ""
+        return _iso_law_day(str(dated.get("precise_date") or ""))
+    return _iso_law_day(dated if isinstance(dated, str) else "")
+
+
+def _candidate_authority_id(candidate: Mapping[str, Any]) -> str:
+    for container in _mapping_layers(candidate):
+        for key in ("authority_id", "authority_identity", "id"):
+            value = container.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    locator = candidate.get("locator")
+    return locator.strip() if isinstance(locator, str) else ""
+
+
+def _candidate_version_rows(candidate: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    version = candidate.get("version") if isinstance(candidate.get("version"), str) else ""
+    version = version.strip()
+    authority_id = _candidate_authority_id(candidate)
+    retrieval = candidate.get("retrieval") if isinstance(candidate.get("retrieval"), Mapping) else {}
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), Mapping) else {}
+    effective = ""
+    for container in (candidate, retrieval, metadata):
+        day = _iso_law_day(container.get("effective_date"))
+        if day:
+            effective = day
+            break
+    ends = []
+    for key in ("sunset_date", "repeal_date", "superseded_date", "expiration_date"):
+        for container in (candidate, retrieval, metadata):
+            day = _iso_law_day(container.get(key))
+            if day:
+                ends.append(day)
+    primary = {
+        "authority_id": authority_id,
+        "version": version,
+        "law_version_id": str(candidate.get("law_version_id") or metadata.get("law_version_id") or (f"{authority_id}:{version}" if authority_id and version else "")),
+        "effective_date": effective,
+        "end_date": min(ends) if ends else "",
+        "source_text": candidate.get("source_text") if isinstance(candidate.get("source_text"), str) else "",
+        "citation": str(candidate.get("citation") or metadata.get("citation") or candidate.get("locator") or ""),
+        "retrieved_at": retrieval.get("retrieved_at"),
+    }
+    rows = [primary]
+    supplied = candidate.get("law_versions")
+    if not isinstance(supplied, list):
+        supplied = metadata.get("law_versions")
+    if isinstance(supplied, list):
+        for item in supplied:
+            if not isinstance(item, Mapping):
+                continue
+            item_version = str(item.get("version") or item.get("authority_version") or "").strip()
+            item_id = str(item.get("authority_id") or authority_id).strip()
+            if item_version == version and item_id == authority_id:
+                continue
+            item_ends = [_iso_law_day(item.get(key)) for key in ("sunset_date", "repeal_date", "superseded_date", "expiration_date")]
+            item_ends = [day for day in item_ends if day]
+            rows.append({
+                "authority_id": item_id or authority_id,
+                "version": item_version,
+                "law_version_id": str(item.get("law_version_id") or (f"{item_id or authority_id}:{item_version}" if item_version else "")),
+                "effective_date": _iso_law_day(item.get("effective_date")),
+                "end_date": min(item_ends) if item_ends else "",
+                "source_text": primary["source_text"] if item_version == version else "",
+                "citation": str(item.get("citation") or primary["citation"] or ""),
+                "retrieved_at": primary["retrieved_at"],
+                "embedded_other_version": True,
+            })
+    return rows
+
+
+def _interval_contains(row: Mapping[str, Any], day: str) -> bool:
+    start = str(row.get("effective_date") or "")
+    end = str(row.get("end_date") or "")
+    if not start or not day or start > day:
+        return False
+    return not end or day < end
+
+
+def _intervals_overlap(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    if not left.get("effective_date") or not right.get("effective_date"):
+        return False
+    left_end = str(left.get("end_date") or _OPEN_INTERVAL_END)
+    right_end = str(right.get("end_date") or _OPEN_INTERVAL_END)
+    return str(left.get("effective_date")) < right_end and str(right.get("effective_date")) < left_end
+
+
+def _version_known(version: str) -> bool:
+    return version.strip().lower() not in {"", "unknown", "unspecified", "n/a", "na", "none", "null", "current", "latest", "unverified"}
+
+
+def handoff_acquired_legal_sources(
+    acquisition: Any,
+    legal_context: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Admit one selected edition for the explicit legal context.
+
+    Overlapping or unknown versions stay unresolved. Retrieval time is kept
+    and is not copied into the applicable-law day. Treatment rows from the
+    canonical record and metadata stay attached. Two versions that share an
+    authority id are not folded into one admitted source.
+    """
+    from integrations.ipfs_datasets.logic import (
+        evaluate_temporal_requirement_applicability,
+        requirement_treatment_support,
+    )
+
+    payload = acquisition if isinstance(acquisition, Mapping) else {}
+    context = legal_context if isinstance(legal_context, Mapping) else {}
+    applicable_day = _explicit_applicable_law_day(context)
+    jurisdiction = resolve_explicit_jurisdiction(context.get("jurisdiction"))
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    base: Dict[str, Any] = {
+        "stage": "acquired_source_handoff",
+        "acquisition_status": str(payload.get("status") or "unavailable"),
+        "admitted": [],
+        "unresolved": [],
+        "withheld": [],
+        "proof": False,
+        "applicable": False,
+        "retrieval_time_used_as_applicable_law": False,
+        "applicable_law_date": applicable_day,
+        "worker_stalled": False,
+        "mixed_authority_versions": False,
+    }
+    acquisition_status = base["acquisition_status"]
+    if acquisition_status in {"cancelled", "unavailable", "timeout", "error", "blocked", "refused", "missing_edition", "incomplete"}:
+        base["status"] = acquisition_status if acquisition_status != "blocked" else "unresolved"
+        base["reason"] = str(payload.get("error_code") or acquisition_status)
+        return base
+    if not candidates:
+        base["status"] = "empty" if acquisition_status in {"empty", "candidates"} else acquisition_status or "empty"
+        base["reason"] = "no_legal_source" if base["status"] == "empty" else acquisition_status
+        return base
+    if jurisdiction == UNKNOWN_LEGAL_CONTEXT or not applicable_day:
+        base["status"] = "unresolved"
+        base["reason"] = "unknown_legal_context" if jurisdiction == UNKNOWN_LEGAL_CONTEXT else "unknown_applicable_law_date"
+        for candidate in candidates:
+            if isinstance(candidate, Mapping):
+                base["unresolved"].append({
+                    "authority_id": _candidate_authority_id(candidate),
+                    "version": str(candidate.get("version") or ""),
+                    "reason": base["reason"],
+                    "retrieved_at": (candidate.get("retrieval") or {}).get("retrieved_at") if isinstance(candidate.get("retrieval"), Mapping) else None,
+                })
+        return base
+
+    grouped: Dict[str, List[tuple]] = {}
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping):
+            base["withheld"].append({"reason": "candidate_malformed"})
+            continue
+        rows = _candidate_version_rows(candidate)
+        authority_id = rows[0]["authority_id"] if rows else ""
+        grouped.setdefault(authority_id or f"missing:{index}", []).append((candidate, rows))
+
+    for authority_id, items in grouped.items():
+        flat = []
+        for candidate, rows in items:
+            for row in rows:
+                flat.append((candidate, row))
+        distinct = {}
+        contradictory = False
+        for candidate, row in flat:
+            key = (row.get("authority_id") or authority_id, row.get("version") or "")
+            prior = distinct.get(key)
+            if prior is not None:
+                if prior[1].get("source_text") and row.get("source_text") and prior[1]["source_text"] != row["source_text"]:
+                    contradictory = True
+                if prior[1].get("effective_date") and row.get("effective_date") and prior[1]["effective_date"] != row["effective_date"]:
+                    contradictory = True
+                continue
+            distinct[key] = (candidate, row)
+        versions = list(distinct.values())
+        unknown = [row for _candidate, row in versions if not _version_known(str(row.get("version") or "")) or not row.get("effective_date")]
+        overlaps = False
+        for left_index, (_left_candidate, left) in enumerate(versions):
+            for _right_candidate, right in versions[left_index + 1:]:
+                if _intervals_overlap(left, right) or left.get("embedded_other_version") or right.get("embedded_other_version"):
+                    overlaps = True
+        shared = len(versions) > 1
+        if shared:
+            base["mixed_authority_versions"] = True
+        if contradictory or unknown or overlaps or any(row.get("embedded_other_version") for _candidate, row in versions):
+            reason = "overlapping_versions" if overlaps or any(row.get("embedded_other_version") for _candidate, row in versions) else "unknown_version" if unknown else "contradictory_versions"
+            for candidate, row in versions:
+                base["unresolved"].append({
+                    "authority_id": row.get("authority_id") or authority_id,
+                    "version": row.get("version") or "",
+                    "law_version_id": row.get("law_version_id") or "",
+                    "effective_date": row.get("effective_date") or "",
+                    "end_date": row.get("end_date") or "",
+                    "reason": reason,
+                    "retrieved_at": row.get("retrieved_at"),
+                    "applicable_law_date": applicable_day,
+                    "edition_selected": False,
+                    "treatment_records": retain_acquired_treatment_records(candidate),
+                    "source_text": row.get("source_text") or "",
+                })
+            continue
+        selected = [(candidate, row) for candidate, row in versions if _interval_contains(row, applicable_day)]
+        if len(selected) != 1:
+            reason = "edition_not_in_effect" if not selected else "overlapping_versions"
+            for candidate, row in versions:
+                base["unresolved"].append({
+                    "authority_id": row.get("authority_id") or authority_id,
+                    "version": row.get("version") or "",
+                    "reason": reason,
+                    "edition_selected": False,
+                    "retrieved_at": row.get("retrieved_at"),
+                    "applicable_law_date": applicable_day,
+                    "treatment_records": retain_acquired_treatment_records(candidate),
+                })
+            continue
+        candidate, row = selected[0]
+        for _other, other in versions:
+            if other is row:
+                continue
+            base["withheld"].append({
+                "authority_id": other.get("authority_id") or authority_id,
+                "version": other.get("version") or "",
+                "reason": "edition_not_selected",
+                "edition_selected": False,
+            })
+        treatments = retain_acquired_treatment_records(candidate)
+        temporal_payload = {
+            "authority_id": row.get("authority_id") or authority_id,
+            "citation": row.get("citation") or candidate.get("locator") or "",
+            "jurisdiction": jurisdiction,
+            "authority_version": row.get("version") or "",
+            "version": row.get("version") or "",
+            "source_text": row.get("source_text") or "",
+            "law_version_id": row.get("law_version_id") or "",
+            "effective_date": row.get("effective_date") or "",
+            "law_versions": [{
+                "law_version_id": row.get("law_version_id") or "",
+                "authority_id": row.get("authority_id") or authority_id,
+                "citation": row.get("citation") or "",
+                "jurisdiction": jurisdiction,
+                "version": row.get("version") or "",
+                "effective_date": row.get("effective_date") or "",
+                **({"sunset_date": row.get("end_date")} if row.get("end_date") else {}),
+            }],
+            "authority_treatment_edges": treatments,
+            "query_context": {
+                "jurisdiction": jurisdiction,
+                "query_date": applicable_day,
+                "authority_version": row.get("version") or "",
+                "law_version_id": row.get("law_version_id") or "",
+            },
+        }
+        if row.get("end_date"):
+            temporal_payload["sunset_date"] = row.get("end_date")
+        temporal = evaluate_temporal_requirement_applicability(temporal_payload)
+        treatment_support = requirement_treatment_support({"authority_treatment_edges": treatments})
+        retrieved_at = row.get("retrieved_at")
+        if isinstance(retrieved_at, str) and retrieved_at[:10] == applicable_day and "T" in retrieved_at:
+            base["retrieval_time_used_as_applicable_law"] = False
+        admitted = {
+            "authority_id": row.get("authority_id") or authority_id,
+            "authority_version": row.get("version") or "",
+            "version": row.get("version") or "",
+            "law_version_id": row.get("law_version_id") or "",
+            "jurisdiction": jurisdiction,
+            "citation": row.get("citation") or "",
+            "locator": candidate.get("locator"),
+            "source_text": row.get("source_text") or "",
+            "effective_date": row.get("effective_date") or "",
+            "end_date": row.get("end_date") or "",
+            "applicable_law_date": applicable_day,
+            "retrieved_at": retrieved_at,
+            "edition_selected": False,
+            "treatment_records": treatments,
+            "authority_treatment_edges": treatments,
+            "treatment_support": treatment_support,
+            "temporal_applicability": temporal,
+            "support_eligible": False,
+            "applicable": False,
+            "proof": False,
+            "mixed_with_other_version": False,
+        }
+        if temporal.get("available") is not True:
+            admitted["edition_selected"] = False
+            base["unresolved"].append(dict(admitted, reason=str(temporal.get("reason") or "temporal_unavailable")))
+            continue
+        if temporal.get("applicable") is not True:
+            admitted["edition_selected"] = False
+            base["unresolved"].append(dict(admitted, reason=str(temporal.get("reason") or temporal.get("applicability_status") or "not_applicable")))
+            continue
+        blocking = bool(treatment_support.get("treatment_blocks_support")) or any(
+            item.get("adverse_treatment_retained") for item in treatments
+        )
+        admitted["edition_selected"] = True
+        admitted["applicable"] = True
+        admitted["support_eligible"] = not blocking
+        admitted["treatment_blocks_support"] = blocking
+        base["admitted"].append(admitted)
+
+    if any(item.get("reason") == "temporal_authority_api_unavailable" or str(item.get("temporal_applicability", {}).get("reason") if isinstance(item.get("temporal_applicability"), Mapping) else "") == "temporal_authority_api_unavailable" for item in base["unresolved"]):
+        temporal_down = [item for item in base["unresolved"] if "temporal" in str(item.get("reason") or "")]
+        if temporal_down and not base["admitted"] and len(temporal_down) == len(base["unresolved"]):
+            base["status"] = "unavailable"
+            base["reason"] = "temporal_authority_api_unavailable"
+            return base
+    if base["admitted"] and not base["unresolved"]:
+        base["status"] = "admitted"
+        base["reason"] = "selected_edition"
+    elif base["admitted"]:
+        base["status"] = "partial"
+        base["reason"] = "partial_edition_selection"
+    elif base["unresolved"]:
+        base["status"] = "unresolved"
+        base["reason"] = str(base["unresolved"][0].get("reason") or "unresolved")
+    else:
+        base["status"] = "empty"
+        base["reason"] = "no_legal_source"
+    base["retrieval_time_used_as_applicable_law"] = False
+    for item in base["admitted"] + base["unresolved"]:
+        if item.get("retrieved_at") and item.get("applicable_law_date") and item.get("retrieved_at") == item.get("applicable_law_date"):
+            base["retrieval_time_used_as_applicable_law"] = True
+        if item.get("effective_date") and item.get("retrieved_at") and item.get("effective_date") == item.get("retrieved_at") and "T" not in str(item.get("retrieved_at")):
+            pass
+    return base
+
+
 def search_legal_authority_program(
     program: Dict[str, Any],
     *,
@@ -3747,6 +4964,9 @@ __all__ = [
     "SourcedLegalRequirement",
     "adapt_sourced_legal_requirements",
     "intake_legal_selection",
+    "build_bounded_legal_acquisition_request",
+    "acquire_bounded_canonical_legal_sources",
+    "CANONICAL_CORPUS_PARAMETER_APIS",
     "unresolved_legal_requirement",
     "legal_requirement_search_plan",
     "lookup_bounded_legal_corpus",

@@ -3,12 +3,23 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
+from .case_routes import shared_inquiry_conflict
 from .complaint_workspace import ComplaintWorkspaceService, WorkspaceAccess, WorkspaceAuthorizationDenied, workspace_access_scope
 
 
 JSONRPC_VERSION = "2.0"
 MCP_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
 DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18"
+
+
+def gui_inference_tool_failed(tool_name: str, payload: Any) -> bool:
+    """A returned refusal is a tool error; a pending proposal is not."""
+    if not isinstance(payload, dict):
+        return False
+    if tool_name == "complaint.admit_bounded_gui_inference":
+        return payload.get("accepted") is not True
+    return (tool_name == "complaint.dispatch_bounded_gui_inference"
+            and payload.get("status") in {"refused", "unavailable", "timeout", "cancelled", "error", "failed"})
 
 
 def negotiated_protocol_version(params: Any) -> str:
@@ -20,6 +31,16 @@ def negotiated_protocol_version(params: Any) -> str:
     return DEFAULT_MCP_PROTOCOL_VERSION
 
 _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "complaint.dispatch_bounded_gui_inference": {
+        "type": "object", "additionalProperties": False,
+        "properties": {"purpose": {"type": "string"}, "inputs": {"type": "object"},
+                       "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 60}},
+        "required": ["purpose", "inputs"],
+    },
+    "complaint.admit_bounded_gui_inference": {
+        "type": "object", "additionalProperties": False,
+        "properties": {"invocation_id": {"type": "string"}}, "required": ["invocation_id"],
+    },
     "complaint.create_identity": {
         "type": "object",
         "properties": {},
@@ -50,7 +71,15 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "user_id": {"type": "string"},
             "message": {"type": "string"},
             "question_id": {"type": "string"},
+            "expected_question_revision": {"type": "integer", "minimum": 0},
+            "interview_action": {"type": "string"},
         },
+        "description": (
+            "Answer or resume the shared WorkflowActionService inquiry. "
+            "question_id is the pending inquiry id. expected_question_revision "
+            "must match the current revision when supplied. A stale or "
+            "mismatched answer is an explicit conflict and does not advance."
+        ),
     },
     "complaint.save_evidence": {
         "type": "object",
@@ -619,6 +648,84 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _service_inquiry(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    interview = payload.get("interview") if isinstance(payload.get("interview"), dict) else {}
+    inquiry = interview.get("inquiry") if isinstance(interview.get("inquiry"), dict) else None
+    if inquiry is not None:
+        return inquiry
+    session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+    projection = session.get("shared_interview") if isinstance(session.get("shared_interview"), dict) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else None
+    return pending
+
+
+def project_shared_inquiry_contract(payload: Any) -> Any:
+    """Copy pending identity, explanation, graph targets, and expected updates.
+
+    Values come from the WorkflowActionService receipt already attached by the
+    workspace. This projection does not invent a question, revision, or graph
+    update. A stale refusal keeps the current inquiry and sets ``conflict``.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    projected = dict(payload)
+    inquiry = _service_inquiry(projected)
+    interview = projected.get("interview") if isinstance(projected.get("interview"), dict) else {}
+    if inquiry is None and not interview:
+        return projected
+    inquiry = inquiry or {}
+    graph = interview.get("graph") if isinstance(interview.get("graph"), dict) else {}
+    explanation = dict(projected.get("explanation") or {}) if isinstance(projected.get("explanation"), dict) else {}
+    explanation.update({
+        "why_it_matters": inquiry.get("why_it_matters"),
+        "grounding_status": inquiry.get("grounding_status"),
+        "unknown_reasons": list(inquiry.get("unknown_reasons") or []),
+        "source": "WorkflowActionService",
+    })
+    graph_targets = {
+        "objective_id": inquiry.get("objective_id"),
+        "target_id": inquiry.get("target_id"),
+        "target_revision": inquiry.get("target_revision"),
+        "graph_id": graph.get("graph_id"),
+        "graph_version": graph.get("graph_version"),
+        "session_revision": interview.get("session_revision"),
+        "legal_sufficiency": False,
+    }
+    public_inquiry = dict(projected.get("inquiry") or {}) if isinstance(projected.get("inquiry"), dict) else {}
+    if inquiry:
+        public_inquiry.update({
+            "inquiry_id": inquiry.get("inquiry_id"),
+            "question_id": inquiry.get("inquiry_id") or public_inquiry.get("question_id"),
+            "revision": inquiry.get("revision"),
+            "prompt": inquiry.get("question") or public_inquiry.get("prompt") or "",
+            "kind": inquiry.get("kind") or public_inquiry.get("kind") or "graph",
+            "why_it_matters": inquiry.get("why_it_matters"),
+            "objective_id": inquiry.get("objective_id"),
+            "target_id": inquiry.get("target_id"),
+            "target_revision": inquiry.get("target_revision"),
+            "expected_answer_contract": inquiry.get("expected_answer_contract"),
+            "expected_update_contract": inquiry.get("expected_update_contract"),
+            "grounding_status": inquiry.get("grounding_status"),
+            "source_references": inquiry.get("source_references"),
+            "legal_sufficiency": False,
+        })
+    revision = interview.get("expected_question_revision")
+    if revision is None:
+        revision = inquiry.get("revision")
+    projected.update({
+        "pending_inquiry_id": inquiry.get("inquiry_id"),
+        "expected_question_revision": revision,
+        "interview_action": interview.get("action"),
+        "explanation": explanation,
+        "graph_targets": graph_targets,
+        "expected_updates": inquiry.get("expected_update_contract"),
+        "inquiry": public_inquiry or projected.get("inquiry"),
+        "legal_sufficiency": False,
+        "conflict": "stale_question" if shared_inquiry_conflict(projected) else None,
+    })
+    return projected
+
+
 def tool_list_payload(service: ComplaintWorkspaceService) -> Dict[str, Any]:
     return {
         "tools": [
@@ -729,17 +836,23 @@ def _handle_jsonrpc_message(
             return _error(request_id, -32602, "Invalid params", "tools/call arguments must be an object.")
         try:
             structured = service.call_mcp_tool(tool_name, arguments)
+            if tool_name == "complaint.run_intake_chat_turn":
+                structured = project_shared_inquiry_contract(structured)
+            conflict = tool_name == "complaint.run_intake_chat_turn" and shared_inquiry_conflict(structured)
+            inference_failed = gui_inference_tool_failed(tool_name, structured)
+            text = "stale_question" if conflict else "mcp_tool_error" if inference_failed else json.dumps(structured, sort_keys=True)
             return _success(
                 request_id,
                 {
                     "content": [
                         {
                             "type": "text",
-                            "text": json.dumps(structured, sort_keys=True),
+                            "text": text,
                         }
                     ],
                     "structuredContent": structured,
-                    "isError": False,
+                    "isError": conflict or inference_failed,
+                    "conflict": "stale_question" if conflict else None,
                 },
             )
         except Exception as exc:

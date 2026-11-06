@@ -8,14 +8,25 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
-from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
+from .browser_sessions import (
+    SESSION_COOKIE,
+    BrowserSessionError,
+    BrowserSessionService,
+    browser_session_http_status,
+)
+from .case_routes import INQUIRY_CONFLICT_STATUS, shared_inquiry_conflict
+from .complaint_mcp_protocol import (handle_jsonrpc_message, project_shared_inquiry_contract,
+    tool_list_payload, gui_inference_tool_failed)
 from .complaint_workspace import (
     ComplaintWorkspaceService,
     PrincipalRegistry,
+    WorkspaceAccess,
     WorkspaceAuthorizationDenied,
+    WorkspacePersistenceError,
     access_from_http_headers,
     generate_decentralized_id,
     workspace_access_scope,
@@ -145,12 +156,26 @@ class IntakeRequest(BaseModel):
     answers: Dict[str, Any] = Field(default_factory=dict)
 
 
+class GuiInferenceRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    purpose: str
+    inputs: Dict[str, Any]
+    timeout_seconds: float = Field(default=30.0, gt=0, le=60)
+
+
+class GuiInferenceAdmissionRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    invocation_id: str
+
+
 class IntakeChatTurnRequest(BaseModel):
     user_id: Optional[str] = None
     message: Optional[str] = None
     question_id: Optional[str] = None
     expected_question_revision: Optional[int] = Field(default=None, ge=0)
     interview_action: Optional[str] = None
+    expected_graph_revision: Optional[str] = Field(default=None, strict=True)
+    expected_session_revision: Optional[int] = Field(default=None, ge=0, strict=True)
 
 
 class EvidenceRequest(BaseModel):
@@ -355,29 +380,61 @@ class PackagedDocketRevalidationPersistRequest(BaseModel):
     chain_until_satisfied: bool = True
 
 
+def _browser_session_http_error(error: BrowserSessionError) -> HTTPException:
+    status, code = browser_session_http_status(error)
+    return HTTPException(status_code=status, detail=code)
+
+
 def create_complaint_workspace_router(
     service: Optional[ComplaintWorkspaceService] = None,
     *,
     principal_registry: Optional[PrincipalRegistry] = None,
     trusted_local: bool = False,
+    browser_sessions: Optional[BrowserSessionService] = None,
 ) -> APIRouter:
     """HTTP and MCP routes share one principal/case authorizer.
 
     ``trusted_local`` must be passed explicitly for a local operator binding.
     A process-wide bearer token or a caller-supplied ``user_id`` does not
     authorize a private read, write, or export.
+
+    When ``browser_sessions`` is installed, including an unavailable service
+    from a missing verifier or signing key, requests fail closed. That path
+    does not fall back to trusted-local access.
     """
 
     router = APIRouter()
     workspace = service or ComplaintWorkspaceService()
     registry = principal_registry
+    sessions = browser_sessions
 
     async def _bind_request_access(http_request: Request):
-        access = access_from_http_headers(
-            http_request.headers,
-            principal_registry=registry,
-            trusted_local=trusted_local,
-        )
+        if sessions is not None:
+            anonymous = http_request.url.path.rstrip("/").endswith("/api/complaint-workspace/auth/login")
+            try:
+                bound = await sessions.bind_http(http_request, allow_anonymous=anonymous)
+            except BrowserSessionError as error:
+                raise _browser_session_http_error(error) from None
+            if bound is None:
+                access = WorkspaceAccess.unauthenticated()
+            else:
+                from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+                    current_workspace_case_authority)
+                try:
+                    authority = current_workspace_case_authority()
+                    if authority is not None:
+                        authority.revalidate(actor_principal_id=bound.principal_id)
+                except WorkspaceCaseAuthorityError:
+                    raise HTTPException(status_code=403, detail="authorization_denied") from None
+                access = WorkspaceAccess.authenticated(bound.principal_id,
+                    case_id=authority.case_id if authority is not None else None)
+                http_request.state.browser_principal = bound
+        else:
+            access = access_from_http_headers(
+                http_request.headers,
+                principal_registry=registry,
+                trusted_local=trusted_local,
+            )
         with workspace_access_scope(access):
             yield
 
@@ -408,12 +465,101 @@ def create_complaint_workspace_router(
     router.post = _register(router.post)  # type: ignore[method-assign]
     router.dependencies.append(Depends(_bind_request_access))
 
+    def _json_payload(http_request: Request) -> Dict[str, Any]:
+        payload = getattr(http_request.state, "browser_json", None)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=401, detail="authentication_failed")
+        return payload
+
+    @router.post("/api/complaint-workspace/auth/login")
+    async def login_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        try:
+            issued = sessions.login(_json_payload(http_request))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse(issued.public_view())
+        sessions.attach_session_cookie(response, issued)
+        return response
+
+    @router.post("/api/complaint-workspace/auth/logout")
+    async def logout_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        token = str(http_request.cookies.get(SESSION_COOKIE) or "")
+        try:
+            sessions.logout(token, csrf_token=str(http_request.headers.get("x-csrf-token") or ""))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse({"authenticated": False})
+        sessions.clear_session_cookie(response)
+        return response
+
+    @router.post("/api/complaint-workspace/auth/rotate")
+    async def rotate_browser_session(http_request: Request) -> JSONResponse:
+        if sessions is None or not sessions.configured:
+            raise HTTPException(status_code=503, detail="authentication_unavailable")
+        token = str(http_request.cookies.get(SESSION_COOKIE) or "")
+        try:
+            issued = sessions.rotate(token, csrf_token=str(http_request.headers.get("x-csrf-token") or ""))
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        response = JSONResponse(issued.public_view())
+        sessions.attach_session_cookie(response, issued)
+        return response
+
+    @router.get("/api/complaint-workspace/auth/session")
+    async def read_browser_session(http_request: Request) -> JSONResponse:
+        bound = getattr(http_request.state, "browser_principal", None)
+        if bound is None:
+            raise HTTPException(status_code=401, detail="session_required")
+        try:
+            resumed = sessions.resume_http(http_request, bound=bound)
+        except BrowserSessionError as error:
+            raise _browser_session_http_error(error) from None
+        return JSONResponse(resumed, headers={"Cache-Control": "private, no-store",
+            "Pragma": "no-cache", "Expires": "0"})
+
+    @router.get("/api/complaint-workspace/factual-graph")
+    async def read_current_factual_graph(
+        user_id: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ):
+        """Current factual projection. Cached flags are not a second graph store."""
+        try:
+            return workspace.current_factual_graph_projection(user_id, case_id=case_id)
+        except WorkspacePersistenceError as error:
+            code = str(error.code or "")
+            if code == "cross_case_id":
+                status_code = 403
+            elif code == "revision_conflict":
+                status_code = 409
+            else:
+                status_code = 503
+            public = code if code in {
+                "unlock_needed", "key_unavailable", "revision_conflict", "cross_case_id",
+                "knowledge_graph_unavailable", "data_graph_owner_unavailable", "factual_ledger_invalid",
+            } else "private_session_unavailable"
+            return JSONResponse(status_code=status_code, content={
+                "status": "unavailable", "error": public, "read_only": True,
+                "user_statements": [], "adopted_evidence": [], "corrections": [], "contradictions": [],
+            })
+
     @router.get("/api/complaint-workspace/session")
     async def get_session(
         user_id: Optional[str] = None,
         case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return workspace.get_session(user_id, case_id=case_id)
+        try:
+            return workspace.get_session(user_id, case_id=case_id)
+        except WorkspacePersistenceError as error:
+            # The real case/key owner supplies this error. Do not expose its
+            # exception text, paths, ciphertext, or partial session payload.
+            code = str(error.code or "")
+            public = code if code in {"unlock_needed", "key_unavailable", "revision_conflict"} else "private_session_unavailable"
+            return JSONResponse(status_code=409 if public == "revision_conflict" else 503,
+                content={"status": "unavailable", "error": public, "session_readable": False})
 
     @router.post("/api/complaint-workspace/identity")
     async def create_identity() -> Dict[str, Any]:
@@ -424,14 +570,37 @@ def create_complaint_workspace_router(
         return workspace.submit_intake_answers(request.user_id, request.answers)
 
     @router.post("/api/complaint-workspace/intake-chat")
-    async def intake_chat_turn(request: IntakeChatTurnRequest) -> Dict[str, Any]:
-        return workspace.run_intake_chat_turn(
-            request.user_id,
-            message=request.message,
-            question_id=request.question_id,
-            expected_question_revision=request.expected_question_revision,
-            interview_action=request.interview_action,
-        )
+    async def intake_chat_turn(request: IntakeChatTurnRequest) -> Response:
+        action = str(request.interview_action or "").strip().lower()
+        if action in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}:
+            # Keep the actual event loop available for logout/revocation while
+            # the guarded effect encrypts. Starlette preserves the issued scope.
+            try:
+                result = await run_in_threadpool(workspace.run_intake_chat_turn,
+                    request.user_id, message=request.message, question_id=request.question_id,
+                    expected_question_revision=request.expected_question_revision,
+                    interview_action=request.interview_action,
+                    expected_graph_revision=request.expected_graph_revision,
+                    expected_session_revision=request.expected_session_revision)
+            except WorkspacePersistenceError as error:
+                if action not in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+                    raise
+                code = error.code if error.code in {"revision_conflict", "unlock_needed", "durability_unproven",
+                    "overwrite_blocked", "wal_unavailable"} else "finite_stop_unavailable"
+                return JSONResponse(status_code=409 if code == "revision_conflict" else 503,
+                    content={"status":"unavailable", "error":code, "outcome_unknown":True,
+                        "legal_sufficiency":False, "worker_stalled":False})
+        else:
+            result = workspace.run_intake_chat_turn(request.user_id,
+                message=request.message, question_id=request.question_id,
+                expected_question_revision=request.expected_question_revision,
+                interview_action=request.interview_action,
+                expected_graph_revision=request.expected_graph_revision,
+                expected_session_revision=request.expected_session_revision)
+        payload = project_shared_inquiry_contract(result)
+        if shared_inquiry_conflict(payload):
+            return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)
+        return JSONResponse(status_code=200, content=payload)
 
     @router.post("/api/complaint-workspace/evidence")
     async def save_evidence(request: EvidenceRequest) -> Dict[str, Any]:
@@ -908,14 +1077,38 @@ def create_complaint_workspace_router(
             chain_until_satisfied=request.chain_until_satisfied,
         )
 
+    @router.post("/api/complaint-workspace/inference/dispatch")
+    async def dispatch_gui_inference(request: GuiInferenceRequest) -> Dict[str, Any]:
+        return await run_in_threadpool(workspace.dispatch_bounded_gui_inference, None, purpose=request.purpose,
+            inputs=request.inputs, timeout_seconds=request.timeout_seconds)
+
+    @router.post("/api/complaint-workspace/inference/admit")
+    async def admit_gui_inference(request: GuiInferenceAdmissionRequest) -> Dict[str, Any]:
+        return await run_in_threadpool(workspace.admit_bounded_gui_inference, None, invocation_id=request.invocation_id)
+
     @router.post("/api/complaint-workspace/mcp/call")
-    async def call_mcp_tool(request: McpCallRequest) -> Dict[str, Any]:
+    async def call_mcp_tool(request: McpCallRequest) -> Response:
         try:
-            return workspace.call_mcp_tool(request.tool_name, request.arguments)
+            threaded_intake = request.tool_name == "complaint.run_intake_chat_turn" and str(
+                request.arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}
+            if threaded_intake or request.tool_name in {"complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}:
+                payload = await run_in_threadpool(workspace.call_mcp_tool, request.tool_name, request.arguments)
+            else:
+                payload = workspace.call_mcp_tool(request.tool_name, request.arguments)
         except WorkspaceAuthorizationDenied:
-            return {"ok": False, "error": "authorization_denied", "isError": True}
+            return JSONResponse(status_code=200, content={"ok": False, "error": "authorization_denied", "isError": True})
         except Exception:
-            return {"ok": False, "error": "workspace_operation_failed", "isError": True}
+            return JSONResponse(status_code=200, content={"ok": False, "error": "workspace_operation_failed", "isError": True})
+        if gui_inference_tool_failed(request.tool_name, payload):
+            return JSONResponse(status_code=200, content={**payload, "ok": False, "isError": True})
+        if request.tool_name == "complaint.run_intake_chat_turn":
+            payload = project_shared_inquiry_contract(payload)
+            if shared_inquiry_conflict(payload):
+                payload = dict(payload)
+                payload["isError"] = True
+                payload["ok"] = False
+                return JSONResponse(status_code=INQUIRY_CONFLICT_STATUS, content=payload)
+        return JSONResponse(status_code=200, content=payload)
 
     @router.post("/api/complaint-workspace/mcp/rpc")
     async def call_jsonrpc(request: JsonRpcRequest, http_request: Request) -> Response:
@@ -924,7 +1117,15 @@ def create_complaint_workspace_router(
             authorization = http_request.headers.get("authorization", "")
             if authorization != f"Bearer {token}":
                 raise HTTPException(status_code=401, detail="MCP bearer token required")
-        response = handle_jsonrpc_message(workspace, request.model_dump())
+        params = request.params if isinstance(request.params, dict) else {}
+        arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        threaded_intake = params.get("name") == "complaint.run_intake_chat_turn" and str(
+            arguments.get("interview_action") or "").strip().lower() in {"correct", "edit", "pause", "cancel", "cap", "unavailable", "saturate", "encrypted_resume"}
+        if request.method == "tools/call" and (threaded_intake or params.get("name") in {
+                "complaint.dispatch_bounded_gui_inference", "complaint.admit_bounded_gui_inference"}):
+            response = await run_in_threadpool(handle_jsonrpc_message, workspace, request.model_dump())
+        else:
+            response = handle_jsonrpc_message(workspace, request.model_dump())
         body = response or {"jsonrpc": "2.0", "id": request.id, "result": None}
         return Response(
             content=json.dumps(body),
@@ -940,6 +1141,7 @@ def attach_complaint_workspace_routes(
     *,
     principal_registry: Optional[PrincipalRegistry] = None,
     trusted_local: bool = False,
+    browser_sessions: Optional[BrowserSessionService] = None,
 ) -> FastAPI:
     return attach_router_routes(
         app,
@@ -947,5 +1149,6 @@ def attach_complaint_workspace_routes(
             service,
             principal_registry=principal_registry,
             trusted_local=trusted_local,
+            browser_sessions=browser_sessions,
         ),
     )

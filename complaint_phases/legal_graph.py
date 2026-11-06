@@ -804,13 +804,26 @@ class LegalGraphBuilder:
             authority_family = str(
                 authority.get('authority_family') or authority.get('source_type') or ''
             ).strip()
+            authority_version = str(
+                authority.get('authority_version') or authority.get('version') or ''
+            ).strip()
+            law_version_id = str(authority.get('law_version_id') or '').strip()
+            if not law_version_id and raw_id and authority_version:
+                law_version_id = f'{raw_id}:{authority_version}'
+            from integrations.ipfs_datasets.legal import retain_acquired_treatment_records
+            retained_treatments = retain_acquired_treatment_records(authority)
+            identity = {
+                'source_authority_id': raw_id, 'name': name, 'citation': citation,
+                'jurisdiction': jurisdiction, 'authority_family': authority_family,
+                'provenance': authority.get('provenance') if isinstance(authority.get('provenance'), dict) else {},
+            }
+            if authority_version:
+                identity['authority_version'] = authority_version
+            if law_version_id:
+                identity['law_version_id'] = law_version_id
 
             node = LegalElement(
-                id=self._get_element_id('authority_source', {
-                    'source_authority_id': raw_id, 'name': name, 'citation': citation,
-                    'jurisdiction': jurisdiction, 'authority_family': authority_family,
-                    'provenance': authority.get('provenance') if isinstance(authority.get('provenance'), dict) else {},
-                }),
+                id=self._get_element_id('authority_source', identity),
                 element_type='authority_source',
                 name=name,
                 citation=citation,
@@ -818,17 +831,30 @@ class LegalGraphBuilder:
                 attributes={
                     'source_authority_id': raw_id,
                     'authority_family': authority_family,
+                    'authority_version': authority_version,
+                    'law_version_id': law_version_id,
+                    'retrieved_at': authority.get('retrieved_at') or '',
+                    'applicable_law_date': authority.get('applicable_law_date') or '',
+                    'effective_date': authority.get('effective_date') or '',
+                    'treatment_records': retained_treatments,
                     'record_kind': 'authority_source',
                     'about_complainant': False,
                     'provenance': dict(authority.get('provenance') or {}) if isinstance(authority.get('provenance'), dict) else {},
                 },
             )
             graph.add_element(node)
+            if law_version_id:
+                authority_node_ids[law_version_id] = node.id
             if raw_id:
-                authority_node_ids[raw_id] = node.id
-                if raw_id.startswith('authority:'):
+                previous = authority_node_ids.get(raw_id)
+                if previous is None:
+                    authority_node_ids[raw_id] = node.id
+                elif previous != node.id:
+                    authority_node_ids.pop(raw_id, None)
+                    authority_node_ids.pop(raw_id.removeprefix('authority:') if raw_id.startswith('authority:') else f'authority:{raw_id}', None)
+                if raw_id.startswith('authority:') and raw_id in authority_node_ids:
                     authority_node_ids.setdefault(raw_id.removeprefix('authority:'), node.id)
-                else:
+                elif raw_id in authority_node_ids:
                     authority_node_ids.setdefault(f'authority:{raw_id}', node.id)
 
         # Second pass: add treatment edges and rule candidate edges now that all
@@ -839,7 +865,11 @@ class LegalGraphBuilder:
             raw_id = str(
                 authority.get('authority_id') or authority.get('id') or ''
             ).strip()
-            source_node_id = authority_node_ids.get(raw_id)
+            authority_version = str(authority.get('authority_version') or authority.get('version') or '').strip()
+            law_version_id = str(authority.get('law_version_id') or '').strip()
+            if not law_version_id and raw_id and authority_version:
+                law_version_id = f'{raw_id}:{authority_version}'
+            source_node_id = authority_node_ids.get(law_version_id) or authority_node_ids.get(raw_id)
             if not source_node_id:
                 continue
 
@@ -864,6 +894,7 @@ class LegalGraphBuilder:
         """Keep treatment edges and stop them from supporting a requirement."""
         blocking_types = {
             'adverse', 'good_law_unconfirmed', 'questioned', 'limits', 'distinguishes', 'superseded',
+            'superseding', 'repealed', 'repealing', 'repeal',
         }
         visible_types = blocking_types | {'supports'}
         treatments_by_authority: Dict[str, List[LegalRelation]] = {}
@@ -917,7 +948,8 @@ class LegalGraphBuilder:
         """
         _VALID_TREATMENT_TYPES = {
             'supports', 'adverse', 'limits', 'distinguishes',
-            'questioned', 'superseded', 'good_law_unconfirmed',
+            'questioned', 'superseded', 'superseding', 'good_law_unconfirmed',
+            'repealed', 'repealing', 'repeal',
         }
         emitted: Set[Tuple[str, str, str]] = set()
 
@@ -986,31 +1018,41 @@ class LegalGraphBuilder:
                     relation_type=str(
                         record.get('relation_type')
                         or record.get('treatment_type')
+                        or record.get('type')
+                        or record.get('treatment')
+                        or record.get('effect')
                         or ''
                     ).strip(),
                 )
 
-        if has_graph_ready_edges:
-            return
-
-        treatment_records = authority.get('treatment_records')
-        if not isinstance(treatment_records, list):
-            summary = authority.get('treatment_summary') if isinstance(authority.get('treatment_summary'), dict) else {}
-            treatment_records = summary.get('records', []) if isinstance(summary, dict) else []
-        for record in treatment_records or []:
+        from integrations.ipfs_datasets.legal import retain_acquired_treatment_records
+        extra_records = retain_acquired_treatment_records(authority)
+        for record in extra_records:
             if not isinstance(record, dict):
                 continue
-            treatment_type = str(record.get('treatment_type') or record.get('type') or '').strip()
+            treatment_type = str(
+                record.get('relation_type')
+                or record.get('treatment_type')
+                or record.get('type')
+                or record.get('treatment')
+                or record.get('effect')
+                or ''
+            ).strip()
             treated_id = str(
-                record.get('treated_authority_id')
-                or record.get('treated_by_authority_id')
-                or record.get('target_authority_id')
+                record.get('target_authority_id')
+                or record.get('treated_authority_id')
+                or record.get('law_version_id')
                 or record.get('target_id')
+                or ''
+            ).strip()
+            source_ref = str(
+                record.get('source_authority_id')
+                or record.get('treated_by_authority_id')
                 or ''
             ).strip()
             add_edge_from_record(
                 record,
-                source_ref='',
+                source_ref=source_ref,
                 target_ref=treated_id,
                 relation_type=treatment_type,
             )

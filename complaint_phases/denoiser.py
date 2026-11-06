@@ -27,23 +27,315 @@ from .intake_claim_registry import (
 
 logger = logging.getLogger(__name__)
 
+_SUPPORT_STATE_NAMES = ("user_assertion", "corroboration", "candidate", "applicability", "proof")
+_SUPPORT_STATE_TOKENS = frozenset({
+    "unknown", "asserted", "unasserted", "corroborated", "uncorroborated",
+    "candidate", "not_candidate", "applicable", "inapplicable", "unproved",
+    "proved", "missing", "unavailable", "contradicted", "needs_review",
+    "admitted", "rejected", "recorded",
+})
+_PRIVATE_DIAGNOSTIC_KEYS = frozenset({
+    "narrative", "prompt", "answer", "question", "why_it_matters", "text", "wording",
+    "span_text", "quote", "secret", "passphrase", "content", "candidate",
+    "expected_information", "display", "password", "token", "recovery",
+})
+_CONDITION_COPY = {
+    "unknown_authority": (
+        "Admitted authority for this question is unknown.",
+        "identify_or_research_admitted_authority",
+    ),
+    "source_outage": (
+        "A legal source is unavailable. This outage is not legal sufficiency.",
+        "retry_when_source_available",
+    ),
+    "contradiction": (
+        "Accounts conflict. Neither account is treated as proved.",
+        "clarify_the_conflicting_accounts",
+    ),
+    "missing_definition": (
+        "The element definition is missing and still needs review.",
+        "review_the_element_definition",
+    ),
+    "missing_review": (
+        "A required review is missing.",
+        "complete_manual_review",
+    ),
+}
+_WHY_DISPLAY_CHAR_BUDGET = 3500
+_FIELD_CHAR_BUDGET = 160
+
+
+def _clip_public(value: Any, limit: int = _FIELD_CHAR_BUDGET) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def _state_token(value: Any) -> str:
+    token = str(value or "").strip().lower().replace(" ", "_")
+    if token in _SUPPORT_STATE_TOKENS:
+        return token
+    return "recorded" if token else "unknown"
+
+
+def _mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _factual_target_view(inquiry: Dict[str, Any]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("factual_target"))
+    unresolved = _mapping(inquiry.get("unresolved_target"))
+    kind = str(raw.get("kind") or unresolved.get("target_kind") or inquiry.get("target_kind") or inquiry.get("gap_family") or "")
+    target_id = str(raw.get("target_id") or "").strip()
+    label = str(raw.get("label") or raw.get("name") or "").strip()
+    factual_kinds = {"factual", "factual_uncertainty", "timeline", "clarification"}
+    if not target_id and kind.strip().lower() in factual_kinds:
+        target_id = str(unresolved.get("target_id") or inquiry.get("target_id") or "").strip()
+    if not label and kind.strip().lower() in factual_kinds:
+        label = str(unresolved.get("label") or unresolved.get("name") or "").strip()
+    return {
+        "target_id": _clip_public(target_id) or "unknown",
+        "label": _clip_public(label) or "unknown",
+        "kind": "factual",
+    }
+
+
+def _law_requirement_view(inquiry: Dict[str, Any], factual: Dict[str, str]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("law_derived_requirement") or inquiry.get("legal_requirement"))
+    requirement_id = str(raw.get("requirement_id") or raw.get("element_id") or "").strip()
+    label = str(raw.get("label") or raw.get("name") or raw.get("element") or "").strip()
+    law_derived = raw.get("law_derived")
+    if law_derived is None:
+        law_derived = bool(requirement_id or label) or str(inquiry.get("gap_family") or "") == "legal_element_support"
+    if not requirement_id and str(inquiry.get("gap_family") or "") == "legal_element_support":
+        requirement_id = str(inquiry.get("requirement_id") or "").strip()
+    # A factual target id is not a law-derived requirement, even when it is the only id present.
+    if requirement_id and requirement_id == factual.get("target_id") and factual.get("target_id") != "unknown":
+        if not raw:
+            requirement_id = ""
+    if label and label == factual.get("label") and factual.get("label") != "unknown" and not raw:
+        label = ""
+    return {
+        "requirement_id": _clip_public(requirement_id) or "unknown",
+        "label": _clip_public(label) or "unknown",
+        "law_derived": "true" if law_derived and (requirement_id or label) else "false",
+    }
+
+
+def _admitted_authorities(inquiry: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw = inquiry.get("admitted_authorities")
+    if not isinstance(raw, list):
+        raw = inquiry.get("authority_references")
+    if not isinstance(raw, list):
+        single = _mapping(inquiry.get("admitted_authority"))
+        raw = [single] if single else []
+    admitted: List[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or item.get("admission") or "").strip().lower()
+        if item.get("admitted") is False or status in {"rejected", "unknown", "candidate", "unavailable"}:
+            continue
+        if item.get("admitted") is not True and status not in {"admitted", "admitted_authority"}:
+            continue
+        citation = _clip_public(item.get("citation") or item.get("cite") or "")
+        version = _clip_public(item.get("version") or item.get("edition") or "")
+        span = _clip_public(item.get("span") or item.get("span_id") or item.get("span_ref") or "")
+        if not (citation or version or span):
+            continue
+        admitted.append({
+            "citation": citation or "unknown",
+            "version": version or "unknown",
+            "span": span or "unknown",
+        })
+        if len(admitted) >= 4:
+            break
+    return admitted
+
+
+def _support_states(inquiry: Dict[str, Any]) -> Dict[str, str]:
+    raw = _mapping(inquiry.get("support_states"))
+    states = {name: _state_token(raw.get(name, inquiry.get(name))) for name in _SUPPORT_STATE_NAMES}
+    score = inquiry.get("retrieval_score", inquiry.get("relevance_score"))
+    raw_proof = raw.get("proof", inquiry.get("proof"))
+    raw_proof_text = str(raw_proof).strip() if raw_proof is not None else ""
+    score_text = str(score).strip() if score is not None else ""
+    # A retrieval score never fills proof, including when a caller copies the score into proof.
+    if not raw_proof_text or (score_text and raw_proof_text == score_text):
+        states["proof"] = "unknown"
+    return states
+
+
+def _support_conditions(inquiry: Dict[str, Any], authorities: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    authority_status = str(inquiry.get("authority_status") or "").strip().lower()
+    source_status = str(inquiry.get("source_status") or inquiry.get("legal_source_status") or "").strip().lower()
+    definition_status = str(inquiry.get("definition_status") or "").strip().lower()
+    review_status = str(inquiry.get("review_status") or "").strip().lower()
+    reasons = {str(item).strip().lower() for item in (inquiry.get("unknown_reasons") or [])}
+    family = str(inquiry.get("gap_family") or "").strip().lower()
+    flags = {
+        "unknown_authority": (not authorities) or authority_status in {"unknown", "missing"},
+        "source_outage": source_status in {"outage", "unavailable", "source_outage"} or "source_outage" in reasons,
+        "contradiction": family == "contradiction" or bool(inquiry.get("contradiction")) or "contradiction" in reasons,
+        "missing_definition": definition_status in {"missing", "unknown"} or bool(inquiry.get("missing_definition")) or "missing_definition" in reasons,
+        "missing_review": review_status in {"missing", "needs_review"} or bool(inquiry.get("missing_review")) or "missing_review" in reasons,
+    }
+    # Unknown authority is the standing case. Other conditions appear only when the inquiry says so.
+    if authority_status in {"admitted", "known"} and authorities:
+        flags["unknown_authority"] = False
+    conditions: List[Dict[str, str]] = []
+    for kind, enabled in flags.items():
+        if not enabled:
+            continue
+        message, action = _CONDITION_COPY[kind]
+        conditions.append({"kind": kind, "message": message, "next_action": action})
+    return conditions
+
+
+def question_support_view(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Separate factual, law-derived, authority, and support facts for /why.
+
+    Retrieval rank stays a retrieval fact. It is not proof, applicability, or admission.
+    """
+    record = inquiry if isinstance(inquiry, dict) else {}
+    factual = _factual_target_view(record)
+    requirement = _law_requirement_view(record, factual)
+    authorities = _admitted_authorities(record)
+    states = _support_states(record)
+    conditions = _support_conditions(record, authorities)
+    score = record.get("retrieval_score", record.get("relevance_score"))
+    score_text = "none"
+    if score is not None and str(score).strip():
+        score_text = _clip_public(score, 32)
+    return {
+        "factual_target": factual,
+        "law_derived_requirement": requirement,
+        "admitted_authorities": authorities,
+        "authority_status": "admitted" if authorities else "unknown",
+        "support_states": states,
+        "retrieval_score": score_text,
+        "retrieval_score_is_proof": False,
+        "conditions": conditions,
+        "legal_sufficiency": False,
+        "proof_established": states.get("proof") == "proved",
+    }
+
+
+def _support_display_lines(support: Dict[str, Any]) -> List[str]:
+    factual = support["factual_target"]
+    requirement = support["law_derived_requirement"]
+    lines = [
+        f"Factual target: {factual['label']} [{factual['target_id']}]",
+        (
+            "Law-derived requirement: "
+            f"{requirement['label']} [{requirement['requirement_id']}] "
+            f"law_derived={requirement['law_derived']}"
+        ),
+    ]
+    authorities = support["admitted_authorities"]
+    if authorities:
+        for item in authorities:
+            lines.append(
+                "Admitted authority: "
+                f"citation={item['citation']}; version={item['version']}; span={item['span']}"
+            )
+    else:
+        lines.append("Admitted authority: unknown")
+    state_text = "; ".join(f"{name}={support['support_states'][name]}" for name in _SUPPORT_STATE_NAMES)
+    lines.append(f"Support states: {state_text}")
+    lines.append(
+        f"Retrieval score: {support['retrieval_score']}. A retrieval score is not proof, corroboration, applicability, or admission."
+    )
+    for condition in support["conditions"]:
+        lines.append(f"Condition {condition['kind']}: {condition['message']}")
+        lines.append(f"Next action: {condition['next_action']}")
+    rendered: List[str] = []
+    budget = _WHY_DISPLAY_CHAR_BUDGET
+    for line in lines:
+        safe = line.encode("ascii", "replace").decode("ascii")
+        if budget <= 0:
+            rendered.append("Further support lines omitted to keep this explanation bounded.")
+            break
+        if len(safe) > budget:
+            safe = safe[: max(0, budget - 3)] + "..."
+        rendered.append(safe)
+        budget -= len(safe) + 1
+    return rendered
+
+
+def public_why_diagnostic_receipt(why: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Codes and references only. Question text and narrative stay out of the receipt."""
+    payload = why if isinstance(why, dict) else {}
+    support = payload.get("question_support") if isinstance(payload.get("question_support"), dict) else {}
+    factual = _mapping(support.get("factual_target"))
+    requirement = _mapping(support.get("law_derived_requirement"))
+    states = _mapping(support.get("support_states"))
+    conditions = [item for item in (support.get("conditions") or []) if isinstance(item, dict)]
+    authorities = [item for item in (support.get("admitted_authorities") or []) if isinstance(item, dict)]
+    return {
+        "schema": "why-diagnostic-receipt-v1",
+        "command": "/why",
+        "objective_id": _clip_public(payload.get("objective_id") or "unknown", 80) or "unknown",
+        "target_id": _clip_public(payload.get("target_id") or "unknown", 80) or "unknown",
+        "factual_target_id": _clip_public(factual.get("target_id") or "unknown", 80),
+        "law_requirement_id": _clip_public(requirement.get("requirement_id") or "unknown", 80),
+        "authority_status": "admitted" if authorities else "unknown",
+        "authority_count": len(authorities),
+        "authority_citations": [_clip_public(item.get("citation") or "unknown", 80) for item in authorities],
+        "support_states": {name: _state_token(states.get(name)) for name in _SUPPORT_STATE_NAMES},
+        "retrieval_score_is_proof": False,
+        "condition_kinds": [str(item.get("kind") or "") for item in conditions],
+        "next_actions": [str(item.get("next_action") or "") for item in conditions],
+        "legal_sufficiency": False,
+        "contains_private_content": False,
+        "awaiting_user": True,
+        "worker_stalled": False,
+    }
+
+
+def redact_diagnostic_value(value: Any) -> Any:
+    """Drop private complaint text from a diagnostic receipt before it is shown."""
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).strip().lower() in _PRIVATE_DIAGNOSTIC_KEYS:
+                continue
+            redacted[str(key)] = redact_diagnostic_value(item)
+        redacted.setdefault("contains_private_content", False)
+        return redacted
+    if isinstance(value, list):
+        return [redact_diagnostic_value(item) for item in value[:20]]
+    if isinstance(value, str):
+        if len(value) > 180:
+            return "[redacted]"
+        return value
+    return value
+
 
 def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Render a /why explanation a person can read without seeing ranking internals."""
     if not isinstance(inquiry, dict) or not (
         str(inquiry.get("question") or "").strip() or str(inquiry.get("why_it_matters") or "").strip()
     ):
+        support = question_support_view({})
         display = (
             "There is no current question to explain. "
-            "The interview is waiting for a selected gap, and this is not a stalled worker."
+            "The interview is waiting for a selected gap, and this is not a stalled worker.\n"
+            + "\n".join(_support_display_lines(support))
         )
-        return {
+        payload = {
             "command": "/why",
             "display": display,
             "stored_as_answer": False,
             "awaiting_user": True,
+            "worker_stalled": False,
             "inquiry": None,
+            "legal_sufficiency": False,
+            "question_support": support,
         }
+        payload["diagnostic_receipt"] = public_why_diagnostic_receipt(payload)
+        return payload
     why = str(inquiry.get("why_it_matters") or inquiry.get("question_reason") or "").strip()
     if not why:
         why = "This question asks for information that is still missing from the complaint record."
@@ -58,6 +350,8 @@ def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         or "facts, dates, people, or documents you observed"
     ).strip()
     update_kind = str(update_contract.get("update_kind") or "record the answer against this target").replace("_", " ")
+    support = question_support_view(inquiry)
+    support_lines = "\n".join(_support_display_lines(support))
     display = (
         f"Why this question: {why}\n"
         f"Question: {question}\n"
@@ -65,19 +359,27 @@ def format_terminal_why(inquiry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         f"Target id: {target_id}\n"
         f"Expected answer: {expected}.\n"
         f"Expected update: {update_kind} for this target. "
-        "An unknown, refused, or skipped answer is recorded as that response and does not satisfy the underlying legal requirement."
+        "An unknown, refused, or skipped answer is recorded as that response and does not satisfy the underlying legal requirement.\n"
+        f"{support_lines}"
     )
-    return {
+    if len(display) > _WHY_DISPLAY_CHAR_BUDGET:
+        display = display[: _WHY_DISPLAY_CHAR_BUDGET - 3] + "..."
+    payload = {
         "command": "/why",
         "display": display,
         "stored_as_answer": False,
         "awaiting_user": True,
+        "worker_stalled": False,
         "objective_id": objective_id,
         "target_id": target_id,
         "why_it_matters": why,
         "expected_answer_contract": answer_contract,
         "expected_update_contract": update_contract,
+        "question_support": support,
+        "legal_sufficiency": False,
     }
+    payload["diagnostic_receipt"] = public_why_diagnostic_receipt(payload)
+    return payload
 
 
 MODULE_OWNERSHIP = require_module_ownership("complaint_phases.denoiser")
@@ -141,6 +443,10 @@ def project_stopping_policy(
         } else "awaiting_user"
     if paused:
         outcome = "paused"
+    stalled = bool(payload.get("worker_stalled"))
+    if stalled and outcome in {"awaiting_user", "paused"}:
+        outcome = "no_progress"
+    lane = str(payload.get("dependency_lane") or "").strip()
     standing = {
         "reason": "interview_stop_is_not_legal_sufficiency",
         "legal_sufficiency": False,
@@ -158,17 +464,46 @@ def project_stopping_policy(
         "saturated": "review_unresolved_issues_then_resume",
         "complete": "review_evidence_gaps_before_filing",
     }
+    distinction = {
+        "awaiting_user": "awaiting_user",
+        "paused": "awaiting_user",
+        "deferred_needs_evidence": "evidence_request",
+        "blocked_provider": "unavailable_provider",
+        "no_progress": "no_progress",
+        "needs_review": "review",
+        "saturated": "saturated",
+        "complete": "complete",
+    }.get(outcome, outcome or "awaiting_user")
+    action = next_actions.get(outcome, "review_unresolved_issues_then_resume")
+    concrete = {
+        "source_research": "acquire_legal_sources",
+        "evidence_request": "ingest_private_evidence",
+        "review": "refresh_grounding",
+    }
+    if lane in concrete and outcome not in {"no_progress", "blocked_provider", "paused", "awaiting_user"}:
+        distinction = lane
+        action = concrete[lane]
+    elif outcome == "saturated" and lane == "source_research":
+        distinction = "source_research"
+        action = concrete["source_research"]
     return {
         "outcome": outcome,
         "state": state or None,
+        "dependency_lane": lane or None,
+        "stopping_distinction": distinction,
+        "operation_terminated": outcome == "no_progress",
+        "busy_loop": False,
+        "reads_developer_stdin": False,
         "remaining_issues": remaining,
         "unresolved_issue_summary": summary,
         "resumable_next_action": {
-            "action": next_actions.get(outcome, "review_unresolved_issues_then_resume"),
-            "resumable": True,
+            "action": action,
+            "resumable": outcome != "no_progress" or not stalled,
             "reason": outcome,
-            "worker_stalled": False,
+            "worker_stalled": stalled,
             "supervisory_restart": False,
+            "reads_developer_stdin": False,
+            "busy_loop": False,
         },
         "legal_sufficiency": False,
         "core_facts_complete": False,
@@ -177,6 +512,142 @@ def project_stopping_policy(
         "intake_complete": bool(payload.get("intake_complete")) and outcome == "complete",
         "rejected_shortcuts": shortcuts,
     }
+
+
+_DEPENDENCY_LANE_ALIASES = {
+    "source_research": "source_research",
+    "source": "source_research",
+    "legal_source": "source_research",
+    "authority": "source_research",
+    "evidence_request": "evidence_request",
+    "evidence": "evidence_request",
+    "proof": "evidence_request",
+    "review": "review",
+    "contradiction": "review",
+    "grounding": "review",
+}
+_DEPENDENCY_LANE_ACTIONS = {
+    "source_research": "acquire_legal_sources",
+    "evidence_request": "ingest_private_evidence",
+    "review": "refresh_grounding",
+}
+MAX_DEPENDENCY_ACTION_ATTEMPTS = 3
+
+
+def dependency_lane_for(item: Any) -> Optional[str]:
+    """Map one open dependency to a source, evidence, or review lane."""
+    if not isinstance(item, dict):
+        return None
+    for key in ("lane", "dependency_lane", "kind", "target_kind", "dependency_kind"):
+        token = str(item.get(key) or "").strip().lower()
+        if token in _DEPENDENCY_LANE_ALIASES:
+            return _DEPENDENCY_LANE_ALIASES[token]
+    disposition = str(item.get("disposition") or "").strip().lower()
+    if disposition == "contradictory":
+        return "review"
+    if item.get("needs_legal_source") or item.get("legal_source_open"):
+        return "source_research"
+    if item.get("needs_evidence") or item.get("evidence_open"):
+        return "evidence_request"
+    if item.get("needs_review"):
+        return "review"
+    return None
+
+
+def publish_authorized_dependency_action(
+    stop: Optional[Dict[str, Any]],
+    *,
+    attempt: int = 0,
+    context: Optional[Dict[str, Any]] = None,
+    hook_completed: bool = False,
+) -> Dict[str, Any]:
+    """Publish one authorized next action, or terminate when the bound is spent.
+
+    A completed hook, an empty question pool, and a stalled worker do not
+    establish factual, legal, proof, or filing sufficiency. This function
+    decides once. It does not loop and it does not read developer stdin.
+    """
+    payload = stop if isinstance(stop, dict) else {}
+    if payload.get("stopping_distinction"):
+        policy = payload
+    else:
+        policy = project_stopping_policy(payload)
+    distinction = str(policy.get("stopping_distinction") or "")
+    resumed = context if isinstance(context, dict) else {}
+    try:
+        used = int(attempt)
+    except (TypeError, ValueError):
+        used = 0
+    if used < 0:
+        used = 0
+    resumable_context = {
+        "case_id": resumed.get("case_id"),
+        "target_id": resumed.get("target_id"),
+        "target_revision": resumed.get("target_revision"),
+        "graph_revision": resumed.get("graph_revision"),
+        "session_revision": resumed.get("session_revision"),
+        "attempt": used,
+        "max_attempts": MAX_DEPENDENCY_ACTION_ATTEMPTS,
+    }
+    packet = {
+        "legal_sufficiency": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+        "filing_ready": False,
+        "hook_completed": bool(hook_completed),
+        "hook_completed_is_sufficiency": False,
+        "busy_loop": False,
+        "reads_developer_stdin": False,
+        "worker_stalled": bool((policy.get("resumable_next_action") or {}).get("worker_stalled")),
+        "awaiting_user": policy.get("outcome") in {"awaiting_user", "paused"} and not policy.get("operation_terminated"),
+        "attempt": used,
+        "max_attempts": MAX_DEPENDENCY_ACTION_ATTEMPTS,
+        "resumable_context": resumable_context,
+        "stopping_distinction": distinction or None,
+        "operation": _DEPENDENCY_LANE_ACTIONS.get(distinction),
+    }
+    if policy.get("operation_terminated") or distinction in {"no_progress", "unavailable_provider"}:
+        packet.update({
+            "status": "terminated" if distinction == "no_progress" or policy.get("operation_terminated") else "unavailable",
+            "published": False,
+            "authorized": False,
+            "awaiting_user": False,
+            "operation_terminated": distinction == "no_progress" or bool(policy.get("operation_terminated")),
+            "reason": distinction or "terminated",
+        })
+        return packet
+    if distinction not in _DEPENDENCY_LANE_ACTIONS:
+        packet.update({
+            "status": "withheld",
+            "published": False,
+            "authorized": False,
+            "operation": None,
+            "reason": distinction or "awaiting_user",
+        })
+        return packet
+    if used >= MAX_DEPENDENCY_ACTION_ATTEMPTS:
+        packet.update({
+            "status": "terminated",
+            "published": False,
+            "authorized": False,
+            "awaiting_user": False,
+            "operation_terminated": True,
+            "reason": "attempt_bound",
+        })
+        return packet
+    packet.update({
+        "status": "published",
+        "published": True,
+        "authorized": True,
+        "bounded": True,
+        "action": _DEPENDENCY_LANE_ACTIONS[distinction],
+        "operation": _DEPENDENCY_LANE_ACTIONS[distinction],
+        "reason": distinction,
+        "operation_terminated": False,
+    })
+    packet["resumable_context"]["attempt"] = used + 1
+    packet["attempt"] = used + 1
+    return packet
 
 
 class ComplaintDenoiser:
@@ -7386,6 +7857,10 @@ class ComplaintDenoiser:
         no_information_attempts: Optional[int] = None,
         model_retries: Optional[int] = None,
         contradictions: Optional[List[Dict[str, Any]]] = None,
+        open_dependencies: Optional[List[Dict[str, Any]]] = None,
+        hook_completed: bool = False,
+        budget_exhausted: bool = False,
+        worker_stalled: bool = False,
     ) -> Dict[str, Any]:
         """Classify the interview stop. Shortcuts cannot claim completion.
 
@@ -7427,6 +7902,27 @@ class ComplaintDenoiser:
                 "reason": "open_answerable_target",
             })
 
+        dependency_items: List[Dict[str, Any]] = []
+        lanes: List[str] = []
+        for dependency in open_dependencies or []:
+            lane = dependency_lane_for(dependency)
+            if lane is None or not isinstance(dependency, dict):
+                continue
+            target_id = str(dependency.get("target_id") or dependency.get("id") or "").strip() or None
+            dependency_items.append({
+                "target_id": target_id,
+                "target_revision": str(dependency.get("target_revision") or "") or None,
+                "target_kind": str(dependency.get("target_kind") or dependency.get("kind") or lane),
+                "reason": lane,
+                "dependency_lane": lane,
+            })
+            lanes.append(lane)
+        primary_lane = None
+        for lane_name in ("source_research", "evidence_request", "review"):
+            if lane_name in lanes:
+                primary_lane = lane_name
+                break
+
         disposed: List[Dict[str, Any]] = []
         unknown_only = True
         answered_count = 0
@@ -7456,6 +7952,7 @@ class ComplaintDenoiser:
                 unknown_only = False
 
         provider_token = str(provider_status or "").strip().lower()
+        stalled = bool(worker_stalled) or provider_token in {"worker_stalled", "stalled", "stuck"}
         provider_down = provider_token in self._PROVIDER_UNAVAILABLE_STATUSES
         asked_count = len(self.questions_asked)
         over_question_limit = asked_count > limit
@@ -7497,9 +7994,19 @@ class ComplaintDenoiser:
             rejected_shortcuts.append("no_information_bound")
         if retry_bounded:
             rejected_shortcuts.append("model_retry_bound")
+        if hook_completed:
+            rejected_shortcuts.append("completed_hook")
+        if any(
+            str(item.get("disposition") or "") in {"unknown", "skipped", "refused", "deferred"}
+            for item in disposed
+        ):
+            rejected_shortcuts.append("skipped_or_unknown_answer")
+        if budget_exhausted:
+            rejected_shortcuts.append("budget_exhausted")
         review_requested = bool(needs_review) or bool(contradictions)
 
         unresolved_items = list(open_targets)
+        unresolved_items.extend(dependency_items)
         for item in disposed:
             if item.get("disposition") != "answered":
                 unresolved_items.append(dict(item))
@@ -7529,12 +8036,22 @@ class ComplaintDenoiser:
             state = "cancelled"
         elif provider_down:
             state = "provider_unavailable"
+        elif stalled:
+            state = "no_progress"
+        elif budget_exhausted:
+            state = "no_progress"
         elif over_iteration_cap or over_question_limit:
             state = "limit_reached"
         elif open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "needs_answer"
-        elif disposed and unknown_only and answered_count == 0 and not (repeat_bounded or no_info_bounded or retry_bounded):
+        elif disposed and unknown_only and answered_count == 0 and not (repeat_bounded or no_info_bounded or retry_bounded) and not primary_lane:
             state = "deferred_unknown"
+        elif not open_targets and primary_lane and not (repeat_bounded or no_info_bounded or retry_bounded):
+            state = {
+                "source_research": "saturated",
+                "evidence_request": "deferred_needs_evidence",
+                "review": "needs_review",
+            }[primary_lane]
         elif disposed and not open_targets and not (repeat_bounded or no_info_bounded or retry_bounded):
             state = "saturated"
         elif repeat_bounded or no_info_bounded or retry_bounded:
@@ -7565,9 +8082,14 @@ class ComplaintDenoiser:
             "core_facts_complete": False,
             "proof_requirements_satisfied": False,
             "ready_for_evidence_phase": False,
-            "awaiting_user": state == "needs_answer",
-            "worker_stalled": False,
+            "awaiting_user": state == "needs_answer" and not stalled,
+            "worker_stalled": stalled,
+            "budget_exhausted": bool(budget_exhausted),
+            "dependency_lane": None if open_targets or stalled or budget_exhausted else primary_lane,
+            "hook_completed": bool(hook_completed),
             "supervisory_restart": False,
+            "busy_loop": False,
+            "reads_developer_stdin": False,
             "unresolved_issue_summary": summary,
             "message": self._interview_stop_message(state, intake_complete),
         }
@@ -7583,8 +8105,12 @@ class ComplaintDenoiser:
             "outcome": projected["outcome"],
             "remaining_issues": projected["remaining_issues"],
             "resumable_next_action": projected["resumable_next_action"],
+            "stopping_distinction": projected["stopping_distinction"],
+            "operation_terminated": projected["operation_terminated"],
+            "busy_loop": False,
+            "reads_developer_stdin": False,
         })
-        stop["awaiting_user"] = projected["outcome"] in {"awaiting_user", "paused"}
+        stop["awaiting_user"] = projected["outcome"] in {"awaiting_user", "paused"} and not stalled
         self.last_interview_stop = stop
         return stop
 

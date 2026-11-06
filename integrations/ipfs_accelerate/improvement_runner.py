@@ -30,7 +30,13 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    __package__ = "integrations.ipfs_accelerate"
+
+from .campaign import DEFAULT_ARTIFACTS, campaign_artifacts
 
 
 SPEC_RELATIVE = "docs/task_boards/complaint_intake_improvement_spec.json"
@@ -208,7 +214,40 @@ def _requested_plan_id(spec_path: Path) -> str | None:
         return None
 
 
+def _campaign_spec(repo_root: Path, spec_path: Path):
+    from .improvement_plan import load_spec
+    spec = load_spec(spec_path)
+    artifacts = campaign_artifacts(spec)
+    artifacts.validate_source(repo_root, spec_path)
+    return spec, artifacts
+
+
+def _native_campaign_spec(repo_root: Path, state_dir: Path, *, todo_path=None, board_namespace=None):
+    """Resolve the specification bound to this Native launch, never a global override."""
+    root = Path(repo_root).resolve()
+    record = _read_json(Path(state_dir) / "launcher.json")
+    bound = _full_launch_record(record)
+    if bound:
+        path = Path(str(record.get("spec_path") or ""))
+        if not _campaign_tuple_matches(record, root, path, Path(state_dir)):
+            raise ValueError("Native campaign specification is not bound to its launcher")
+        spec, artifacts = _campaign_spec(root, path)
+    else:
+        spec, artifacts = _campaign_spec(root, root / SPEC_RELATIVE)
+    expected = root / artifacts.board_relative
+    if bound and todo_path is not None and Path(todo_path).resolve() != expected:
+        raise ValueError("Native task board differs from its campaign specification")
+    if ((board_namespace or artifacts != DEFAULT_ARTIFACTS)
+            and board_namespace is not None and board_namespace != artifacts.board_namespace):
+        raise ValueError("Native board namespace differs from its campaign specification")
+    return spec
+
+
 def _campaign_tuple_matches(record: Mapping[str, Any], repo_root: Path, spec_path: Path, state_dir: Path) -> bool:
+    try:
+        _, artifacts = _campaign_spec(repo_root, spec_path)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
     plan_id = _requested_plan_id(spec_path)
     return bool(
         plan_id and record.get("schema_version") == "complaint-improvement-launcher@1"
@@ -219,6 +258,7 @@ def _campaign_tuple_matches(record: Mapping[str, Any], repo_root: Path, spec_pat
         and record.get("provider") == "grok_cli"
         and record.get("model") == MODEL
         and record.get("allow_fallback") is False
+        and (artifacts == DEFAULT_ARTIFACTS or record.get("board_path") == str(repo_root / artifacts.board_relative))
     )
 
 
@@ -459,7 +499,9 @@ def campaign_environment(repo_root: Path, ambient: Mapping[str, str] | None = No
             env.pop(key, None)
     env.update({
         "IPFS_ACCELERATE_AGENT_IMPLEMENTATION_PROVIDER": "grok",
-        AUTOMATIC_RETRY_REARM_ENV: "0",
+        # Once-per-recovery-revision validation rearm. Exact 0 would keep a
+        # spent frontier stopped even after this supervisor repair.
+        AUTOMATIC_RETRY_REARM_ENV: "1",
         "IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS": "external/ipfs_datasets_py,external/ipfs_kit_py",
         # Bound retained prepared checkouts in this campaign, without reclaiming leases.
         "IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES": "1",
@@ -511,11 +553,12 @@ def _branch(repo_root: Path) -> str:
 
 def _private_runtime_checks(repo_root: Path, env: Mapping[str, str]) -> dict[str, Any]:
     from ipfs_accelerate_py.agent_supervisor.runtime import grok_cli_runner
-    if env.get(AUTOMATIC_RETRY_REARM_ENV) == "0":
+    if env.get(AUTOMATIC_RETRY_REARM_ENV) in {"0", "1"}:
         from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
         rearm_control = getattr(native, "automatic_retry_rearm_enabled", None)
+        expected = env.get(AUTOMATIC_RETRY_REARM_ENV) == "1"
         if (getattr(native, "AUTOMATIC_RETRY_REARM_ENV", None) != AUTOMATIC_RETRY_REARM_ENV
-                or not callable(rearm_control) or rearm_control(env) is not False):
+                or not callable(rearm_control) or rearm_control(env) is not expected):
             return {"ready": False, "reason": "native_retry_budget_control_unavailable"}
     supported = getattr(grok_cli_runner, "GROK_PRIVATE_PATHS_VERSION", 0) >= 1
     validator = getattr(grok_cli_runner, "validate_grok_private_path_patterns", None)
@@ -629,6 +672,44 @@ class CampaignResourceHold(RuntimeError):
         super().__init__("campaign_resource_hold:" + str(observation.get("reason", "unavailable")))
 
 
+class CampaignOperatorHold(RuntimeError):
+    """Refuse the next Native pass without interrupting an active pass."""
+
+    def __init__(self, marker: str):
+        self.observation = {"schema": "complaint-campaign-operator-admission@1",
+            "reason": "operator_hold_present", "marker": marker, "stage": "before_native_pass",
+            "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False}
+        super().__init__("campaign_operator_hold:" + marker)
+
+
+def _require_no_operator_hold(state_dir: Path) -> None:
+    # Any directory entry fences admission, including a dangling symlink.
+    # Never read, follow, replace or retire another operator's marker.
+    for name in ("HOLD", "OPERATOR_STOP"):
+        try:
+            (state_dir / "watchdog" / name).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise CampaignOperatorHold(name) from None
+        raise CampaignOperatorHold(name)
+
+
+def _containerd_metadata_directory() -> Path:
+    """Native's standard rootful containerd metadata location, independently of DockerRootDir.
+
+    This does not discover custom/rootless/external daemon configurations.
+    An absent standard directory is unavailable, never an ancestor substitute.
+    """
+    return Path("/var/lib/containerd")
+
+
+def _native_validation_temporary_directory() -> Path:
+    # Native creates each Linux validation HOME under this short root so
+    # Chromium's AF_UNIX paths fit. It may differ from the profile TMPDIR.
+    return Path("/tmp")
+
+
 def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
                        environment: Mapping[str, str]) -> dict[str, Any]:
     """Observe each storage role without creating paths or reserving capacity.
@@ -638,7 +719,10 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
     """
     paths = {"repository": repo_root, "state": state_dir, "worktrees": worktree_root,
              "home": Path(environment.get("HOME") or Path.home()),
-             "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir())}
+             "temporary": Path(environment.get("TMPDIR") or tempfile.gettempdir()),
+             "containerd_metadata": _containerd_metadata_directory()}
+    if sys.platform.startswith("linux"):
+        paths["validation_temporary"] = _native_validation_temporary_directory()
     roles = {}
     timed_out = False
     for role, raw_path in paths.items():
@@ -648,8 +732,10 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
             if not path.is_absolute() or path.resolve(strict=False) != path:
                 raise ValueError("resource path is not canonical")
             probe = path
-            while not probe.exists() and probe != probe.parent:
-                probe = probe.parent
+            daemon_metadata = role == "containerd_metadata"
+            if not daemon_metadata and role != "validation_temporary":
+                while not probe.exists() and probe != probe.parent:
+                    probe = probe.parent
             info = probe.stat()
             if not stat.S_ISDIR(info.st_mode) or (probe != path and info.st_uid != os.getuid()):
                 raise ValueError("absent resource path lacks an owned existing directory")
@@ -658,12 +744,18 @@ def _resource_capacity(repo_root: Path, state_dir: Path, worktree_root: Path,
             if any(type(value) is not int or value < 0 for value in fields) or fields[1] == 0 or fields[3] == 0:
                 raise ValueError("resource capacity metadata is unavailable")
             free_bytes, free_inodes = fields[0] * fields[1], fields[2]
-            writable = (not available.f_flag & os.ST_RDONLY
-                        and os.access(probe, os.W_OK | os.X_OK, effective_ids=True))
+            # Rootful containerd writes its root-owned0700 metadata directory.
+            # Operator access is irrelevant there; observe filesystem capacity
+            # and its readonly flag without claiming daemon permission proof.
+            writable = (not available.f_flag & os.ST_RDONLY and (daemon_metadata
+                        or os.access(probe, os.W_OK | os.X_OK, effective_ids=True)))
             ready = bool(writable and free_bytes >= RESOURCE_MIN_FREE_BYTES and free_inodes >= RESOURCE_MIN_FREE_INODES)
             row.update(filesystem_path=str(probe), free_bytes=free_bytes, free_inodes=free_inodes,
                        writable_observed=bool(writable), ready=ready,
                        reason="observed_capacity_ready" if ready else "local_capacity_insufficient")
+            if daemon_metadata:
+                row.update(path_source="standard_rootful_containerd",
+                           write_access_scope="filesystem_flag_for_rootful_daemon")
         except TimeoutError:
             # Native's hook alarm is an OSError subclass. Stop this observation
             # immediately; swallowing it and proceeding would lose its bound.
@@ -703,22 +795,36 @@ def _resource_admission_hook(repo_root: Path, state_dir: Path, worktree_root: Pa
     # Convert it inside the callback so this mandatory admission check refuses
     # before run_once; every other hold also propagates through the sole loop.
     def before_pass(_context):
+        _require_no_operator_hold(state_dir)
         try:
             _require_resource_capacity(repo_root, state_dir, worktree_root, environment,
                                        stage="before_native_pass")
+            cold_checkout = _worktree_capacity(repo_root, worktree_root)
+            if cold_checkout.get("sufficient") is not True:
+                raise CampaignResourceHold({"schema": "complaint-campaign-resource-admission@1",
+                    "ready": False, "reason": "cold_checkout_capacity_insufficient"
+                        if cold_checkout.get("sufficient") is False else "cold_checkout_capacity_unavailable",
+                    "stage": "before_native_pass", "worktree_capacity": cold_checkout,
+                    "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False,
+                    "capacity_reserved": False, "live_wait_or_lease_claimed": False})
         except DaemonHookTimeoutError:
             raise CampaignResourceHold({"schema": "complaint-campaign-resource-admission@1",
                 "ready": False, "reason": "resource_observation_timed_out", "stage": "before_native_pass",
                 "paid_dispatch": False, "accounting_changed": False, "attempt_refunded": False,
                 "live_wait_or_lease_claimed": False}) from None
-    return DaemonLoopHook(phase="before", message="Campaign resource admission hold: %s", callback=before_pass)
+        # Sizing can take time. Recheck at the end of admission as well; a
+        # hold created while the previous pass runs must fence the next pass.
+        _require_no_operator_hold(state_dir)
+    return DaemonLoopHook(phase="before", message="Campaign before-pass admission hold: %s", callback=before_pass)
 
 
-def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None) -> list[str]:
+def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktree_root: Path | None = None,
+                board_namespace: str = DEFAULT_ARTIFACTS.board_namespace,
+                protected_paths: tuple[str, ...] = ()) -> list[str]:
     """Compile only options supported by the actual native supervisor parser."""
     return [
         "--todo-path", str(board_path), "--state-dir", str(state_dir),
-        "--state-prefix", STATE_PREFIX, "--board-namespace", "complaint-intake-improvement",
+        "--state-prefix", STATE_PREFIX, "--board-namespace", board_namespace,
         "--task-prefix", TASK_PREFIX, "--task-source-kind", "legacy-markdown",
         "--authority-mode", "legacy_markdown", "--explicit-legacy-task-source", "--implement",
         "--check-interval", "5", "--daemon-interval", "10",
@@ -727,6 +833,7 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--implementation-max-timeout", str(TIMEOUT_SECONDS),
         "--implementation-log-stall-seconds", str(STALL_SECONDS),
         "--max-task-attempts", "3", "--max-restarts", "5", "--validation-max-workers", "1",
+        "--worktree-reconciliation-max-merges", "2",
         "--task-shard-count", "1", "--task-shard-index", "0",
         "--worktree-root", str(worktree_root if worktree_root is not None else state_dir / "worktrees"), "--merge-target-branch", merge_target,
         # Every task validation imports datasets, and shared interviews use
@@ -741,7 +848,7 @@ def native_argv(board_path: Path, state_dir: Path, merge_target: str, *, worktre
         "--no-objective-goal-completion-reconcile", "--no-objective-goal-migration",
         "--no-objective-ast-dataset", "--no-objective-todo-vector-index",
         "--no-retry-budget-guardrail", "--no-dependency-guardrail", "--no-reconciliation-guardrail",
-    ]
+    ] + [argument for path in protected_paths for argument in ("--implementation-protected-path", path)]
 
 
 def _board_summary(tasks: list[Any]) -> dict[str, Any]:
@@ -793,15 +900,16 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
         return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
                 "paid_calls": 0, "native_config_validated": False, "execution_started": False}
     os.chdir(repo_root)
-    from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
-    spec = load_spec(spec_path)
+    from .improvement_plan import build_improvement_work_plan
+    spec, artifacts = _campaign_spec(repo_root, spec_path)
     plan = build_improvement_work_plan(spec)
     branch = merge_target or _branch(repo_root)
     supervisor, _ = _native_modules(repo_root)
-    args = native_argv(repo_root / BOARD_RELATIVE, state_dir, branch, worktree_root=selected_root)
+    args = native_argv(repo_root / artifacts.board_relative, state_dir, branch, worktree_root=selected_root,
+                       board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)
     parsed = supervisor.parse_args(args)
     config = supervisor.supervisor_config_from_args(parsed, repo_root=repo_root)
-    board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
+    board = _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
     env = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
     grok = shutil.which(env.get("IPFS_ACCELERATE_AGENT_GROK_BIN") or "grok", path=env.get("PATH"))
     auth_present = _auth_material_present(env)
@@ -821,16 +929,155 @@ def doctor(repo_root: Path, spec_path: Path, state_dir: Path, *, merge_target: s
                             "Cross-worktree reconciliation and dynamic guardrail/refill task generation are disabled for this fixed campaign; native dependency readiness, process fencing and implementation watchdog remain enabled."]}
 
 
-def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None) -> dict[str, Any]:
+def _recovery_start_admission(state_dir: Path, expected_launcher_sha256: str | None) -> str | None:
+    """Keep automatic stopped recovery bound to its original launcher and holds."""
+    if expected_launcher_sha256 is None:
+        return None
+    current = _read_json(state_dir / "launcher.json")
+    digest = hashlib.sha256(json.dumps(current, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if (not isinstance(expected_launcher_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256) is None
+            or digest != expected_launcher_sha256):
+        return "launcher_changed_before_recovery"
+    try:
+        _require_no_operator_hold(state_dir)
+        (state_dir / "implementation-protected-path-incident.json").lstat()
+    except FileNotFoundError:
+        return None
+    except CampaignOperatorHold:
+        return "watchdog_manual_hold"
+    except OSError:
+        return "protected_fence_unavailable"
+    return "protected_incident"
+
+
+def _reconcile_stopped_fence_before_start(repo_root: Path, spec_path: Path, state_dir: Path, *,
+                                         expected_launcher_sha256: str | None) -> tuple[str | None, dict[str, Any] | None]:
+    """Reconcile a stopped crash fence before compilation, outside start's lock.
+
+    Marker presence only selects this admission path. The public recovery seam
+    retains all Native custody, closure, accounting and callback requirements.
+    """
+    active = state_dir / "implementation-protected-path-active.json"
+    incident = state_dir / "implementation-protected-path-incident.json"
+    markers, unavailable = [], False
+    for path in (active, incident):
+        try:
+            path.lstat()
+            markers.append(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            unavailable = True
+    if not markers and not unavailable:
+        return expected_launcher_sha256, None
+    record = _read_json(state_dir / "launcher.json")
+    # The ordinary locked route proves campaign identity and reuses this owner.
+    if owns_process(record):
+        return expected_launcher_sha256, None
+
+    def refuse(reason, recovery=None):
+        return expected_launcher_sha256, {"status": "not_ready", "reason": reason,
+            "execution_started": False, "paid_calls": 0, "completion_authority": False,
+            "prestart_recovery": recovery}
+
+    if unavailable:
+        return refuse("protected_fence_unavailable")
+    if incident in markers:
+        return refuse("protected_incident")
+    digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    admission = _recovery_start_admission(state_dir,
+        digest if expected_launcher_sha256 is None else expected_launcher_sha256)
+    if admission:
+        return refuse(admission)
+    if (not _full_launch_record(record) or record.get("status") != "stopped"
+            or not _campaign_tuple_matches(record, repo_root, spec_path, state_dir)
+            or _owner_liveness(record.get("identity")) != "dead"):
+        return refuse("prestart_recovery_owner_unverified")
+    from .improvement_shutdown import _context, _parent_closed
+    from .improvement_recovery import _owned_bytes
+    try:
+        snapshot = json.loads(_owned_bytes(active, 32 * 1024 * 1024, legacy_group_write=True))
+        if (not isinstance(snapshot, dict)
+                or snapshot.get("schema") != "implementation-protected-path-active-v1"
+                or not isinstance(snapshot.get("snapshot"), dict)):
+            return refuse("protected_fence_unavailable")
+        before, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        if not isinstance(before, dict) or not isinstance(source, dict):
+            return refuse("prestart_recovery_source_unverified")
+        authority = Path(str(source.get("authority_path") or ""))
+        if (before.get("read_error") or source.get("source") not in {"native_control_plane", "legacy_json"}
+                or not authority.is_absolute() or authority.resolve(strict=True) != authority
+                or not authority.is_relative_to(state_dir) or not authority.is_file()):
+            return refuse("prestart_recovery_source_unverified")
+        if any(before.get(key) for key in ("manual_hold", "manual_cancellation", "capacity_quarantine", "protected_incident")):
+            return refuse("prestart_recovery_native_hold")
+        context = _context(state_dir, record)
+        if context is None:
+            return refuse("prestart_recovery_owner_unverified")
+        _parent_closed(state_dir, record, context, False)
+        shutdown = json.loads(_owned_bytes(state_dir / "container_shutdown.json"))
+        worktrees, _ = recorded_worktree_root(record, state_dir)
+        if (not _shutdown_verified(record, shutdown, repo_root, state_dir)
+                or not _observe_campaign_containers(repo_root, state_dir, worktrees, record, shutdown)):
+            return refuse("prestart_recovery_closure_unverified")
+        admission = _recovery_start_admission(state_dir, digest)
+        if admission:
+            return refuse(admission)
+        recovery = recover_stalled_worker(repo_root, spec_path, state_dir, expected_launcher_sha256=digest)
+        if (not isinstance(recovery, dict) or recovery.get("reconciled") is not True
+                or any(recovery.get(key) is not True for key in
+                    ("counters_preserved", "progress_preserved", "manual_holds_preserved"))
+                or any(recovery.get(key) is not False for key in
+                    ("selection_performed", "paid_dispatch", "attempt_refunded", "completion_authority"))):
+            return refuse("prestart_quiesced_recovery_refused", recovery)
+        admission = _recovery_start_admission(state_dir, digest)
+        if admission:
+            return refuse(admission, recovery)
+        for path in (active, incident):
+            try:
+                path.lstat()
+                return refuse("prestart_protected_fence_retained", recovery)
+            except FileNotFoundError:
+                pass
+        after, after_source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        if (not isinstance(after, dict) or after.get("read_error") or after_source != source or any(after.get(key) != before.get(key)
+                for key in ("implementation_attempts", "implementation_attempts_by_cid", "completed_task_ids"))):
+            return refuse("prestart_recovery_accounting_unverified", recovery)
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+        return refuse("prestart_recovery_evidence_unverified", {"error_type": type(error).__name__})
+    # The original stopped launcher must still match under the normal start lock.
+    return digest, None
+
+
+def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: Path | None = None,
+          expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     state_dir = state_dir.resolve()
     prospective_root, _ = _select_worktree_root(repo_root, state_dir, _read_json(state_dir / "launcher.json"), worktree_root)
     resources = _resource_capacity(repo_root, state_dir, prospective_root, os.environ)
     if not resources["ready"]:
         return {"status": "not_ready", "reason": CampaignResourceHold.code, "resource_capacity": resources,
                 "paid_calls": 0, "execution_started": False}
+    expected_launcher_sha256, refusal = _reconcile_stopped_fence_before_start(
+        repo_root, spec_path, state_dir, expected_launcher_sha256=expected_launcher_sha256)
+    if refusal is not None:
+        return refusal
     with _lock(state_dir):
         owner_path = state_dir / "launcher.json"
         previous = _read_json(owner_path)
+        def watchdog_refusal():
+            if expected_launcher_sha256 is None:
+                return None
+            current = _read_json(owner_path)
+            digest = hashlib.sha256(json.dumps(current, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256) or digest != expected_launcher_sha256:
+                return {"status": "stop_incomplete", "reason": "launcher_changed_before_start", "execution_started": False}
+            if any(os.path.lexists(state_dir / "watchdog" / name) for name in ("HOLD", "OPERATOR_STOP")):
+                return {"status": "not_ready", "reason": "watchdog_manual_hold", "execution_started": False}
+            return None
+        refusal = watchdog_refusal()
+        if refusal is not None:
+            return refusal
         if previous.get("read_error"):
             return _stop_incomplete(state_dir, "launcher_receipt_unreadable")
         selected_root, root_binding = _select_worktree_root(repo_root, state_dir, previous, worktree_root)
@@ -841,6 +1088,15 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             if full_launch and not _campaign_tuple_matches(previous, repo_root, spec_path, state_dir):
                 return _stop_incomplete(state_dir, "live_campaign_mismatch")
             return {"status": "already_running", "pid": previous["identity"]["pid"], "state_dir": str(state_dir)}
+        from .pending_claim_runtime import unfinished_handoff_task
+        try:
+            unfinished = unfinished_handoff_task(state_dir)
+        except (OSError, ValueError, TypeError):
+            return {"status": "not_ready", "reason": "pending_candidate_handoff_unverified",
+                    "execution_started": False, "paid_calls": 0}
+        if unfinished:
+            return {"status": "not_ready", "reason": "pending_candidate_materialization_required",
+                    "task_id": unfinished, "execution_started": False, "paid_calls": 0}
         shutdown_path = state_dir / "container_shutdown.json"
         shutdown = {}
         shutdown_raw = None
@@ -884,6 +1140,14 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
                 native = any("ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_" in argument for argument in argv)
                 if ("_run" in argv or native) and "--state-dir" in argv and str(state_dir) in argv:
                     raise RuntimeError("campaign runner exists without a valid owner receipt; inspect its ownership before restarting")
+        initializing_cleanup = []
+        if full_launch:
+            from .startup_initializing_cleanup import cleanup_stopped_initializing_checkouts
+            try:
+                initializing_cleanup = cleanup_stopped_initializing_checkouts(sys.modules[__name__], repo_root, state_dir, previous)
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+                return {"status": "not_ready", "reason": "initializing_checkout_cleanup_unverified",
+                        "error_type": type(error).__name__, "execution_started": False, "paid_calls": 0}
         prepared = prepare(repo_root, spec_path, state_dir)
         check = (doctor(repo_root, spec_path, state_dir, worktree_root=selected_root) if root_binding is not None
                  else doctor(repo_root, spec_path, state_dir))
@@ -899,11 +1163,15 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
         if root_binding is not None:
             argv.extend(["--worktree-root", str(selected_root)])
         log_path = state_dir / "launcher.log"
-        from .improvement_plan import load_spec
-        policy = load_spec(spec_path)["execution_policy"]
+        from .improvement_plan import load_spec, source_generation
+        launch_spec = load_spec(spec_path)
+        policy = launch_spec["execution_policy"]
+        refusal = watchdog_refusal()
+        if refusal is not None:
+            return refusal
         with log_path.open("ab", buffering=0) as log:
             process = subprocess.Popen(argv, cwd=repo_root, env=campaign_environment(repo_root, context_exclude=policy.get("context_exclude"), state_dir=state_dir),
-                                       stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                       stdin=campaign_worker_stdin(), stdout=log, stderr=subprocess.STDOUT,
                                        start_new_session=True, close_fds=True)
         identity = None
         for _ in range(20):
@@ -918,6 +1186,7 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
                   "status": "starting", "repo_root": str(repo_root), "spec_path": str(spec_path),
                   "state_dir": str(state_dir), "merge_target": check["merge_target"],
                   "board_path": prepared["board_path"], "plan_id": check["native_plan_id"],
+                  "source_generation": source_generation(launch_spec),
                   "provider": "grok_cli", "model": MODEL, "allow_fallback": False}
         if root_binding is not None:
             record.update(worktree_root=str(selected_root), worktree_root_binding=root_binding)
@@ -927,6 +1196,7 @@ def start(repo_root: Path, spec_path: Path, state_dir: Path, *, worktree_root: P
             raise RuntimeError("spawned process did not establish exact launcher ownership")
         _atomic_json(owner_path, record)
         return {"status": "starting", "pid": process.pid, "state_dir": str(state_dir),
+                "initializing_checkouts_reclaimed": initializing_cleanup,
                 "log_path": str(log_path), "provider": "grok_cli", "model": MODEL,
                 "progress_verified": False,
                 "next_check": "status must show native heartbeat and task/provider progress"}
@@ -960,6 +1230,47 @@ def _timestamp_age(value: Any, now: float) -> float | None:
         return None
 
 
+def _direct_legacy_task_state(state_path: Path) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Read a JSON claim mirror when this campaign has no DuckDB authority.
+
+    The isolated reader clears ambient Quack and DuckDB endpoints, then looks
+    only beside the state file. A missing mirror still uses that reader so a
+    configured control plane cannot be skipped and a deadline still applies.
+    This path creates nothing and does not import the native catalog stack.
+    """
+
+    try:
+        path = Path(state_path)
+        if path.is_symlink() or not path.is_file():
+            return None
+        control = path.parent / "control-plane"
+        if control.exists() and not control.is_symlink():
+            for candidate in control.rglob("*"):
+                if candidate.is_symlink():
+                    continue
+                if candidate.is_file() and candidate.suffix == ".duckdb":
+                    return None
+        current = path.parent
+        for parent in (current, *current.parents):
+            if (parent / ".git").exists() or (parent / ".git" / "agent-board-control-plane").exists():
+                return None
+            if parent == parent.parent:
+                break
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            payload = {}
+        if len(json.dumps(payload)) > 2_000_000:
+            raise ValueError("native_state_size_limit")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return {"read_error": type(exc).__name__}, {"source": "unavailable", "completion_authority": False}
+    return payload, {
+        "source": "legacy_json",
+        "authority_path": str(path),
+        "completion_authority": False,
+    }
+
+
 def _native_state_reader(connection: Any, state_path: Path) -> None:
     """Read a real native projection without opening/creating a new catalog."""
     try:
@@ -990,6 +1301,9 @@ def _native_state_reader(connection: Any, state_path: Path) -> None:
 
 
 def _read_native_state(repo_root: Path, state_path: Path, *, timeout_seconds: float = 3.0) -> tuple[dict[str, Any], dict[str, Any]]:
+    direct = _direct_legacy_task_state(state_path)
+    if direct is not None:
+        return direct
     _native_modules(repo_root)
     # Native file-lock/transport timeouts can be much longer than a status
     # check. Isolate this read, enforce a deadline, and never call .load(),
@@ -1172,10 +1486,23 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
         if not events.endswith(b"\n"):
             return None
         start = None
+        repair_starts = 0
         for line in reversed(events.splitlines()):
             event = json.loads(line)
             if not isinstance(event, dict):
                 return None
+            if event.get("type") == "implementation_auto_rescue_provider_started":
+                # Native's repair event carries task/CID/attempt, but its
+                # workspace and log are inherited from the primary start.
+                # That exact start is independently verified below.
+                repair_binding = dict(binding)
+                if not (event.get("worktree_path") or event.get("worktree")):
+                    repair_binding.pop("worktree", None)
+                if (_event_matches_attempt(event, repair_binding, started_at=started_at, require_log=False)
+                        and event.get("strategy_changed") is True
+                        and type(event.get("provider_pid")) is int and event["provider_pid"] > 1
+                        and _event_timestamp(event) <= now + 2):
+                    repair_starts += 1
             if event.get("type") == "implementation_started":
                 # A later attempt/selection cannot borrow an earlier log.
                 if not _event_matches_attempt(event, binding, started_at=started_at, require_log=True):
@@ -1212,7 +1539,18 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
         complete = raw[:raw.rfind(b"\n") + 1]
         counts = Counter()
         terminal = False
+        repair_markers = 0
+        repair_open = False
+        repair_progress = False
         for line in complete.splitlines():
+            if line == b"[auto-rescue] inline_provider_rescue start":
+                repair_markers += 1
+                repair_open = True
+                repair_progress = False
+            elif (line.startswith(b"[auto-rescue] inline_provider_rescue returncode=")
+                    or line.startswith(b"[auto-rescue] inline_provider_rescue error:")):
+                repair_open = False
+                repair_progress = False
             if not line.startswith(b"{"):
                 continue
             try:
@@ -1228,17 +1566,22 @@ def _owned_attempt_log_evidence(events_path: Path, state_dir: Path, binding: Map
                 counts["usage"] += 1
                 # A native repair round can append to this same owned log.
                 terminal = False
+                repair_progress = repair_open
             elif kind in {"tool_call", "tool_call_update"}:
                 counts[kind] += 1
                 terminal = False
+                repair_progress = repair_open
             elif kind in {"end", "error", "max_turns_reached"}:
                 terminal = True
+                repair_progress = False
         if not counts:
             return None
         return {"type": "grok_frame", "source": "owned_attempt_log", "task_id": binding["task_id"],
                 "task_cid": binding["task_cid"], "attempt": binding["attempt"],
                 "log_path": str(log), "log_bytes": len(raw), "log_mtime_ns": before.st_mtime_ns,
                 "frame_counts": dict(counts), "provider_terminal_observed": terminal,
+                "provider_repair_in_flight": bool(repair_starts and repair_markers == repair_starts
+                    and repair_open and repair_progress and not terminal),
                 "progress_fresh": not terminal, "completion_authority": False}
     except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError):
         return None
@@ -1253,6 +1596,113 @@ def _provider_event_evidence(path: Path, *, task_id: str, started_at: float,
 
 def _validation_event_evidence(path: Path, binding: Mapping[str, Any], *, started_at: float) -> dict[str, Any] | None:
     return _matching_event(path, binding, started_at=started_at, kind="validation")
+
+
+def campaign_worker_stdin():
+    """Campaign workers never read a complaint or interview answer from stdin."""
+    return subprocess.DEVNULL
+
+
+def _campaign_scope_liveness(native_state: Mapping[str, Any], *, phase: str, interview_state: str | None,
+                             worker_liveness: str, active: bool, attempt_age: float | None,
+                             active_age: float | None, heartbeat_fresh: bool,
+                             provider_fresh: bool, provider_terminal: bool,
+                             validation_fresh: bool, now: float, provider_repair: bool = False,
+                             canonical_validation_active: bool = False) -> dict[str, Any]:
+    """Project five execution scopes without folding in an application interview.
+
+    Typed stall classification comes from the existing native progress and
+    worktree monitors. This projection does not edit claims, refund attempts,
+    complete tasks, or retry a provider.
+    """
+    interview_hold = interview_state in {"awaiting_user", "paused", "manual_hold", "cancelled"}
+    claim_id = str(native_state.get("active_task_id") or "")
+    if not claim_id:
+        claim = "absent"
+    elif (attempt_age is not None and attempt_age > TIMEOUT_SECONDS
+            # A verified repair keeps Native's original execution-event and
+            # phase deadlines; its earlier selection clock is not expiry.
+            and not ((canonical_validation_active or provider_repair) and active and not interview_hold
+                     and phase.startswith("valid") and worker_liveness == "alive")):
+        claim = "expired"
+    elif worker_liveness in {"dead", "pid_reuse"}:
+        claim = "owner_dead"
+    elif worker_liveness == "alive":
+        claim = "held"
+    else:
+        claim = "unknown"
+    provider_phase = active and not interview_hold and (provider_repair or phase in {"", "implementing", "implementation", "provider"})
+    validation_phase = active and not interview_hold and phase.startswith("valid") and not provider_repair
+    merge_phase = active and not interview_hold and "merge" in phase
+    monitors: dict[str, Any] = {"completion_authority": False, "progress": {}, "worktree_worker": None,
+                                "dependency_error": None}
+    try:
+        from ipfs_accelerate_py.agent_supervisor.rescue.supervisor_watchdog import classify_progress_stall
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor import worktree_phase_worker_status
+    except Exception as exc:
+        monitors["dependency_error"] = type(exc).__name__
+        unavailable = "unavailable"
+        return {"claim": claim if monitors["dependency_error"] is None else unavailable,
+                "worker": worker_liveness, "provider": unavailable, "validation": unavailable,
+                "merge": unavailable, "monitors": monitors, "completion_authority": False}
+
+    def progress(scope: str, in_scope: bool) -> dict[str, Any]:
+        report = classify_progress_stall(
+            process_alive=worker_liveness == "alive",
+            heartbeat_stale=not heartbeat_fresh,
+            active_task_id="" if interview_hold or not in_scope else claim_id,
+            log_age_seconds=active_age,
+            task_transition_age_seconds=attempt_age,
+            quiet_seconds=float(STALL_SECONDS),
+        )
+        monitors["progress"][scope] = report
+        return report
+
+    for name, enabled in (("provider", provider_phase), ("validation", validation_phase), ("merge", merge_phase)):
+        progress(name, enabled)
+    started = native_state.get("active_phase_started_at") or native_state.get("active_task_started_at")
+    worktree = worktree_phase_worker_status(
+        {"active_phase": phase, "active_phase_started_at": started},
+        daemon_pid=0, threshold_seconds=float(STALL_SECONDS), descendants=[],
+        now=datetime.fromtimestamp(now, timezone.utc),
+    )
+    monitors["worktree_worker"] = {
+        "phase": worktree.get("phase"),
+        "required": worktree.get("required"),
+        "stalled_without_active_worker": worktree.get("stalled_without_active_worker"),
+        "stall_evidence_unavailable_reason": worktree.get("stall_evidence_unavailable_reason"),
+        "completion_authority": False,
+    }
+
+    def activity(scope: str, in_scope: bool, fresh: bool, terminal: bool) -> str:
+        if interview_hold:
+            return "excluded_interview"
+        if not in_scope:
+            return "idle"
+        if fresh:
+            return "fresh"
+        if terminal:
+            return "terminal"
+        report = monitors["progress"][scope]
+        if report.get("progress_stalled") or worktree.get("stalled_without_active_worker") is True:
+            return "stalled"
+        if attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
+            return "expired"
+        if worker_liveness in {"dead", "pid_reuse"}:
+            return "owner_dead"
+        if not heartbeat_fresh:
+            return "heartbeat_stale"
+        return "quiet"
+
+    return {
+        "claim": claim,
+        "worker": worker_liveness,
+        "provider": activity("provider", provider_phase, provider_fresh, provider_terminal),
+        "validation": activity("validation", validation_phase, validation_fresh, False),
+        "merge": activity("merge", merge_phase, False, False),
+        "monitors": monitors,
+        "completion_authority": False,
+    }
 
 
 def _owner_liveness(birth: Any) -> str:
@@ -1272,8 +1722,593 @@ def _owner_liveness(birth: Any) -> str:
     return "alive"
 
 
+_NATIVE_CLOSE_KINDS = ("validation_accepted", "merge_accepted", "completion_callback_accepted")
+
+
+def _artifact_digest(path: Path) -> dict[str, Any]:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return {"present": False, "sha256": None, "reason": "unavailable"}
+        raw = path.read_bytes()
+    except OSError as exc:
+        return {"present": False, "sha256": None, "reason": type(exc).__name__}
+    return {"present": True, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+
+
+def _accepted_native_closures(events_path: Path, *, plan_id: str, source_generation: str,
+                              task_cids: Mapping[str, str]) -> dict[str, Any]:
+    """Close a task only from accepted validation, merge, and callback events.
+
+    Characterization frames and manual metadata never count, and a frame for a
+    different plan, CID, or source generation cannot close this campaign.
+    """
+
+    satisfied = {task_id: set() for task_id in task_cids}
+    report: dict[str, Any] = {"status": "absent", "closed_task_ids": [],
+                              "ignored_characterization": 0, "ignored_manual": 0}
+    try:
+        if not events_path.is_file() or events_path.is_symlink():
+            return report
+        if events_path.stat().st_size > MAX_EVENT_HISTORY_BYTES:
+            report["status"] = "size_limit"
+            return report
+        raw = events_path.read_bytes()
+    except OSError as exc:
+        report["status"] = type(exc).__name__
+        return report
+    report["status"] = "read"
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("counts_as_characterization_pass") is True or event.get("type") == "characterization":
+            report["ignored_characterization"] += 1
+            continue
+        if event.get("manual") is True or event.get("type") in {"manual_completion", "manual_metadata"}:
+            report["ignored_manual"] += 1
+            continue
+        kind = event.get("type")
+        if kind not in _NATIVE_CLOSE_KINDS or event.get("accepted") is not True:
+            continue
+        if event.get("skipped") is True or event.get("outcome") in {"skipped", "failed", "error", "xfailed"}:
+            continue
+        task_id = event.get("task_id")
+        if not isinstance(task_id, str) or task_cids.get(task_id) != event.get("canonical_task_cid"):
+            continue
+        if event.get("plan_id") != plan_id or event.get("source_generation") != source_generation:
+            continue
+        satisfied[task_id].add(kind)
+    report["closed_task_ids"] = sorted(
+        task_id for task_id, kinds in satisfied.items() if set(kinds) == set(_NATIVE_CLOSE_KINDS)
+    )
+    return report
+
+
+def observe_separate_campaign(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
+    """Read one separate campaign through the public Native status seam.
+
+    The completed intake spec, plan, and board are hashed before and after and
+    are never rewritten. This observation does not start a provider or grant
+    completion authority.
+    """
+
+    from .improvement_plan import BOARD_RELATIVE, PLAN_RELATIVE, campaign_observation_binding
+
+    repo_root = Path(repo_root).resolve()
+    spec_path = Path(spec_path)
+    state_dir = Path(state_dir)
+    spec, artifacts = _campaign_spec(repo_root, spec_path)
+    if artifacts == DEFAULT_ARTIFACTS:
+        raise ValueError("separate campaign observation requires a distinct artifact namespace")
+    historical_names = (SPEC_RELATIVE, PLAN_RELATIVE, BOARD_RELATIVE)
+    before = {relative: _artifact_digest(repo_root / relative) for relative in historical_names}
+    binding = campaign_observation_binding(spec)
+    observed = status(repo_root, spec_path, state_dir)
+    after = {relative: _artifact_digest(repo_root / relative) for relative in historical_names}
+    identity_error = None
+    identities: list[Any] = []
+    try:
+        _, daemon = _native_modules(repo_root)
+        identities = list(daemon.parse_task_file(repo_root / artifacts.board_relative, task_header_prefix=TASK_PREFIX))
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        identity_error = type(exc).__name__
+    task_cids = {task.task_id: task.canonical_task_cid for task in identities}
+    markdown_completed = sorted(task.task_id for task in identities if task.status == "completed")
+    characterization = sorted(
+        task.task_id for task in identities
+        if str(task.metadata.get("counts as characterization pass", "")).lower() in {"1", "true", "yes"}
+        or str(task.metadata.get("characterization", "")).lower() in {"pass", "passed", "complete", "completed"}
+    )
+    manual = sorted(
+        task.task_id for task in identities
+        if str(task.metadata.get("manual completion", "")).lower() in {"1", "true", "yes", "allowed"}
+        or str(task.metadata.get("completion", "")).lower() == "manual"
+    )
+    record = _read_json(state_dir / "launcher.json")
+    recorded_plan = record.get("plan_id")
+    recorded_generation = record.get("source_generation")
+    if record.get("read_error"):
+        plan_bound = generation_bound = False
+    elif record.get("schema_version"):
+        plan_bound = recorded_plan == binding["plan_id"]
+        generation_bound = recorded_generation == binding["source_generation"]
+    else:
+        plan_bound = recorded_plan in (None, binding["plan_id"])
+        generation_bound = recorded_generation in (None, "", binding["source_generation"])
+    closures = _accepted_native_closures(
+        state_dir / f"{STATE_PREFIX}_events.jsonl",
+        plan_id=binding["plan_id"], source_generation=binding["source_generation"], task_cids=task_cids,
+    )
+    if not plan_bound or not generation_bound:
+        closures = {**closures, "closed_task_ids": [], "rejected_reason": "plan_or_source_generation_mismatch"}
+    env = campaign_environment(repo_root, state_dir=state_dir)
+    merge_target = record.get("merge_target") if isinstance(record.get("merge_target"), str) else "campaign-test"
+    argv = native_argv(
+        repo_root / artifacts.board_relative, state_dir, merge_target,
+        board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths,
+    )
+    workers = argv[argv.index("--validation-max-workers") + 1] if "--validation-max-workers" in argv else None
+    timeout = argv[argv.index("--implementation-timeout") + 1] if "--implementation-timeout" in argv else None
+    historical_tasks = None
+    historical_error = None
+    if before[BOARD_RELATIVE]["present"]:
+        try:
+            _, daemon = _native_modules(repo_root)
+            historical = list(daemon.parse_task_file(repo_root / BOARD_RELATIVE, task_header_prefix=TASK_PREFIX))
+            historical_tasks = {
+                "count": len(historical),
+                "markdown_completed": sum(task.status == "completed" for task in historical),
+                "remapped": False, "completion_authority": False,
+            }
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            historical_error = type(exc).__name__
+    else:
+        historical_error = "unavailable"
+    active_cid = (observed.get("native_state") or {}).get("active_task_cid")
+    return {
+        "schema": "complaint-campaign-health-observation@1",
+        "status": observed.get("status"),
+        "healthy": bool(observed.get("healthy") and plan_bound and generation_bound),
+        "native_state_source": observed.get("native_state_source"),
+        "native_read_errors": observed.get("native_read_errors"),
+        "binding": binding,
+        "plan_bound": bool(plan_bound),
+        "source_generation_bound": bool(generation_bound),
+        "task_cids": task_cids,
+        "active_task_cid": active_cid,
+        "active_task_cid_bound": active_cid in (None, "") or active_cid in set(task_cids.values()),
+        "identity_error": identity_error,
+        "markdown_completed_task_ids": markdown_completed,
+        "characterization_task_ids": characterization,
+        "manual_metadata_task_ids": manual,
+        "native_closed_task_ids": list(closures["closed_task_ids"]),
+        "native_closure": closures,
+        "markdown_or_characterization_grants_completion": False,
+        "provider_started": False,
+        "paid_calls": 0,
+        "completion_authority": False,
+        "route": {
+            "provider": "grok_cli", "model": MODEL, "allow_fallback": False,
+            "router": env.get("TODO_DAEMON_LLM_BACKEND"),
+            "pool_max_entries": env.get("IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"),
+            "implementation_timeout_seconds": TIMEOUT_SECONDS,
+            "argv_implementation_timeout": timeout,
+            "max_agent_turns": env.get("IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"),
+            "validation_max_workers": workers,
+            "implement": "--implement" in argv,
+            "fallback_disabled": env.get("TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK") == "0"
+            and env.get("TODO_DAEMON_LLM_ALLOW_CROSS_PROVIDER_FALLBACK") == "0",
+            "resource_min_free_bytes": RESOURCE_MIN_FREE_BYTES,
+            "resource_min_free_inodes": RESOURCE_MIN_FREE_INODES,
+        },
+        "historical_baseline": {
+            **binding["historical_baseline"],
+            "before": before, "after": after, "unchanged": before == after,
+            "tasks": historical_tasks, "read_error": historical_error,
+        },
+    }
+
+
+_HISTORICAL_CAMPAIGN_RELATIVES = (
+    "docs/task_boards/complaint_intake_improvement_spec.json",
+    "docs/task_boards/complaint_intake_formal_work_plan.json",
+    "docs/task_boards/complaint_intake_task_board.md",
+    "docs/task_boards/complaint_mediator_grounding_spec.json",
+    "docs/task_boards/complaint_mediator_grounding_formal_work_plan.json",
+    "docs/task_boards/complaint_mediator_grounding_task_board.md",
+    "docs/task_boards/complaint_gui_collaboration_spec.json",
+    "docs/task_boards/complaint_gui_collaboration_formal_work_plan.json",
+    "docs/task_boards/complaint_gui_collaboration_task_board.md",
+)
+_HISTORICAL_NAMESPACES = frozenset({
+    "complaint-intake-improvement", "complaint-mediator-grounding", "complaint-gui-collaboration",
+})
+_PRESERVED_STATE_NAMES = ("budget.json", "receipts.jsonl", "accounting.json")
+_BOUNDED_PHASES = frozenset({"implementing", "validating"})
+
+
+def _snapshot_paths(paths: Sequence[Path]) -> dict[str, str | None]:
+    digest: dict[str, str | None] = {}
+    for path in paths:
+        key = str(path)
+        try:
+            if path.is_symlink() or not path.is_file():
+                digest[key] = None
+            else:
+                digest[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            digest[key] = None
+    return digest
+
+
+def _daemon_birth_owned(record: Mapping[str, Any], state_dir: Path) -> bool:
+    """Observe Native's managed birth and exact command, never heartbeat PID fields alone."""
+    try:
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+        heartbeat = _read_validation_watchdog_authority(state_dir / f"{STATE_PREFIX}_supervisor_status.json")
+        identity_path = state_dir / f"{STATE_PREFIX}_managed_daemon.identity.json"
+        if heartbeat is None or _read_validation_watchdog_authority(identity_path) is None:
+            return False
+        parent = record.get("identity") or {}
+        pid = heartbeat.get("daemon_pid")
+        if (type(pid) is not int or pid <= 1 or heartbeat.get("status") != "running"
+                or heartbeat.get("supervisor_pid") != parent.get("pid")
+                or heartbeat.get("daemon_pid_alive") is False
+                or (age := _timestamp_age(heartbeat.get("updated_at"), time.time())) is None
+                or not 0 <= age <= 120):
+            return False
+        child = native.load_supervised_child_identity(identity_path)
+        current = process_identity(pid)
+        scope = {"repo_root": record["repo_root"], "state_dir": str(state_dir), "state_prefix": STATE_PREFIX,
+                 "todo_path": record["board_path"], "daemon_entrypoint": str(Path(__file__).resolve())}
+        if (child is None or not current or current.get("ppid") != parent.get("pid")
+                or child.process_birth.pid != pid or child.process_birth.parent_pid != parent.get("pid")
+                or native.read_process_birth(pid) != child.process_birth
+                or native.supervised_child_identity_liveness(child) is not native.OwnerLiveness.ALIVE
+                or dict(child.owner_scope) != scope
+                or native.read_process_command_argv(pid) != child.command):
+            return False
+        # Native's ordinary wrapper command has an exact entrypoint and one
+        # occurrence of each campaign option. A python -c marker is not a daemon.
+        command = tuple(child.command)
+        if len(command) < 2 or command[1] != scope["daemon_entrypoint"]:
+            return False
+        for option, value in (("--state-dir", str(state_dir)), ("--state-prefix", STATE_PREFIX),
+                              ("--todo-path", record["board_path"])):
+            if [command[i + 1] for i, part in enumerate(command[:-1]) if part == option] != [value]:
+                return False
+        return native.read_process_birth(pid) == child.process_birth
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def _startup_provider_evidence(repo_root: Path, state_dir: Path, record: Mapping[str, Any],
+                               state: Mapping[str, Any], *, now: float) -> dict[str, Any] | None:
+    """Join Native's current claim, live provider process and owned work frames."""
+    from types import SimpleNamespace
+    from .improvement_recovery import _owned_bytes
+    try:
+        daemon, native, _ = _validation_activity_modules()
+        binding = _attempt_binding(state)
+        owner = native.load_supervised_child_identity(state_dir / f"{STATE_PREFIX}_managed_daemon.identity.json")
+        if owner is None:
+            return None
+        expected = {"task_id": binding["task_id"], "canonical_task_cid": binding["task_cid"],
+                    "canonical_task_key": state.get("active_task_key"), "attempt": binding["attempt"]}
+        claim_path = daemon.PortalImplementationDaemon._implementation_task_claim_path(
+            SimpleNamespace(repo_root=repo_root), binding["task_id"], canonical_task_cid=binding["task_cid"])
+        claim = _read_validation_watchdog_authority(claim_path)
+        lease = _read_validation_watchdog_authority(state_dir / "implementation.lock")
+        if (claim is None or lease is None or not expected["canonical_task_key"]
+                or claim.get("kind") != native.IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+                or claim.get("lease_role") != native.IMPLEMENTATION_DISPATCH_INTENT_LEASE_ROLE
+                or lease.get("kind") != "implementation" or lease.get("lease_role") == "supervisor_maintenance"
+                or native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth")) != owner.process_birth
+                or not native.checkout_lock_repository_matches(claim, repo_root)
+                or claim.get("dispatch_authority_cid") != daemon.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)
+                or any(not value.get("lease_id") or value.get("pid") != owner.process_birth.pid
+                       or value.get("state_dir") != str(state_dir)
+                       or any(value.get(key) != item for key, item in expected.items()) for value in (claim, lease))
+                or claim.get("state_path") != str(state_dir / f"{STATE_PREFIX}_task_state.json")
+                or lease.get("repo_root") != str(repo_root)):
+            return None
+        started = float(record["started_at"])
+        event_path = state_dir / f"{STATE_PREFIX}_events.jsonl"
+        log_evidence = _owned_attempt_log_evidence(event_path, state_dir, binding, started_at=started, now=now)
+        if not log_evidence or not log_evidence.get("progress_fresh") or log_evidence.get("provider_terminal_observed"):
+            return None
+        rows = [json.loads(line) for line in _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES,
+                                                        legacy_group_write=True).splitlines()]
+        primary = next(row for row in reversed(rows) if row.get("type") == "implementation_started")
+        command = primary.get("command")
+        event_time = _event_timestamp(primary)
+        if (not _event_matches_attempt(primary, binding, started_at=started, require_log=True)
+                or not isinstance(command, list) or not command or not all(type(item) is str and item for item in command)
+                or event_time is None or not 0 <= now - event_time < float(TIMEOUT_SECONDS)):
+            return None
+        workspace = Path(binding["worktree"])
+        selected_root, _ = recorded_worktree_root(record, state_dir)
+        if workspace.resolve(strict=True) != workspace or workspace == selected_root or not workspace.is_relative_to(selected_root):
+            return None
+        log_info = Path(binding["log_prefix"]).lstat()
+        boot_time = next(int(line.split()[1]) for line in Path("/proc/stat").read_text().splitlines() if line.startswith("btime "))
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            birth = native.read_process_birth(int(entry.name))
+            if (birth is None or birth.parent_pid != owner.process_birth.pid or birth.boot_id != owner.process_birth.boot_id
+                    or native.read_process_command_argv(birth.pid) != tuple(command)):
+                continue
+            born_at = boot_time + birth.start_time_ticks / os.sysconf("SC_CLK_TCK")
+            if (not event_time - 2 <= born_at <= now or entry.stat().st_uid != os.getuid()
+                    or Path(os.readlink(entry / "cwd")) != workspace
+                    or os.getsid(birth.pid) != birth.pid or os.getpgid(birth.pid) != birth.pid):
+                continue
+            if any((info.st_dev, info.st_ino) != (log_info.st_dev, log_info.st_ino)
+                   for info in ((entry / "fd" / str(number)).stat() for number in (1, 2))):
+                continue
+            if native.read_process_birth(birth.pid) == birth and native.read_process_birth(owner.process_birth.pid) == owner.process_birth:
+                return {"source": "owned_native_provider_and_work_frames", "task_id": expected["task_id"],
+                        "task_cid": expected["canonical_task_cid"], "attempt": expected["attempt"],
+                        "owner_birth": owner.process_birth.to_dict(), "provider_birth": birth.to_dict(),
+                        "deadline_at": event_time + TIMEOUT_SECONDS, "completion_authority": False}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, StopIteration):
+        return None
+    return None
+
+
+def _bounded_provider_validation(repo_root: Path, state_dir: Path, task_cids: Mapping[str, str],
+                                 native_tasks: Sequence[Any]) -> dict[str, Any]:
+    """Observe real current work; phase metadata alone cannot grant execution."""
+    native_state, source = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+    now = time.time()
+    attempt = native_state.get("active_attempt")
+    phase = str(native_state.get("active_phase") or "")
+    task_id = native_state.get("active_task_id")
+    age = _timestamp_age(native_state.get("active_phase_started_at"), now)
+    known = isinstance(task_id, str) and task_cids.get(task_id) == native_state.get("active_task_cid")
+    declared = next((task for task in native_tasks if task.task_id == task_id), None)
+    commands = list(getattr(declared, "validation", ()) or ()) if declared is not None else []
+    bounded = bool(native_state.get("implementation_in_progress") is True and phase in _BOUNDED_PHASES and known
+                   and type(attempt) is int and 1 <= attempt <= 3
+                   and age is not None and 0 <= age < float(TIMEOUT_SECONDS) and commands
+                   and declared.canonical_task_key == native_state.get("active_task_key")
+                   and not any(native_state.get(key) for key in
+                               ("manual_hold", "manual_cancellation", "capacity_quarantine", "protected_incident")))
+    evidence = None
+    record = _read_json(state_dir / "launcher.json")
+    if bounded and owns_process(record) and _daemon_birth_owned(record, state_dir):
+        if phase == "validating":
+            from .reconciliation_activity import evidence as executor_evidence
+            evidence = executor_evidence(sys.modules[__name__], repo_root, state_dir, record, native_state, now_ts=now)
+            if evidence is None:
+                from .auto_rescue_activity import observe
+                rescue = observe(sys.modules[__name__], repo_root, state_dir, native_state, now_ts=now)
+                if rescue.get("activity_verified") is True and rescue.get("work_progress_verified") is True:
+                    evidence = rescue
+        else:
+            evidence = _startup_provider_evidence(repo_root, state_dir, record, native_state, now=now)
+    # A racing settlement/new attempt cannot borrow the previous work proof.
+    if evidence is not None:
+        current, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
+        keys = ("implementation_in_progress", "active_task_id", "active_task_cid", "active_task_key", "active_attempt",
+                "active_phase", "active_phase_started_at", "active_log_path", "active_worktree_path")
+        final_age = _timestamp_age(current.get("active_phase_started_at"), time.time())
+        deadline = evidence.get("deadline_at")
+        if (any(current.get(key) != native_state.get(key) for key in keys)
+                or final_age is None or not 0 <= final_age < float(TIMEOUT_SECONDS)
+                or type(deadline) not in (int, float) or not math.isfinite(deadline) or time.time() >= deadline
+                or not _daemon_birth_owned(record, state_dir)):
+            evidence = None
+    return {
+        "active": bool(bounded and evidence is not None),
+        "phase_metadata_bounded": bounded,
+        "work_evidence": evidence,
+        "phase": phase,
+        "attempt": attempt if type(attempt) is int else None,
+        "task_id": task_id if isinstance(task_id, str) else None,
+        "phase_age_seconds": age,
+        "attempt_cap": 3,
+        "timeout_seconds": TIMEOUT_SECONDS,
+        "validation_commands": commands,
+        "native_state_source": source,
+        "completion_authority": False,
+    }
+
+
+def qualify_new_campaign_startup(repo_root: Path, spec_path: Path, state_dir: Path, *,
+                                 worktree_root: Path) -> dict[str, Any]:
+    """Observe a new campaign's published bindings without treating readiness as execution.
+
+    Ingestion, a live PID, and a ready doctor report do not execute provider or
+    validation work. Execution is admitted only for an owned launcher birth, its
+    daemon child, and a bounded in-progress provider or validation phase. This
+    read does not rewrite historical campaigns, task status, receipts, or budgets.
+    """
+
+    from .improvement_plan import campaign_observation_binding
+
+    started = Path.cwd()
+    repo_root = Path(repo_root).resolve()
+    spec_path = Path(spec_path).resolve()
+    state_dir = Path(state_dir).resolve()
+    worktree_root = Path(worktree_root).resolve()
+    import_root = Path(__file__).resolve().parents[2]
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
+    try:
+        _native_modules(import_root)
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
+        binding = campaign_observation_binding(spec)
+        plan_path = repo_root / artifacts.plan_relative
+        board_path = repo_root / artifacts.board_relative
+        historical_paths = [repo_root / relative for relative in _HISTORICAL_CAMPAIGN_RELATIVES]
+        preserved_paths = [state_dir / name for name in _PRESERVED_STATE_NAMES]
+        watched = [*historical_paths, *preserved_paths, board_path, plan_path, spec_path]
+        before = _snapshot_paths(watched)
+        locations = {
+            "repository": repo_root, "spec": spec_path, "plan": plan_path,
+            "board": board_path, "state": state_dir, "worktree": worktree_root,
+        }
+        distinct_paths = len({path.resolve() for path in locations.values()}) == len(locations)
+        outside = (not state_dir.is_relative_to(repo_root) and not repo_root.is_relative_to(state_dir)
+                   and not worktree_root.is_relative_to(repo_root) and not repo_root.is_relative_to(worktree_root)
+                   and not worktree_root.is_relative_to(state_dir) and not state_dir.is_relative_to(worktree_root))
+        historical_collision = (artifacts.board_namespace in _HISTORICAL_NAMESPACES
+                                or bool(set(artifacts.protected_paths) & set(_HISTORICAL_CAMPAIGN_RELATIVES))
+                                or artifacts == DEFAULT_ARTIFACTS)
+        identities_independent = bool(distinct_paths and outside and not historical_collision
+                                      and binding["distinct_from_historical_intake"])
+        worktree_error = None
+        worktree_identity = None
+        try:
+            worktree_identity = _worktree_directory(worktree_root, repo_root, state_dir)
+        except (OSError, ValueError) as exc:
+            worktree_error = type(exc).__name__
+            identities_independent = False
+        publisher: dict[str, Any] = {"bound": False, "plan_id": None, "source_generation": None, "task_ids": []}
+        try:
+            document = json.loads(plan_path.read_text(encoding="utf-8"))
+            from ipfs_accelerate_py.agent_supervisor.planning.formal_planning_contracts import FormalWorkPlan
+            restored = FormalWorkPlan.from_dict(document)
+            metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+            published_ids = {task.task_id for task in restored.tasks}
+            publisher = {
+                "bound": (restored.plan_id == document.get("plan_id") == binding["plan_id"]
+                          and metadata.get("spec_sha256") == binding["source_generation"]
+                          and restored.events == () and published_ids == {task["id"] for task in spec["tasks"]}),
+                "plan_id": document.get("plan_id"),
+                "source_generation": metadata.get("spec_sha256"),
+                "task_ids": sorted(published_ids),
+                "event_count": len(restored.events),
+            }
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            publisher["error"] = type(exc).__name__
+        identity_error = None
+        native_tasks: list[Any] = []
+        try:
+            _, daemon = _native_modules(import_root)
+            native_tasks = list(daemon.parse_task_file(board_path, task_header_prefix=TASK_PREFIX))
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            identity_error = type(exc).__name__
+        task_cids = {task.task_id: task.canonical_task_cid for task in native_tasks}
+        task_bindings = {
+            task.task_id: {
+                "canonical_task_cid": task.canonical_task_cid,
+                "canonical_task_key": task.canonical_task_key,
+                "depends_on": list(task.depends_on),
+                "validation": list(task.validation),
+                "status": task.status,
+            }
+            for task in native_tasks
+        }
+        expected = {task["id"]: task for task in spec["tasks"]}
+        try:
+            from .improvement_plan import _require_matching_projection
+            _require_matching_projection(board_path.read_text(encoding="utf-8"), spec, binding["plan_id"], repo_root)
+            semantic_match = True
+        except (OSError, ValueError, TypeError, KeyError):
+            semantic_match = False
+        tasks_match_publisher = bool(publisher["bound"] and semantic_match and set(task_cids) == set(expected)
+                                     and all(task_bindings[task_id]["depends_on"] == list(expected[task_id]["depends_on"])
+                                             and task_bindings[task_id]["validation"] == list(expected[task_id]["validation_commands"])
+                                             for task_id in expected))
+        record = _read_json(state_dir / "launcher.json")
+        plan_bound = record.get("plan_id") == binding["plan_id"]
+        generation_bound = record.get("source_generation") == binding["source_generation"]
+        launcher_birth = bool(owns_process(record) and plan_bound and generation_bound
+                              and _campaign_tuple_matches(record, repo_root, spec_path, state_dir))
+        if launcher_birth and worktree_identity is not None:
+            try:
+                recorded_root, recorded_binding = recorded_worktree_root(record, state_dir)
+                launcher_birth = recorded_root == worktree_root and recorded_binding is not None
+            except (OSError, ValueError, TypeError):
+                launcher_birth = False
+        elif worktree_identity is None:
+            launcher_birth = False
+        daemon_birth = _daemon_birth_owned(record, state_dir) if launcher_birth else False
+        bounded = _bounded_provider_validation(repo_root, state_dir, task_cids, native_tasks)
+        pid = (record.get("identity") or {}).get("pid") if isinstance(record.get("identity"), dict) else None
+        pid_alive = process_identity(pid) is not None if type(pid) is int else False
+        doctor_report: dict[str, Any]
+        try:
+            doctor_report = doctor(repo_root, spec_path, state_dir, worktree_root=worktree_root)
+        except Exception as exc:
+            doctor_report = {"status": "not_ready", "error": type(exc).__name__, "paid_calls": 0, "execution_started": False}
+        doctor_ready = doctor_report.get("status") == "ready"
+        after = _snapshot_paths(watched)
+        preserved = before == after
+        markdown_completed = sorted(task_id for task_id, item in task_bindings.items() if item["status"] == "completed")
+        execution_admitted = bool(identities_independent and publisher["bound"] and tasks_match_publisher
+                                  and launcher_birth and daemon_birth and bounded["active"] and preserved
+                                  and worktree_error is None)
+        return {
+            "schema": "complaint-new-campaign-startup-observation@1",
+            "identities_independent": identities_independent,
+            "identity_scopes": {name: str(path) for name, path in locations.items()},
+            "worktree_identity": worktree_identity,
+            "worktree_error": worktree_error,
+            "binding": binding,
+            "publisher": publisher,
+            "publisher_bound": bool(publisher["bound"] and tasks_match_publisher),
+            "task_bindings": task_bindings,
+            "task_cids": task_cids,
+            "identity_error": identity_error,
+            "plan_bound": bool(plan_bound),
+            "source_generation_bound": bool(generation_bound),
+            "ingestion_is_execution": False,
+            "tasks_completed_by_ingestion": 0,
+            "pid_alive": pid_alive,
+            "pid_alive_is_execution": False,
+            "launcher_birth": launcher_birth,
+            "daemon_birth": daemon_birth,
+            "doctor_ready": doctor_ready,
+            "doctor_ready_is_execution": False,
+            "doctor_status": doctor_report.get("status"),
+            "paid_calls": 0,
+            "bounded_work": bounded,
+            "execution_admitted": execution_admitted,
+            "markdown_completed_task_ids": markdown_completed,
+            "markdown_status_grants_execution": False,
+            "historical_and_budget_unchanged": preserved,
+            "completion_authority": False,
+        }
+    finally:
+        os.chdir(started)
+
+
+
+def _attempt_budget_block(native_state: Mapping[str, Any], board: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Report Native's exhausted ready set without changing retry accounting."""
+    reason = "all_selectable_ready_tasks_reached_max_task_attempts"
+    ready = board.get("ready_task_ids")
+    if (native_state.get("selection_idle_reason") != reason
+            or native_state.get("selectable_ready_task_ids") != []
+            or not isinstance(ready, list) or not ready
+            or any(type(task_id) is not str for task_id in ready)
+            or native_state.get("ready_task_ids") != ready):
+        return None
+    attempts = native_state.get("implementation_attempts")
+    by_cid = native_state.get("implementation_attempts_by_cid")
+    identities = native_state.get("task_identities")
+    if not all(isinstance(value, Mapping) for value in (attempts, by_cid, identities)):
+        return None
+    counts = {}
+    for task_id in ready:
+        identity = identities.get(task_id)
+        cid = identity.get("canonical_task_cid") if isinstance(identity, Mapping) else None
+        count = by_cid.get(cid) if isinstance(cid, str) and cid else None
+        if type(count) is not int or count < 3 or attempts.get(task_id) != count:
+            return None
+        counts[task_id] = count
+    return {"reason": reason, "max_task_attempts": 3, "task_ids": list(ready),
+            "attempts": counts, "completion_authority": False}
+
+
 def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
-    from .improvement_plan import BOARD_RELATIVE, load_spec
     record = _read_json(state_dir / "launcher.json")
     owned = owns_process(record)
     identity = record.get("identity")
@@ -1288,12 +2323,22 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     now = time.time()
     heartbeat_age = _age(heartbeat_path, now)
     try:
-        board = _validate_board(repo_root, repo_root / BOARD_RELATIVE, load_spec(spec_path))
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
+        board = _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
     except Exception as exc:
         board = {"read_error": str(exc), "count": 0, "completed": 0, "ready_task_ids": [], "manual_hold_task_ids": []}
     # Native selection sets active_task_id before an attempt or worker exists.
     # Only the execution flag identifies an active implementation/validation.
     active = bool(native_state.get("implementation_in_progress"))
+    # Native clears these current execution/selection fields on settlement.
+    # Inspect the raw row: stale timestamps must not hide an unfinished claim.
+    # Lane owner births and last_implementation_* survive legitimate settlement.
+    native_execution_unsettled = any(native_state.get(key) for key in (
+        "implementation_in_progress", "active_task_id", "active_task_key", "active_task_cid",
+        "active_task_title", "active_task_track", "active_task_started_at", "active_attempt",
+        "active_phase", "active_phase_started_at", "active_phase_detail", "active_log_path",
+        "active_worktree_path", "active_branch", "active_provider_runner",
+    ))
     try:
         since_start = max(0.0, now - float(record.get("started_at", now)))
     except (TypeError, ValueError):
@@ -1335,6 +2380,9 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         and since_start <= STARTUP_SECONDS and not heartbeat.get("daemon_pid")
         and not heartbeat.get("last_agentic_maintenance_error")
     )
+    from .startup_maintenance_activity import observe as observe_startup_maintenance
+    startup_activity = (observe_startup_maintenance(sys.modules[__name__], repo_root, spec_path, state_dir,
+        record, heartbeat, native_state, now_ts=now) if owned else None)
     maintenance_ready = False
     if heartbeat_status in {"agentic_maintenance_started", "agentic_maintenance_completed"} and daemon_alive:
         from ipfs_accelerate_py.agent_supervisor.todo_daemon.supervisor_activity import observe_supervisor_activity
@@ -1353,8 +2401,31 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         log_evidence = _owned_attempt_log_evidence(events_path, state_dir, binding, started_at=invocation_start, now=now)
         provider_evidence = log_evidence or provider_evidence
     provider_progress = bool(provider_evidence and provider_evidence.get("progress_fresh", True))
+    rescue_activity = None
+    rescue_active = False
+    if owned and current_state and claim_verified and phase == "validating":
+        from .auto_rescue_activity import observe as observe_rescue_activity
+        rescue_activity = observe_rescue_activity(sys.modules[__name__], repo_root, state_dir, native_state, now_ts=now)
+        rescue_active = rescue_activity.get("activity_verified") is True
+        # Native's original terminal log and an integer repair PID alone do
+        # not prove a current repair. Thought/text are liveness only: they
+        # never become verified work or reset a recovery incident budget.
+        provider_progress = rescue_active and rescue_activity.get("work_progress_verified") is True
+        if rescue_active:
+            provider_evidence = {**rescue_activity, "type": "grok_frame",
+                "provider_repair_in_flight": True, "provider_terminal_observed": False,
+                "progress_fresh": provider_progress}
+        elif provider_evidence:
+            provider_evidence = {**provider_evidence, "provider_repair_in_flight": False, "progress_fresh": False}
     validation_evidence = _validation_event_evidence(events_path, binding, started_at=invocation_start) if claim_verified else None
+    from .reconciliation_activity import evidence as owned_executor_activity_evidence
+    canonical_activity_evidence = (owned_executor_activity_evidence(sys.modules[__name__], repo_root, state_dir,
+        record, native_state, now_ts=now) if owned and current_state else None)
+    if canonical_activity_evidence is not None:
+        validation_evidence = canonical_activity_evidence
     worker_liveness = _owner_liveness(native_state.get("owner_process_birth"))
+    if canonical_activity_evidence is not None or startup_activity is not None:
+        worker_liveness = "alive"  # Exact live maintenance birth, re-proved above.
     if worker_liveness == "missing":
         worker_liveness = "alive" if daemon_alive else ("absent" if not owned else "unknown")
     shutdown = _read_json(state_dir / "container_shutdown.json")
@@ -1365,6 +2436,14 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     except (OSError, ValueError, TypeError) as error:
         selected_root, root_binding, worktree_error = None, None, str(error)
     shutdown_verified = _shutdown_verified(record, shutdown, repo_root, state_dir) and worktree_error is None
+    from .retry_cooldown_activity import observe as observe_retry_cooldown
+    retry_cooldown = (observe_retry_cooldown(sys.modules[__name__], repo_root, state_dir,
+        record, native_state, heartbeat, board, spec=spec, artifacts=artifacts,
+        current_state=current_state, now_ts=now)
+        if owned and current_state and not board.get("read_error")
+        and not provider_progress and not validation_evidence else {"verified": False})
+    attempt_budget = (_attempt_budget_block(native_state, board)
+        if owned and current_state and not native_execution_unsettled and not intentional_wait else None)
     if not owned:
         if identity and process_identity(identity.get("pid")):
             health = "identity_mismatch"
@@ -1374,14 +2453,33 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         health = "board_error"
     elif native_state.get("read_error") or heartbeat.get("read_error"):
         health = "state_error"
-    elif board["count"] and board["completed"] == board["count"]:
-        health = "complete"
     elif heartbeat_age is not None and heartbeat_owner != identity.get("pid"):
         health = "heartbeat_identity_mismatch"
     elif heartbeat_age is not None and heartbeat_age > 120:
         health = "stalled"
+    elif retry_cooldown.get("verified") is True:
+        health = "retry_cooldown"
+    elif (board["count"] and board["completed"] == board["count"]
+            and not native_execution_unsettled and canonical_activity_evidence is None
+            and not rescue_active and startup_activity is None):
+        health = "complete"
+    elif canonical_activity_evidence is not None:
+        # The exact canonical executor has its existing fixed validation
+        # deadline. Its pulse/finalization proof never renews the provider.
+        health = "active"
+    elif rescue_active:
+        # Selection can precede checkout. The exact owned repair has already
+        # proved its unique execution-event deadline and unchanged phase cap.
+        health = "active"
     elif active and attempt_age is not None and attempt_age > TIMEOUT_SECONDS:
         health = "stalled"
+    elif attempt_budget is not None and since_start > STARTUP_SECONDS:
+        # Repeated bounded maintenance and backpressure events cannot turn
+        # exhausted ready tasks into healthy work. Actual validation/rescue
+        # above retains its existing deadline; no paid attempt is rearmed.
+        health = "budget_exhausted"
+    elif startup_activity is not None:
+        health = "maintenance"  # Liveness only, within Native's fixed window/handoff.
     elif heartbeat_age is not None and startup_maintenance:
         health = "starting"
     elif heartbeat_age is not None and maintenance_ready:
@@ -1411,9 +2509,10 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
         log_stale = active_age is not None and active_age > STALL_SECONDS
         silent_window = attempt_age is not None and attempt_age > STALL_SECONDS
         in_validation = phase.startswith("valid")
+        provider_repair = rescue_active
         # Fresh generic log lines and a live PID are not provider or validation progress.
-        silent = silent_window and (validation_evidence is None if in_validation else not provider_progress)
-        post_provider = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+        silent = silent_window and (not (validation_evidence or provider_repair) if in_validation else not provider_progress)
+        post_provider = bool(not in_validation and provider_evidence and provider_evidence.get("provider_terminal_observed"))
         health = ("stalled" if hard_expired or log_stale else "post_provider" if post_provider
                   else "stalled" if silent else "active")
     elif selected:
@@ -1449,16 +2548,27 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
     elif phase in {"cancelled", "canceled"} or native_state.get("manual_cancellation"):
         interview_state = "cancelled"
     heartbeat_fresh = heartbeat_age is not None and heartbeat_age <= 120
+    provider_terminal = bool(provider_evidence and provider_evidence.get("provider_terminal_observed"))
+    scope_liveness = _campaign_scope_liveness(
+        native_state, phase=phase, interview_state=interview_state, worker_liveness=worker_liveness,
+        active=active, attempt_age=attempt_age, active_age=active_age, heartbeat_fresh=heartbeat_fresh,
+        provider_fresh=bool(provider_progress or rescue_active), provider_terminal=provider_terminal,
+        validation_fresh=bool(validation_evidence), now=now, provider_repair=rescue_active,
+        canonical_validation_active=canonical_activity_evidence is not None,
+    )
     identity_ok = worker_liveness == "alive" and health not in {"identity_mismatch", "heartbeat_identity_mismatch", "state_error"}
-    activity_ok = (not active) or bool(provider_progress or validation_evidence
-        or (provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
+    activity_ok = (not active) or bool(provider_progress or validation_evidence or rescue_active
+        or (not phase.startswith("valid") and provider_evidence and provider_evidence.get("provider_terminal_observed"))) or not (
         attempt_age is not None and attempt_age > STALL_SECONDS
     )
     healthy = bool(identity_ok and heartbeat_fresh and activity_ok and health in {
-        "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete",
+        "active", "post_provider", "running", "maintenance", "waiting_for_user", "selected", "complete", "retry_cooldown",
     })
     return {"status": health, "healthy": healthy, "owned_process_alive": owned,
+            "attempt_budget": attempt_budget,
             "worker_liveness": worker_liveness,
+            "scope_liveness": {key: scope_liveness[key] for key in ("claim", "worker", "provider", "validation", "merge")},
+            "scope_monitors": scope_liveness["monitors"],
             "application_interview_state": interview_state,
             "pid": identity.get("pid"), "state_dir": str(state_dir),
             "worktree_root": str(selected_root) if selected_root is not None else None,
@@ -1481,9 +2591,15 @@ def status(repo_root: Path, spec_path: Path, state_dir: Path) -> dict[str, Any]:
             "provider_execution_verified": bool(owned and provider_evidence),
             "provider_progress_verified": bool(owned and provider_progress),
             "provider_execution_evidence": provider_evidence,
+            "auto_rescue_activity_verified": rescue_active,
+            "auto_rescue_activity_evidence": rescue_activity,
+            "retry_cooldown_verified": health == "retry_cooldown" and retry_cooldown.get("verified") is True,
+            "retry_cooldown_evidence": retry_cooldown,
+            "startup_activity_verified": startup_activity is not None,
+            "startup_activity_evidence": startup_activity,
             "validation_activity_verified": bool(owned and validation_evidence),
             "validation_activity_evidence": validation_evidence,
-            "progress_verified": bool(owned and provider_progress),
+            "progress_verified": bool(owned and (provider_progress or canonical_activity_evidence)),
             "completion_authority": False}
 
 
@@ -1542,18 +2658,25 @@ def _recovery_config(repo_root: Path, state_dir: Path, record: Mapping[str, Any]
     """Derive the native paths/options from the first-party compiler only."""
     supervisor, _ = _native_modules(repo_root)
     selected_root, _ = recorded_worktree_root(record, state_dir)
-    args = native_argv(Path(record["board_path"]), state_dir, record["merge_target"], worktree_root=selected_root)
+    spec = _native_campaign_spec(repo_root, state_dir, todo_path=record["board_path"])
+    artifacts = campaign_artifacts(spec)
+    args = native_argv(Path(record["board_path"]), state_dir, record["merge_target"], worktree_root=selected_root,
+                       board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths)
     return supervisor.supervisor_config_from_args(supervisor.parse_args(args), repo_root=repo_root)
 
 
-def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any], *, merge_queue=None):
+def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str, Any], *, merge_queue=None,
+                          common_checkout_owner: bool = False):
     """Native quiesced reconciliation has no implementation/selection authority."""
     _, native = _native_modules(repo_root)
     config = _recovery_config(repo_root, state_dir, record)
     return native.PortalImplementationDaemon(
         todo_path=config.todo_path, state_path=config.state_path, strategy_path=config.strategy_path,
         events_path=state_dir / f"{STATE_PREFIX}_events.jsonl", repo_root=repo_root,
-        task_header_prefix=config.task_prefix, board_namespace=config.board_namespace, implement=False,
+        task_header_prefix=config.task_prefix,
+        # Native supervisor recovery owns the common checkout journal; the
+        # remaining Host recovery keeps its separate board-scoped lease.
+        board_namespace="" if common_checkout_owner else config.board_namespace, implement=False,
         implementation_command=config.implementation_command,
         implementation_timeout=config.implementation_timeout, max_task_attempts=config.max_task_attempts,
         use_ephemeral_worktree=False, worktree_root=config.worktree_root,
@@ -1570,18 +2693,20 @@ def _open_recovery_daemon(repo_root: Path, state_dir: Path, record: Mapping[str,
 
 
 @contextmanager
-def _recovery_checkout_lease(repo_root: Path):
+def _recovery_checkout_lease(repo_root: Path, *, board_namespace: str = "complaint-intake-improvement"):
     # Exclude merges/checkout mutation, while leaving the protected-path
     # reconciler free to acquire and revalidate its own crash-fence lease.
     from ipfs_accelerate_py.agent_supervisor.merge import checkout_lock as locks
-    path = locks.board_scoped_checkout_mutation_lock_path(repo_root, "complaint-intake-improvement")
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,63}", board_namespace) is None:
+        raise ValueError("recovery board namespace is not canonical")
+    path = locks.board_scoped_checkout_mutation_lock_path(repo_root, board_namespace)
     metadata = locks.checkout_lock_metadata(kind="merge", repo_root=repo_root,
         owner_script="", extra={"lease_id": secrets.token_hex(16), "operation": "quiesced_stalled_worker_reconciliation"})
     lease, _, _, _ = locks.acquire_checkout_mutation_lease(path, metadata, owner_active=lambda _: True)
     if lease is None:
         raise BlockingIOError("native checkout mutation owner is present")
     try:
-        yield
+        yield lease
     finally:
         if not locks.release_checkout_mutation_lease(lease, require_exact_metadata=True):
             raise RuntimeError("native recovery checkout lease changed; retained")
@@ -1635,7 +2760,74 @@ def _claim_proof_conflict(native_state: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+def _settle_obsolete_checkout_journal(daemon, state_dir: Path, lease,
+                                      preimage: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Settle Native metadata before holding the queue's separate writer FD.
+
+    The typed owner API reads completed queue requests. Holding the external
+    writer guard during that read would lock this process against itself.
+    Only its one proved settlement event may refresh recovery evidence.
+    """
+    from .improvement_recovery import _owned_bytes
+    from ipfs_accelerate_py.agent_supervisor.proof.formal_verification_contracts import content_identity
+    from ipfs_accelerate_py.agent_supervisor.runtime.event_log import _event_identity, _event_stream_binding
+    from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import read_checkout_mutation_lease
+    event_path = state_dir / f"{STATE_PREFIX}_events.jsonl"
+    if _recovery_preimage(daemon.repo_root, state_dir, _read_json(state_dir / "launcher.json")) != preimage:
+        raise ValueError("native_completion_journal_settlement_preimage_changed")
+    events_before = _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
+    if hashlib.sha256(events_before).hexdigest() != preimage[str(event_path)][3]:
+        raise ValueError("native_completion_journal_settlement_event_preimage_changed")
+    journal_before = _owned_bytes(lease.lock_path, 32 * 1024 * 1024, legacy_group_write=True)
+    if read_checkout_mutation_lease(lease.lock_path) != lease:
+        raise ValueError("native_completion_journal_settlement_lease_changed")
+    result = daemon.reconcile_obsolete_protected_completion_journal()
+    if (result.get("checkout_mutation_lease_recovered") is not True
+            or result.get("reason") != "obsolete_completion_journal_settled"
+            or any(result.get(key) is not False for key in ("completion_authority", "attempt_refunded", "old_guard_trusted"))):
+        raise ValueError("native_completion_journal_settlement_required")
+    archive_path = Path(str(result.get("settlement_path") or ""))
+    if (not archive_path.is_absolute() or archive_path.resolve(strict=True) != archive_path
+            or archive_path.parent != state_dir / "protected-checkout-settlements"):
+        raise ValueError("native_completion_journal_settlement_path_changed")
+    archive = json.loads(_owned_bytes(archive_path, 64 * 1024 * 1024))
+    if not isinstance(archive, dict) or not isinstance(archive.get("proof"), dict):
+        raise ValueError("native_completion_journal_settlement_archive_invalid")
+    proof = archive.get("proof") or {}
+    if (archive.get("retired") is not True or archive.get("settlement_id") != result.get("settlement_id")
+            or content_identity(proof) != result.get("settlement_id")
+            or proof.get("old_lease_id") != lease.lease_id
+            or proof.get("old_lease_device") != lease.device or proof.get("old_lease_inode") != lease.inode
+            or proof.get("old_journal") != dict(lease.metadata)
+            or proof.get("old_journal_raw_hex") != journal_before.hex()
+            or proof.get("completion_authority") is not False or proof.get("attempt_refunded") is not False
+            or os.path.lexists(lease.lock_path)):
+        raise ValueError("native_completion_journal_settlement_proof_changed")
+    events_after = _owned_bytes(event_path, MAX_EVENT_HISTORY_BYTES, legacy_group_write=True)
+    appended = events_after[len(events_before):].splitlines() if events_after.startswith(events_before) else []
+    event = json.loads(appended[0]) if len(appended) == 1 else {}
+    previous = json.loads(events_before.splitlines()[-1]) if events_before.strip() else {}
+    stream, snapshot = _event_stream_binding(event_path)
+    if (not isinstance(event, dict) or not isinstance(previous, dict)
+            or type(previous.get("sequence", 0)) is not int
+            or event.get("type") != "obsolete_completion_journal_settled"
+            or not event.get("timestamp") or any(event.get(key) != value for key, value in result.items())
+            or type(event.get("sequence")) is not int or event["sequence"] != previous.get("sequence", 0) + 1
+            or event.get("previous_event_id") != previous.get("event_id", "")
+            or event.get("stream_id") != stream or event.get("snapshot_id") != snapshot
+            or event.get("event_id") != _event_identity(event)):
+        raise ValueError("native_completion_journal_settlement_event_changed")
+    current = _recovery_preimage(daemon.repo_root, state_dir, _read_json(state_dir / "launcher.json"))
+    old_events = preimage[str(event_path)]
+    if (current[str(event_path)][:3] != old_events[:3]
+            or {key: value for key, value in current.items() if key != str(event_path)}
+            != {key: value for key, value in preimage.items() if key != str(event_path)}):
+        raise ValueError("native_completion_journal_settlement_changed_recovery_evidence")
+    return result, current
+
+
+def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None,
+                            expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     """Fence a proven-dead ordinary attempt and reconcile it through native APIs.
 
     A live PID, stale heartbeat, or missing birth is not permission to refund an
@@ -1643,6 +2835,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
     dispatch another paid provider call. Lock contention and a temporarily
     unavailable dependency wait on a capped cooldown.
     """
+    admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+    if admission:
+        return _refusal(admission, {})
     observed = status(repo_root, spec_path, state_dir)
     moment = time.time() if now is None else now
     native_state = observed.get("native_state") if isinstance(observed.get("native_state"), dict) else {}
@@ -1701,10 +2896,15 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
         with ExitStack() as stack:
             for name in ("recovery.lock", "launcher.lock", "runner.lock"):
                 stack.enter_context(_lock(state_dir, name, blocking=False))
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
             if _recovery_preimage(repo_root, state_dir, record) != preimage:
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
-            stack.enter_context(_recovery_checkout_lease(repo_root))
+            _, recovery_artifacts = _campaign_spec(repo_root, spec_path)
+            checkout_lease = stack.enter_context(_recovery_checkout_lease(repo_root,
+                board_namespace=recovery_artifacts.board_namespace))
             # Even preparing an existing queue can touch its schema/import
             # projection. Prove current process/container closure first.
             _parent_closed(state_dir, record, context, False)
@@ -1729,14 +2929,50 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             # genuine existing queue before retaining its writer guard, then
             # inject that same instance into the non-implementing reconciler.
             _parent_closed(state_dir, record, context, False)
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
             queue_instance = MergeQueue(state_dir / "merge-queue")
             if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
                 return _refusal("merge_queue_changed_during_preparation", observed)
+            from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import (
+                checkout_mutation_lock_path, read_checkout_mutation_lease,
+            )
+            daemon = None
+            checkout_settlement = None
+            native_lease = read_checkout_mutation_lease(checkout_mutation_lock_path(repo_root))
+            if (native_lease is not None and native_lease.metadata.get("protected_recovery_required") is True
+                    and native_lease.metadata.get("protected_recovery_owner") == "implementation_daemon"
+                    and native_lease.metadata.get("operation") == "mark_tasks_completed"):
+                native_owner = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance,
+                    common_checkout_owner=True)
+                if native_owner._repo_merge_lock_path() != native_lease.lock_path:
+                    return _refusal("native_completion_journal_owner_path_mismatch", observed)
+                try:
+                    checkout_settlement, preimage = _settle_obsolete_checkout_journal(
+                        native_owner, state_dir, native_lease, preimage)
+                except (OSError, ValueError, RuntimeError, TypeError) as error:
+                    return _refusal("native_completion_journal_settlement_unverified", observed,
+                        diagnostics=[str(error)[:500]], effects_uncertain=True,
+                        counters_preserved=None, progress_preserved=None)
+                _parent_closed(state_dir, record, context, False)
+                admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+                if admission:
+                    return _refusal(admission, observed)
+                containers = _read_json(state_dir / "container_shutdown.json")
+                if (not _fence_owned_tree(record).get("fenced")
+                        or not _shutdown_verified(record, containers, repo_root, state_dir)
+                        or not _observe_campaign_containers(repo_root, state_dir, selected_root, record, containers)):
+                    return _refusal("container_or_process_closure_unverified", observed)
+                if read_merge_queue_settlement(state_dir / "merge-queue", **queue_args) != queue_before:
+                    return _refusal("merge_queue_changed_during_checkout_settlement", observed)
             queue = stack.enter_context(hold_merge_queue_settlement(state_dir / "merge-queue",
                 target_repository_id=checkout_repository_id(repo_root), target_branch=record["merge_target"],
                 lock_timeout_seconds=0.01))
             if not queue.get("settled"):
                 return _refusal("merge_queue_unsettled", observed)
+            if queue != queue_before:
+                return _refusal("merge_queue_changed_before_reconciliation", observed)
             _parent_closed(state_dir, record, context, False)
             fence = _fence_owned_tree(record)
             containers = _read_json(state_dir / "container_shutdown.json")
@@ -1754,9 +2990,15 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             if _recovery_preimage(repo_root, state_dir, record) != preimage:
                 return _refusal("recovery_preimage_changed", observed)
             _parent_closed(state_dir, record, context, False)
-            daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
+            admission = _recovery_start_admission(state_dir, expected_launcher_sha256)
+            if admission:
+                return _refusal(admission, observed)
+            if daemon is None:
+                daemon = _open_recovery_daemon(repo_root, state_dir, record, merge_queue=queue_instance)
             attempt_result = daemon.reconcile_quiesced_active_attempt()
             claim_result = None
+            pending_claim_result = None
+            completed_claim_result = None
             blocked = bool(attempt_result.get("blocked"))
             reason = str(attempt_result.get("reason") or "")
             terminal_claim_ok = (not blocked) or reason == "task_claim_reconciliation_blocked"
@@ -1767,22 +3009,82 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
             }
             if terminal_claim_ok and not unsafe:
                 claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+            if (terminal_claim_ok and not unsafe and isinstance(claim_result, dict)
+                    and claim_result.get("blocked") is True
+                    and claim_result.get("reason") == "task_claim_worktree_lifecycle_missing"):
+                from .completed_claim_recovery import completed_claim_daemon, reconcile_completed_claim
+                from ipfs_accelerate_py.agent_supervisor.merge.checkout_lock import read_checkout_mutation_lease
+                def completed_claim_closed():
+                    _parent_closed(state_dir, record, context, False)
+                    if read_checkout_mutation_lease(checkout_lease.lock_path) != checkout_lease:
+                        raise ValueError("completed_claim_checkout_guard_changed")
+                    current_containers = _read_json(state_dir / "container_shutdown.json")
+                    if (not _fence_owned_tree(record).get("fenced")
+                            or not _shutdown_verified(record, current_containers, repo_root, state_dir)
+                            or not _observe_campaign_containers(repo_root, state_dir, selected_root,
+                                record, current_containers)):
+                        raise ValueError("completed_claim_process_or_container_closure_unverified")
+                completed_claim_closed()
+                daemon = completed_claim_daemon(_recovery_config(repo_root, state_dir, record),
+                    merge_queue=queue_instance)
+                completed_claim_result = reconcile_completed_claim(daemon, reprove_closure=completed_claim_closed)
+                attempt_result = daemon.reconcile_quiesced_active_attempt()
+                claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+                reason = str(attempt_result.get("reason") or "")
+                completed_claim_closed()
+            from .pending_claim_runtime import reconcile_pending_claim, unfinished_handoff_task
+            unfinished = unfinished_handoff_task(state_dir)
+            nonterminal_claim = (isinstance(claim_result, dict) and claim_result.get("blocked") is True
+                and claim_result.get("reason") == "canonical_task_not_terminal")
+            if terminal_claim_ok and not unsafe and (nonterminal_claim or unfinished):
+                if unfinished and nonterminal_claim and unfinished != claim_result.get("task_id"):
+                    raise ValueError("pending_candidate_handoff_conflicts_with_current_claim")
+                _, native = _native_modules(repo_root)
+                try:
+                    pending_claim_result = reconcile_pending_claim(repo_root, spec_path, state_dir,
+                        record, native, daemon, unfinished or str(claim_result.get("task_id") or ""))
+                except ValueError as error:
+                    if str(error) != "latest_exact_start_required":
+                        raise
+                    # Waiting cannot supply missing attempt provenance. Retain
+                    # the claim refusal and run the accounting checks below;
+                    # this classification grants no recovery or retry authority.
+                    pending_claim_result = {"reconciled": False, "blocked": True,
+                        "reason": "latest_exact_start_required", "completion_authority": False,
+                        "attempt_refunded": False, "provider_callback_settled": False,
+                        "new_attempt_authority": False}
+                if pending_claim_result.get("reconciled") is True and not pending_claim_result.get("blocked"):
+                    # The companion releases only the exact claim. Let the
+                    # unchanged Native API finish its ordinary stale-lock cleanup.
+                    attempt_result = daemon.reconcile_quiesced_active_attempt()
+                    claim_result = daemon.reconcile_quiesced_implementation_task_claim()
+                    reason = str(attempt_result.get("reason") or "")
             after_state, _ = _read_native_state(repo_root, state_dir / f"{STATE_PREFIX}_task_state.json")
             count_keys = ("implementation_attempts", "implementation_attempts_by_cid")
             before_state = preimage["native_payload"]
+            if completed_claim_result is not None and after_state != before_state:
+                return _refusal("completed_claim_native_payload_changed", observed,
+                    counters_preserved=False, progress_preserved=False, effects_uncertain=True,
+                    completed_claim_reconciliation=completed_claim_result)
             if (after_state.get("read_error") or any(after_state.get(key) != before_state.get(key) for key in count_keys)
                     or after_state.get("completed_task_ids") != before_state.get("completed_task_ids")):
                 return _refusal("native_accounting_or_completion_changed", observed,
                     counters_preserved=False, progress_preserved=False,
                     attempt_refunded=None, diagnostics=["native invariant observation changed; no rollback attempted"],
-                    attempt_reconciliation=attempt_result, claim_reconciliation=claim_result)
-            reconciled = bool(attempt_result.get("reconciled")) or (
+                    attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
+                    pending_claim_reconciliation=pending_claim_result,
+                    completed_claim_reconciliation=completed_claim_result)
+            reconciled = (not attempt_result.get("blocked") and
+                not (isinstance(claim_result, dict) and claim_result.get("blocked"))) and (bool(attempt_result.get("reconciled")) or (
                 isinstance(claim_result, dict) and bool(claim_result.get("reconciled")) and not claim_result.get("blocked")
-            )
+            ) or (isinstance(completed_claim_result, dict)
+                and completed_claim_result.get("reconciled") is True and not completed_claim_result.get("blocked")))
             if not reconciled:
                 return _refusal(reason or "native_reconciliation_blocked", observed,
                                 diagnostics=[reason or "native_reconciliation_blocked"],
                                 attempt_reconciliation=attempt_result, claim_reconciliation=claim_result,
+                                pending_claim_reconciliation=pending_claim_result,
+                                completed_claim_reconciliation=completed_claim_result,
                                 fence=fence, container_shutdown=containers)
             return {"recovery": "reconciled", "eligible": True, "reconciled": True,
                     "reason": reason or "quiesced_active_attempt_reconciled", "status": observed.get("status"),
@@ -1790,6 +3092,9 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                     "application_interview_state": None,
                     "diagnostics": [reason or "quiesced_active_attempt_reconciled"],
                     "attempt_reconciliation": attempt_result, "claim_reconciliation": claim_result,
+                    "pending_claim_reconciliation": pending_claim_result,
+                    "completed_claim_reconciliation": completed_claim_result,
+                    "checkout_journal_settlement": checkout_settlement,
                     "fence": fence, "container_shutdown": containers,
                     "selection_performed": False, "paid_dispatch": False, "attempt_refunded": False,
                     "completion_authority": False, "counters_preserved": True, "progress_preserved": True,
@@ -1802,14 +3107,16 @@ def _recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *
                              diagnostics=[type(exc).__name__, str(exc)[:500]])
 
 
-def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None) -> dict[str, Any]:
+def recover_stalled_worker(repo_root: Path, spec_path: Path, state_dir: Path, *, now: float | None = None,
+                           expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     """Explicit stopped-only operator seam; the native watchdog owns live work."""
     previous = dict(os.environ)
     try:
         effective = campaign_environment(repo_root, state_dir=state_dir)
         os.environ.clear()
         os.environ.update(effective)
-        return _recover_stalled_worker(repo_root, spec_path, state_dir, now=now)
+        return _recover_stalled_worker(repo_root, spec_path, state_dir, now=now,
+            expected_launcher_sha256=expected_launcher_sha256)
     finally:
         os.environ.clear()
         os.environ.update(previous)
@@ -1855,10 +3162,17 @@ def _descendants(root: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def stop(state_dir: Path, *, timeout: float = 15.0,
-         retained_native_child_proof: Mapping[str, Any] | None = None) -> dict[str, Any]:
+         retained_native_child_proof: Mapping[str, Any] | None = None,
+         expected_launcher_sha256: str | None = None) -> dict[str, Any]:
     with _lock(state_dir):
         path = state_dir / "launcher.json"
         record = _read_json(path)
+        if expected_launcher_sha256 is not None:
+            current_digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if (not re.fullmatch(r"[0-9a-f]{64}", expected_launcher_sha256)
+                    or current_digest != expected_launcher_sha256):
+                return {"status": "stop_incomplete", "signalled": False,
+                        "reason": "launcher_changed_before_stop", "manual_holds_preserved": True}
         from .improvement_shutdown import close_campaign_containers
         try:
             recorded_worktree_root(record, state_dir)
@@ -1965,6 +3279,11 @@ def _validation_activity_log_identity(path: Path):
     return value.st_dev, value.st_ino
 
 
+def _validation_activity_snapshot(campaign):
+    from .reconciliation_activity import snapshot
+    return snapshot(sys.modules[__name__], campaign)
+
+
 def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], context: Mapping[str, Any], *, now_ts: float, owner_pid=None):
     """Read one exact live Native validation owner without changing its state."""
     from types import SimpleNamespace
@@ -1977,12 +3296,17 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
         if target != Path(__file__).resolve().parents[2]:
             return None
         state_path = campaign / f"{STATE_PREFIX}_task_state.json"
-        snapshot = plane.read_portal_task_state_snapshot(state_path)
+        snapshot = _validation_activity_snapshot(campaign)
         if not isinstance(snapshot, dict) or type(snapshot.get("revision")) is not int:
             return None
         state = snapshot.get("body")
         if not isinstance(state, dict):
             return None
+        if state.get("active_phase") == "validating_reconciled_candidate":
+            from .reconciliation_activity import binding as reconciled_binding
+            return reconciled_binding(sys.modules[__name__], daemon, native,
+                campaign=campaign, target=target, workspace=workspace, state=state,
+                task=task, context=context, now_ts=now_ts, owner_pid=owner_pid)
         expected = {"task_id": task["id"], "canonical_task_cid": context["task_cid"],
                     "canonical_task_key": context["task_key"], "attempt": state.get("active_attempt")}
         if (not expected["task_id"] or not expected["canonical_task_cid"] or not expected["canonical_task_key"]
@@ -2013,8 +3337,18 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
         birth = native.read_process_birth(owner_pid)
         if lease is None or claim is None or identity is None or birth is None:
             return None
+        launcher = _read_validation_watchdog_authority(campaign / "launcher.json")
+        if (launcher is None or launcher.get("repo_root") != str(target)
+                or launcher.get("state_dir") != str(campaign)):
+            return None
+        artifacts = DEFAULT_ARTIFACTS
+        if any(key in launcher for key in ("schema_version", "spec_path", "plan_id")):
+            spec_path = Path(str(launcher.get("spec_path") or ""))
+            if not _campaign_tuple_matches(launcher, target, spec_path, campaign):
+                return None
+            _, artifacts = _campaign_spec(target, spec_path)
         scope = {"repo_root": str(target), "state_dir": str(campaign), "state_prefix": STATE_PREFIX,
-                 "todo_path": str(target / "docs/task_boards/complaint_intake_task_board.md"),
+                 "todo_path": str(target / artifacts.board_relative),
                  "daemon_entrypoint": str(Path(__file__).resolve())}
         if (dict(identity.owner_scope) != scope or identity.process_birth != birth or birth.pid != owner_pid
                 or native.ProcessBirthIdentity.from_dict(claim.get("owner_process_birth")) != birth
@@ -2029,10 +3363,6 @@ def _validation_activity_binding(workspace: Path, task: Mapping[str, Any], conte
                 or claim.get("state_dir") != str(campaign) or claim.get("state_path") != str(state_path)
                 or not native.checkout_lock_repository_matches(claim, target)
                 or claim.get("dispatch_authority_cid") != daemon.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
-            return None
-        launcher = _read_validation_watchdog_authority(campaign / "launcher.json")
-        if (launcher is None or launcher.get("repo_root") != str(target)
-                or launcher.get("state_dir") != str(campaign)):
             return None
         worktree_root, _ = recorded_worktree_root(launcher, campaign)
         if workspace == worktree_root or not workspace.is_relative_to(worktree_root):
@@ -2267,8 +3597,66 @@ def _call_validation_with_activity(*, executor, spec, workspace_path, timeout_se
         with activity_lock:
             stopped.set()
         worker.join(timeout=1.0)
-        _clear_validation_activity(binding, activity_id)
-        os.close(inode_guard)
+        try:
+            # Keep the returned executor's exact current owner observable
+            # while Native writes its terminal receipt. Never renew a task or
+            # executor deadline, and never mint this for another dispatch.
+            now_ts = time.time()
+            fresh = _validation_activity_binding(workspace_path, task, context, now_ts=now_ts)
+            if fresh == binding:
+                from .validation_handoff import publish
+                publish(sys.modules[__name__], binding, activity_id=activity_id,
+                    started_at=started_at, settled_at=now_ts, deadline_at=deadline_at)
+        except Exception:
+            pass  # Observation failure cannot replace the canonical result.
+        finally:
+            _clear_validation_activity(binding, activity_id)
+            os.close(inode_guard)
+
+
+def _owned_validation_child_exists(native, owner_birth) -> bool:
+    """Read an exact owned descendant during the first executor pulse gap.
+
+    Native 6af's legacy marker detector joins its scalar command text as
+    characters. Use actual procfs argv, retaining its existing marker scope,
+    only after the caller has proved the full current Native dispatch owner.
+    """
+    markers = ("playwright", "run_playwright_test.mjs", "pytest", "vitest", "npm run test",
+        "npm run evidence", "release-readiness-gate", "audit-release-evidence-freshness",
+        "build-virtual-desktop-release-evidence", "tsc --noemit", "run_legal_ir_10m_smoke.sh",
+        "run_legal_ir_8h_canary.sh", "run_hammer_leanstral_smoke.sh", "run_hammer_leanstral_hparam.sh",
+        "uscode_modal_daemon_runner")
+    try:
+        if native.read_process_birth(owner_birth.pid) != owner_birth:
+            return False
+        for row in native.descendant_processes(owner_birth.pid):
+            pid = row.get("pid")
+            if type(pid) is not int or pid <= 1:
+                continue
+            birth = native.read_process_birth(pid)
+            if (birth is None or birth.start_time_ticks != row.get("start_ticks")
+                    or birth.start_time_ticks < owner_birth.start_time_ticks
+                    or birth.boot_id != owner_birth.boot_id
+                    or os.stat(f"/proc/{pid}").st_uid != os.getuid()):
+                continue
+            argv = native.read_process_command_argv(pid)
+            if not argv or not any(marker in " ".join(argv).lower() for marker in markers):
+                continue
+            current, seen = birth, set()
+            for _ in range(64):
+                if current == owner_birth:
+                    return (native.read_process_birth(pid) == birth
+                            and native.read_process_birth(owner_birth.pid) == owner_birth
+                            and native.read_process_command_argv(pid) == argv)
+                if current.pid in seen or current.parent_pid <= 1:
+                    break
+                seen.add(current.pid)
+                current = native.read_process_birth(current.parent_pid)
+                if current is None:
+                    break
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    return False
 
 
 def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
@@ -2330,8 +3718,11 @@ def _owned_validation_window(supervisor, state, *, now_ts: float) -> bool:
                 or not native.checkout_lock_repository_matches(claim, supervisor.config.repo_root)
                 or claim.get("dispatch_authority_cid") != native.PortalImplementationDaemon._implementation_dispatch_authority_cid(claim)):
             return False
+        from .validation_handoff import owned as owned_handoff
         return bool(supervisor._active_validation_subprocess_exists()
-                    or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
+                    or _owned_validation_child_exists(native, birth)
+                    or _owned_validation_activity(supervisor, state, now_ts=now_ts, owner_pid=birth.pid)
+                    or owned_handoff(sys.modules[__name__], supervisor, state, now_ts=now_ts, owner_pid=birth.pid))
     except (OSError, TypeError, ValueError, AttributeError, KeyError):
         return False
 
@@ -2495,6 +3886,43 @@ def _rescue_receipt_daemon_class(native_class, supervisor):
     return RescueReceiptDaemon
 
 
+def _startup_candidate_is_completed(supervisor, candidate):
+    """Recognize Native's retained terminal candidate without retiring it."""
+    if not isinstance(candidate, Mapping):
+        return False
+    merge = candidate.get("merge_result")
+    if isinstance(merge, Mapping) and merge.get("reason") == "preflight_merge_conflict":
+        from .startup_terminal_candidate import completed_preflight_conflict
+        return completed_preflight_conflict(supervisor, candidate)
+    context = getattr(supervisor, "_complaint_startup_reconciliation_context", None)
+    if (candidate.get("merged") is not False or not isinstance(merge, Mapping)
+            or merge.get("attempted") is not False or merge.get("merged") is not False
+            or merge.get("reason") != "reconciliation_candidate_task_already_completed"
+            or not isinstance(context, Mapping)):
+        return False
+    try:
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
+        daemon = context["daemon"]
+        if not isinstance(daemon, PortalImplementationDaemon):
+            return False
+        # Only Native's event-derived branch mapping qualifies. Its fallback
+        # branch-name parser cannot turn a reason string into task authority.
+        branch = str(candidate.get("branch") or "").removeprefix("refs/heads/")
+        task_id = context["task_ids_by_branch"].get(branch)
+        task = context["tasks_by_id"].get(task_id)
+        if not branch or not task_id or task is None:
+            return False
+        identity = daemon._identity_for_task(task)
+        if not identity.canonical_task_cid or not identity.canonical_task_key:
+            return False
+        return not PortalImplementationDaemon._completed_task_binding_error(daemon, {
+            "task": {"task_id": task_id},
+            "completion_task_cids": {task_id: identity.canonical_task_cid},
+        })
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return False
+
+
 def _validation_aware_supervisor_class(native_class):
     class ValidationAwareSupervisor(native_class):
         @staticmethod
@@ -2505,17 +3933,44 @@ def _validation_aware_supervisor_class(native_class):
 
         def _run_forever_loop(self):
             self._complaint_startup_preflight_pending = True
+            self._complaint_startup_reconciliation_context = None
             return super()._run_forever_loop()
+
+        def _reconciliation_task_context(self, daemon):
+            context = super()._reconciliation_task_context(daemon)
+            if getattr(self, "_complaint_startup_preflight_pending", False):
+                self._complaint_startup_reconciliation_context = {
+                    "daemon": daemon, "tasks_by_id": context[0], "task_ids_by_branch": context[1],
+                    "provenance_by_branch": context[3] if len(context) > 3 else {},
+                }
+            return context
 
         def run_once(self, *, include_refill=True):
             result = super().run_once(include_refill=include_refill)
             if getattr(self, "_complaint_startup_preflight_pending", False):
                 if result.get("maintenance_blocked") is True:
                     raise RuntimeError("Native startup preflight blocked: " + str(result.get("reason") or "maintenance unavailable"))
-                if any(item.get("merged") is not True for item in
-                        result.get("worktree_reconciliation", {}).get("processed", ())):
+                if any(item.get("reason") == "reconciliation_limit_reached" for item in
+                        result.get("worktree_reconciliation", {}).get("skipped", ())):
                     raise RuntimeError("Native startup candidate recovery remains unresolved")
+                from .startup_integrated_scope import (
+                    retained_empty_integrated_baseline, retained_integrated_scope_refusal)
+                from .startup_rejected_candidate import (
+                    retained_quarantined_balance_replay, retained_replay_rejection)
+                from .startup_settled_validation import settled_validation_failure
+                if any(item.get("merged") is not True and not _startup_candidate_is_completed(self, item)
+                        and not retained_replay_rejection(self, item, maintenance_result=result)
+                        and not retained_quarantined_balance_replay(self, item, maintenance_result=result)
+                        and not settled_validation_failure(self, item, maintenance_result=result)
+                        and not retained_integrated_scope_refusal(self, item, maintenance_result=result)
+                        and not retained_empty_integrated_baseline(self, item, maintenance_result=result) for item in
+                        result.get("worktree_reconciliation", {}).get("processed", ())):
+                    detail = getattr(retained_quarantined_balance_replay, "last_error", "")
+                    raise RuntimeError(
+                        "Native startup candidate recovery remains unresolved"
+                        + (": " + detail if detail else ""))
                 self._complaint_startup_preflight_pending = False
+                self._complaint_startup_reconciliation_context = None
             return result
 
         def _implementation_attempt_is_active(self, state, *, now_ts):
@@ -2530,7 +3985,6 @@ def _validation_aware_supervisor_class(native_class):
             from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
             if isinstance(daemon, PortalImplementationDaemon):
                 daemon.__class__ = _rescue_receipt_daemon_class(type(daemon), self)
-            from .improvement_plan import load_spec
             from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
             native_scheduler = daemon.validation_scheduler
             if isinstance(native_scheduler, ValidationScheduler):
@@ -2542,7 +3996,9 @@ def _validation_aware_supervisor_class(native_class):
                 )
             scheduler = EvidenceValidationScheduler(
                 native_scheduler, state_dir=self.config.state_dir,
-                spec=load_spec(self.config.repo_root / SPEC_RELATIVE),
+                spec=_native_campaign_spec(self.config.repo_root, self.config.state_dir,
+                    todo_path=getattr(self.config, "todo_path", None),
+                    board_namespace=getattr(self.config, "board_namespace", None)),
                 defer_readiness=True,
             )
             daemon.validation_scheduler = scheduler
@@ -2601,8 +4057,8 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("internal worktree root differs from its owned launch")
     with _lock(state_dir, "runner.lock", blocking=False):
         os.chdir(repo_root)
-        from .improvement_plan import BOARD_RELATIVE, build_improvement_work_plan, load_spec
-        spec = load_spec(spec_path)
+        from .improvement_plan import build_improvement_work_plan
+        spec, artifacts = _campaign_spec(repo_root, spec_path)
         if build_improvement_work_plan(spec).plan_id != record.get("plan_id"):
             raise RuntimeError("specification changed after the owned launch was prepared")
         effective = campaign_environment(repo_root, context_exclude=spec["execution_policy"].get("context_exclude"), state_dir=state_dir)
@@ -2610,7 +4066,7 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("auth_material_unavailable")
         os.environ.clear()
         os.environ.update(effective)
-        _validate_board(repo_root, repo_root / BOARD_RELATIVE, spec)
+        _validate_board(repo_root, repo_root / artifacts.board_relative, spec)
         privacy = _private_runtime_checks(repo_root, effective)
         if not privacy["ready"]:
             raise RuntimeError(privacy["reason"])
@@ -2620,7 +4076,8 @@ def run_internal(repo_root: Path, spec_path: Path, state_dir: Path, token: str, 
             raise RuntimeError("worktree root changed before native admission")
         # No --once: this is the real native run_forever watchdog and daemon.
         _run_native_supervisor(
-            native_argv(repo_root / BOARD_RELATIVE, state_dir, merge_target, worktree_root=selected_root),
+            native_argv(repo_root / artifacts.board_relative, state_dir, merge_target, worktree_root=selected_root,
+                        board_namespace=artifacts.board_namespace, protected_paths=artifacts.protected_paths),
             repo_root=repo_root, logger=_LOGGER,
             daemon_script_path=Path(__file__).resolve(),
         )
@@ -2638,6 +4095,14 @@ def _task_outputs(task: Mapping[str, Any]) -> list[str]:
     if not isinstance(targets, list) or not targets:
         raise ValueError("task evidence requires declared outputs")
     return [str(item) for item in targets]
+
+
+def _task_freeze_inputs(task: Mapping[str, Any], *, context=None, spec=None) -> list[str]:
+    inputs = _task_outputs(task)
+    relative = (context or {}).get("campaign_spec_relative")
+    if relative is None and isinstance(spec, Mapping) and "campaign" in spec:
+        relative = campaign_artifacts(spec).spec_relative
+    return list(dict.fromkeys([*inputs, relative])) if relative else inputs
 
 
 def _observed_artifacts(repo_root: Path, observation: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -2681,6 +4146,15 @@ def gate_task_completion(repo_root: Path, state_dir: Path, task: Mapping[str, An
     if not isinstance(observation, _MeasuredEvidence):
         observed["artifacts"] = _observed_artifacts(root, observation)
     receipt = assess_behavioral_evidence(task, observed, source_binding=binding, model_policy=model_policy)
+    if isinstance(observation, _MeasuredEvidence) and receipt.get("reason") == "existing_behavioral_definition_changed":
+        detail = observation["host_measurement"].get("behavioral_definition_diagnostic")
+        if isinstance(detail, dict) and detail.get("schema") == "complaint-behavioral-definition-diagnostic@1":
+            receipt["behavioral_definition_diagnostic"] = detail
+    if isinstance(observation, _MeasuredEvidence) and receipt.get("reason") in {
+            "synthetic_browser_http_response", "browser_http_preflight_unavailable"}:
+        detail = observation["host_measurement"].get("browser_http_preflight")
+        if isinstance(detail, dict) and detail.get("schema") == "complaint-browser-http-preflight@1":
+            receipt["browser_http_preflight"] = detail
     receipt["host_task_contract"] = observation.get("host_task_contract")
     receipt["facts_digest"] = _digest(dict(facts or {}))
     receipt["legal_data_version"] = legal_data_version
@@ -2775,7 +4249,7 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
                     reason = "stale_source_hash" if fresh.get("digest") or receipt.get("implementation_digest") else "missing_output"
                     if fresh.get("missing") or fresh.get("empty"):
                         reason = "missing_output"
-                elif receipt.get("host_measurement") and (receipt["host_measurement"].get("source_after") != _source_freeze(root, _task_outputs(by_id[task_id])) or any(not Path(p).is_file() or hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in receipt["host_measurement"].get("imported_sources", {}).items())):
+                elif receipt.get("host_measurement") and (receipt["host_measurement"].get("source_after") != _source_freeze(root, _task_freeze_inputs(by_id[task_id], spec=spec)) or any(not Path(p).is_file() or hashlib.sha256(Path(p).read_bytes()).hexdigest() != h for p, h in receipt["host_measurement"].get("imported_sources", {}).items())):
                     reason = "stale_source_hash"
                 elif not isinstance(receipt.get("host_task_contract"), dict) or receipt["host_task_contract"].get("task") != by_id[task_id]:
                     reason = "task_contract_changed"
@@ -2824,7 +4298,7 @@ def recompute_dependent_readiness(repo_root: Path, state_dir: Path, spec: Mappin
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare, run and observe the Grok-only complaint improvement campaign.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "watch", "_run"):
+    for command in ("prepare", "doctor", "start", "status", "recover", "stop", "watch", "watchdog", "_run"):
         child = commands.add_parser(command, help=argparse.SUPPRESS if command == "_run" else command)
         child.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
         child.add_argument("--spec", type=Path)
@@ -2837,6 +4311,14 @@ def main(argv: list[str] | None = None) -> int:
         if command == "start":
             child.add_argument("--watch", action="store_true",
                                help="Watch this launch and close its verified orphan if the launcher exits.")
+        if command == "watchdog":
+            mode = child.add_mutually_exclusive_group()
+            mode.add_argument("--once", action="store_true", help="One durable progress/recovery check, suitable for a timer.")
+            mode.add_argument("--install-user-timer", action="store_true", help="Install and enable this campaign's minutely user timer.")
+            child.add_argument("--interval-seconds", type=float, default=60)
+            child.add_argument("--stop-completed", action="store_true", help="Close this owned launcher after verified completion.")
+            child.add_argument("--expected-spec-sha256")
+            child.add_argument("--expected-plan-id")
         if command == "_run":
             child.add_argument("--owner-token", required=True)
             child.add_argument("--merge-target", required=True)
@@ -2857,6 +4339,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_internal(root, spec, state, args.owner_token, args.merge_target, worktree_root=args.worktree_root)
         if args.command == "stop":
             result = stop(state)
+        elif args.command == "watchdog":
+            from .campaign_watchdog import install_user_timer, watch_campaign
+            if args.install_user_timer:
+                result = install_user_timer(root, spec, state)
+            else:
+                result = watch_campaign(root, spec, state, once=args.once,
+                    interval_seconds=args.interval_seconds, stop_completed=args.stop_completed,
+                    expected_spec_sha256=args.expected_spec_sha256, expected_plan_id=args.expected_plan_id)
         elif args.command == "watch":
             from .improvement_monitor import watch_owned_launch
             result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
@@ -2868,6 +4358,12 @@ def main(argv: list[str] | None = None) -> int:
                 initial = result
                 result = watch_owned_launch(root, spec, state, maximum_seconds=args.monitor_seconds)
                 result["start_result"] = initial
+        if args.command == "watchdog":
+            print(json.dumps({**{key: result.get(key) for key in
+                ("status", "reason", "completed", "task_count", "active_task_id", "completion_cleanup")},
+                **{key: result[key] for key in ("unit", "timer_enabled") if key in result},
+                "report_path": str(state / "watchdog" / "latest.json")}, sort_keys=True))
+            return 2 if result.get("status") in {"error", "refused", "exhausted"} else 0
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2 if result.get("status") in {"not_ready", "board_error", "state_error", "identity_mismatch", "stop_incomplete",
             "monitor_refused", "monitor_window_consumed", "monitor_owner_changed", "monitor_source_changed",
@@ -2926,16 +4422,38 @@ def _source_freeze(root: Path, extra=()):
     return {**value, "digest": _digest(value)}
 
 
+_PYTEST_INVOCATION_PATTERN = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+
+
+def _pytest_population_filtered(command):
+    """Treat caller discovery controls as unknown whole-file coverage."""
+    import shlex
+    matches = list(re.finditer(_PYTEST_INVOCATION_PATTERN, command))
+    if len(matches) != 1:
+        return True
+    # Exclude the Python interpreter's -m from pytest's marker filter.
+    arguments = shlex.split(command[matches[0].end():])
+    controls = {"--deselect", "--ignore", "--ignore-glob", "--lf", "--last-failed",
+                "--lfnf", "--last-failed-no-failures", "--sw", "--stepwise",
+                "--sw-skip", "--stepwise-skip", "--override-ini", "--config-file"}
+    return any(argument.startswith(("-k", "-m", "-o", "-c"))
+               or argument.partition("=")[0] in controls for argument in arguments)
+
+
 def _pytest_instrument(command, arguments, *, pythonpath=()):
     # Keep the original shell/environment prefix and original selectors. This
     # adapter supports one explicit pytest invocation, not arbitrary scripts.
-    pattern = r"(?<![\w-])(?:python(?:3(?:\.\d+)*)?\s+-m\s+pytest|pytest)(?=\s|$)"
+    pattern = _PYTEST_INVOCATION_PATTERN
     matches = list(re.finditer(pattern, command))
     if len(matches) != 1 or any(flag in command for flag in ("--junit", "--collect-only", "--complaint-evidence-path", " -p no:")):
         raise ValueError("unsupported_behavioral_command")
     end = matches[0].end()
     import shlex
-    invocation = command[matches[0].start():end] + " " + shlex.join(arguments)
+    original_invocation = command[matches[0].start():end]
+    executable = original_invocation.split()[0] if original_invocation != "pytest" else "python"
+    # Do not let cwd precede the explicitly owned bootstrap directories. The
+    # canonical Native Python launcher preserves this interpreter flag.
+    invocation = executable + " -P -m pytest " + shlex.join(arguments)
     if pythonpath:
         # A retained task prefix may export its own PYTHONPATH. Bind the owned
         # plugin roots at the actual invocation, after that prefix, while
@@ -2969,6 +4487,28 @@ def _read_catalog(path, *, repo_root=None):
     return [n for n, _, _, _ in nodes], hashes
 
 
+class _BehavioralDefinitionError(ValueError):
+    """Keep the existing refusal while exposing finite repair locators only."""
+    def __init__(self, issues):
+        super().__init__("existing_behavioral_definition_changed")
+        projected = []
+        for issue in issues[:16]:
+            path = issue["path"]
+            safe_path = (isinstance(path, str) and len(path) <= 256
+                and re.fullmatch(r"tests/[A-Za-z0-9_./-]+\.py", path) is not None
+                and ".." not in Path(path).parts and Path(path).as_posix() == path)
+            name = issue["definition"]
+            safe_name = (isinstance(name, str) and len(name) <= 128
+                and (not name or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name) is not None))
+            projected.append({"path": path if safe_path else "<unavailable>",
+                "definition": name if safe_name else "<unavailable>",
+                "change": issue["change"] if issue["change"] in {"changed", "missing", "duplicate",
+                    "parse_failed", "source_unavailable", "invalid_path"} else "unavailable"})
+        self.diagnostics = {"schema": "complaint-behavioral-definition-diagnostic@1",
+            "reason": "existing_behavioral_definition_changed", "issues": projected,
+            "truncated": len(issues) > 16, "candidate_executed": False, "completion_authority": False}
+
+
 def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root: Path | None = None):
     """Keep installed test/helper definitions when a task adds behavioral checks.
 
@@ -2982,20 +4522,23 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
 
     installed = trusted_root if trusted_root is not None else Path(__file__).resolve().parents[2]
     records = []
+    relative = ""
+    def fail(change, definition=""):
+        raise _BehavioralDefinitionError([{"path": relative, "definition": definition, "change": change}])
     def definitions(body, prefix=()):
         rows = {}
         for node in body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 key = prefix + (node.name,)
                 if key in rows:
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("duplicate", ".".join(key))
                 rows[key] = ast.dump(node, include_attributes=False)
             elif isinstance(node, ast.ClassDef):
                 key = prefix + (node.name,)
                 header = copy.deepcopy(node)
                 header.body = []
                 if key in rows:
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("duplicate", ".".join(key))
                 rows[key] = ast.dump(header, include_attributes=False)
                 rows.update(definitions(node.body, key))
         return rows
@@ -3004,14 +4547,14 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
         if not relative.startswith("tests/") or name.suffix != ".py":
             continue
         if name.is_absolute() or ".." in name.parts:
-            raise ValueError("existing_behavioral_definition_changed")
+            fail("invalid_path")
         baseline, candidate = installed / name, Path(root) / name
         if not baseline.exists() and not baseline.is_symlink():
             continue
         try:
             for path in (baseline, candidate):
                 if path.is_symlink() or path.resolve(strict=True) != path or not path.is_file():
-                    raise ValueError("existing_behavioral_definition_changed")
+                    fail("source_unavailable")
             original_bytes, candidate_bytes = baseline.read_bytes(), candidate.read_bytes()
             if original_bytes == candidate_bytes:
                 # Some legacy modules repeat a Python definition name. Exact
@@ -3027,10 +4570,15 @@ def _preserve_existing_behavioral_definitions(root: Path, paths, *, trusted_root
                 continue
             original = definitions(ast.parse(original_bytes).body)
             current = definitions(ast.parse(candidate_bytes).body)
-        except (OSError, SyntaxError, UnicodeError):
-            raise ValueError("existing_behavioral_definition_changed") from None
-        if any(current.get(name) != value for name, value in original.items()):
-            raise ValueError("existing_behavioral_definition_changed")
+        except SyntaxError:
+            fail("parse_failed")
+        except (OSError, UnicodeError):
+            fail("source_unavailable")
+        issues = [{"path": relative, "definition": ".".join(name),
+                   "change": "missing" if name not in current else "changed"}
+                  for name, value in original.items() if current.get(name) != value]
+        if issues:
+            raise _BehavioralDefinitionError(issues)
         records.append({"path": relative, "trusted_sha256": hashlib.sha256(original_bytes).hexdigest(),
                         "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
                         "preserved_definition_count": len(original)})
@@ -3197,11 +4745,20 @@ def _private_replica_acceptance_capability(junit, binding):
     return capability
 
 
+_FACTUAL_CORRECTION_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_answer_and_correction_update_graphs_once_and_stale_replies_do_not")
+_CASE_SWITCH_ACCEPTANCE = ("tests/test_cimp_ux_10.py::"
+    "test_delayed_answer_cannot_repaint_a_new_selected_case")
+_INTERVIEW_BEHAVIORAL_ACCEPTANCE = (_FACTUAL_CORRECTION_ACCEPTANCE, _CASE_SWITCH_ACCEPTANCE)
+
+
 _IMPACTED_BEHAVIORAL_CHECKS = {
     "integrations/ipfs_datasets/legal.py": ("tests/test_explicit_legal_context.py", "tests/test_ipfs_adapter_layer.py"),
     "integrations/ipfs_datasets/storage.py": ("tests/test_private_storage_adapter.py", "tests/test_ipfs_kit_storage_adapter.py", "tests/test_proof_report_and_pinning.py", _PRIVATE_REPLICA_ACCEPTANCE),
     "integrations/private_storage.py": ("tests/test_private_workspace_crypto.py", "tests/test_private_workspace_keys.py", "tests/test_private_storage_adapter.py", _PRIVATE_REPLICA_ACCEPTANCE),
-    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py"),
+    "applications/complaint_workspace.py": ("tests/test_private_workspace_isolation.py", "tests/test_private_workspace_policy.py", "tests/test_private_workspace_keys.py", *_INTERVIEW_BEHAVIORAL_ACCEPTANCE),
+    "static/complaint_conversation.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
+    "static/complaint_mcp_sdk.js": _INTERVIEW_BEHAVIORAL_ACCEPTANCE,
     "integrations/ipfs_datasets/llm.py": ("tests/test_grok47_router_contract.py", "tests/test_private_workspace_policy.py"),
     "mediator/mediator.py": ("tests/test_factual_correction_replay.py", "tests/test_tui_shared_interview.py"),
 }
@@ -3211,14 +4768,15 @@ def _impacted_behavioral_checks(root, changed_paths):
     selected = set()
     for changed in changed_paths:
         selected.update(_IMPACTED_BEHAVIORAL_CHECKS.get(changed, ()))
-    if any(not (root / path).is_file() for path in selected):
+    if any(not (root / path.partition("::")[0]).is_file() for path in selected):
         raise ValueError("impacted_check_missing")
     return sorted(selected)
 
 
 def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, Any], command: str, *,
                                runner, environment: dict, timeout_seconds: float = TIMEOUT_SECONDS,
-                               context: Mapping[str, Any] | None = None, declared_command: str | None = None):
+                               context: Mapping[str, Any] | None = None, declared_command: str | None = None,
+                               candidate_proposal=None, campaign_spec: Mapping[str, Any] | None = None):
     """Execute and measure an owned command; never accept serialized success.
 
     Independent collection freezes the required population. The actual command
@@ -3239,6 +4797,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     observation_command = declared_command or command
     contract = {"task": dict(task), "context": dict(context or {}), "command": command, "declared_command": observation_command}
     extra = _task_outputs(task)
+    freeze_inputs = _task_freeze_inputs(task, context=context, spec=campaign_spec)
     start = time.monotonic()
     original_command = command
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native_source
@@ -3251,9 +4810,19 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     if phase_source is None or not phase_source.is_file():
         raise ValueError("validation_bootstrap_source_unavailable")
     native_root = Path(native_source.__file__).resolve().parents[3]
-    bootstrap_roots = tuple(dict.fromkeys((root, phase_root, native_root)))
+    from . import validation_network as owned_network
+    from . import python_global_preflight as owned_python_globals
+    from . import browser_http_preflight as owned_browser_http
+    from .validation_network import prepare_validation_network_guard, verify_validation_network_proof
+    network_guard = prepare_validation_network_guard(run, Path(owned_network.__file__).resolve().parents[2])
+    # This private, Host-created module precedes all candidate package roots.
+    # -P above also removes Python's otherwise implicit cwd precedence.
+    bootstrap_roots = tuple(dict.fromkeys((run, root, phase_root, native_root)))
     bootstrap_files = (phase_source, native_root / "ipfs_accelerate_py/__init__.py",
-                       native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py")
+                       native_root / "ipfs_accelerate_py/testing/pytest_ast_seal.py",
+                       *(Path(path) for path in network_guard["files"]),
+                       Path(owned_python_globals.__file__).resolve(),
+                       Path(owned_browser_http.__file__).resolve())
     bootstrap_before = {str(path): _hash_file(path) for path in bootstrap_files}
     impacted = _impacted_behavioral_checks(root, (context or {}).get("changed_paths", ()))
     if task.get("id") == "CIMP-DUR-005" and _PRIVATE_REPLICA_ACCEPTANCE not in impacted:
@@ -3265,6 +4834,11 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     release_qualification_before = None
     release_qualification_after = None
     preserved_behavioral_definitions = None
+    missing_impacted_checks = []
+    filtered_whole_file_companions = []
+    behavioral_definition_diagnostic = None
+    python_global_preflight = None
+    browser_http_preflight = None
     release_script = (task.get("id") == "CIMP-REL-03" and
         observation_command == "python scripts/validate_complaint_intake.py --phase pre-admission" and
         task.get("validation_commands") in (
@@ -3274,17 +4848,49 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         ) and
         "tests/test_intake_release_gate.py" in extra and
         command.rstrip().endswith("python scripts/validate_complaint_intake.py --phase pre-admission"))
-    before = _source_freeze(root, extra)
-    artifacts, results = [], []
+    before = _source_freeze(root, freeze_inputs)
+    artifacts, results, network_proofs = [], [], []
     required, cases, imported = [], [], {}
     reason = ""
+    infrastructure_reasons = {"validation_process_cleanup_unverified", "validation_output_limit_exceeded"}
+    def invoke(specification, effective_environment, remaining):
+        try:
+            return _call_validation_with_activity(executor=runner, spec=specification,
+                workspace_path=root, timeout_seconds=remaining, environment=effective_environment,
+                task=task, context=context)
+        except subprocess.TimeoutExpired as exc:
+            # Native's public executor raises this after its own deadline.
+            # Preserve only typed facts; output/argv do not prove cleanup.
+            result = {"command": str(specification.command), "raw_command": str(specification.raw_command),
+                      "returncode": 124, "timed_out": True, "error": "subprocess_timeout"}
+            if getattr(exc, "process_tree_quiesced", None) is True:
+                result["process_tree_quiesced"] = True
+            else:
+                # Legacy timeout exceptions do not prove descendant closure.
+                # Preserve the deadline fact without classifying an uncertain
+                # process tree as a clean timeout that recovery may retry.
+                result.update(returncode=75, error="validation_process_cleanup_unverified",
+                              infrastructure_failure=True, execution_deadline_exceeded=True)
+                result.pop("timed_out")
+            return result
+
+    def reject_executor_failure(result):
+        if result.get("infrastructure_failure") is True and result.get("error") in infrastructure_reasons:
+            raise ValueError(result["error"])
+        if result.get("timed_out") or result.get("error") == "subprocess_timeout":
+            raise TimeoutError("subprocess_timeout")
+
     def execute(mode):
         catalog, manifest = run / (mode + ".duckdb"), run / (mode + ".json")
         junit = run / "junit.xml"
-        options = (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
+        options = ["-p", network_guard["module"]] + (["-p", str(context["pytest_guard_plugin"])] if (context or {}).get("pytest_guard_plugin") else []) + ["-p", "integrations.ipfs_accelerate.improvement_plan", "-p", "ipfs_accelerate_py.testing.pytest_ast_seal",
                    "--complaint-evidence-path=" + str(manifest)]
         options += ["--collect-only"] if mode == "collect" else ["--junitxml=" + str(junit), "-o", "junit_family=xunit2"]
-        options += [p for p in impacted if p not in command.split()]
+        # A bounded companion may name one node. A declared whole-file run
+        # already includes it; adding both would duplicate required nodeids.
+        declared_tokens = shlex.split(command)
+        options += [p for p in impacted if p not in declared_tokens
+                    and p.partition("::")[0] not in declared_tokens]
         instrumented = _pytest_instrument(command, options, pythonpath=bootstrap_roots)
         export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
         # Never depend on ambient pytest injection or a shared/reused catalog.
@@ -3293,18 +4899,28 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         remaining = timeout_seconds - (time.monotonic() - start)
         if remaining <= 0:
             raise TimeoutError("subprocess_timeout")
-        result = _call_validation_with_activity(executor=runner,
-                        spec=SimpleNamespace(command=instrumented, raw_command=command),
-                        workspace_path=root, timeout_seconds=remaining, environment=environment,
-                        task=task, context=context)
+        result = invoke(SimpleNamespace(command=instrumented, raw_command=command), environment, remaining)
         _atomic_json(run / (mode + "-native-result.json"), result)
         results.append({"mode": mode, "original_command": command, "instrumented_command": instrumented, "executed_command": result.get("command"),
                         "returncode": result.get("returncode"), "timed_out": bool(result.get("timed_out")),
+                        "error": result.get("error"), "infrastructure_failure": result.get("infrastructure_failure") is True,
+                        "process_tree_quiesced": result.get("process_tree_quiesced") is True,
+                        "execution_deadline_exceeded": result.get("execution_deadline_exceeded") is True,
                         "validation_python_launcher": result.get("validation_python_launcher", {})})
-        if result.get("timed_out") or result.get("error") == "subprocess_timeout":
-            raise TimeoutError("subprocess_timeout")
+        reject_executor_failure(result)
         if result.get("validation_python_launcher", {}).get("sealed") is not True:
             raise ValueError("sealed_execution_unavailable")
+        network_path = manifest.with_suffix(network_guard["proof_suffix"])
+        try:
+            proof = verify_validation_network_proof(network_path,
+                expected_plugin_sha256=network_guard["plugin_sha256"],
+                expected_policy_sha256=network_guard["policy_sha256"],
+                expected_exitstatus=result.get("returncode"))
+        except (OSError, ValueError, TypeError, KeyError):
+            raise ValueError("validation_network_guard_unavailable") from None
+        network_proofs.append({"mode": mode, "path": str(network_path),
+            "sha256": _hash_file(network_path), "proof": proof})
+        artifacts.append({"path": str(network_path), "sha256": _hash_file(network_path)})
         if not manifest.is_file():
             raise ValueError("missing_phase_manifest")
         guard_path = manifest.with_suffix(".guard.json")
@@ -3322,8 +4938,39 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             artifacts.append({"path": str(path), "sha256": _hash_file(path)})
         return result, observation, _read_catalog(catalog, repo_root=root)
     try:
+        browser_http_preflight = owned_browser_http.inspect_complaint_browser_http(
+            root, task, observation_command, campaign_spec=campaign_spec)
+        if browser_http_preflight is not None:
+            # Only an applicable preflight that read the immutable bytes adds
+            # this campaign's spec to the Host bootstrap freeze. Other Native
+            # campaigns do not depend on availability of the UX specification.
+            if browser_http_preflight.get("spec_sha256") == owned_browser_http.SPEC_SHA256:
+                browser_spec = owned_browser_http._SOURCE_ROOT / owned_browser_http.SPEC_RELATIVE
+                try:
+                    browser_spec_hash = _hash_file(browser_spec)
+                except OSError:
+                    browser_spec_hash = ""
+                if browser_spec_hash != owned_browser_http.SPEC_SHA256:
+                    browser_http_preflight.update(passed=False, reason="browser_http_preflight_unavailable")
+                else:
+                    bootstrap_files = (*bootstrap_files, browser_spec)
+                    bootstrap_before[str(browser_spec)] = browser_spec_hash
+            browser_preflight_path = run / "browser-http-preflight.json"
+            _atomic_json(browser_preflight_path, browser_http_preflight)
+            artifacts.append({"path": str(browser_preflight_path), "sha256": _hash_file(browser_preflight_path)})
+            if browser_http_preflight.get("passed") is not True:
+                raise ValueError(browser_http_preflight["reason"])
+        if (context or {}).get("require_python_global_preflight") is True:
+            python_global_preflight = owned_python_globals.inspect_changed_python_globals(
+                root, candidate_proposal, expected_task_id=task["id"])
+            preflight_path = run / "python-global-preflight.json"
+            _atomic_json(preflight_path, python_global_preflight)
+            artifacts.append({"path": str(preflight_path), "sha256": _hash_file(preflight_path)})
+            if python_global_preflight.get("passed") is not True:
+                raise ValueError(python_global_preflight["reason"])
         preserved_behavioral_definitions = _preserve_existing_behavioral_definitions(
-            root, [*extra, *impacted, *(context or {}).get("changed_paths", ())])
+            root, [*extra, *(p.partition("::")[0] for p in impacted),
+                   *(context or {}).get("changed_paths", ())])
         replica_kit_before = _private_replica_kit_qualification(root, state_dir, task, before,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
         if release_script:
@@ -3354,14 +5001,16 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 release_qualification_before = read_current_release_qualification(
                     root, root / release_spec_relative, campaign, phase="pre-admission",
                     validation_environment=environment)
-            original = _call_validation_with_activity(executor=runner,
-                spec=SimpleNamespace(command=original_command, raw_command=original_command),
-                workspace_path=root, timeout_seconds=max(0.001, timeout_seconds - (time.monotonic() - start)),
-                environment=release_environment, task=task, context=context)
+            original = invoke(SimpleNamespace(command=original_command, raw_command=original_command),
+                release_environment, max(0.001, timeout_seconds - (time.monotonic() - start)))
             _atomic_json(run / "declared-script-result.json", original)
             artifacts.append({"path": str(run / "declared-script-result.json"), "sha256": _hash_file(run / "declared-script-result.json")})
             results.append({"mode": "declared_script", "original_command": original_command,
                 "instrumented_command": original_command, "returncode": original.get("returncode"),
+                "timed_out": bool(original.get("timed_out")), "error": original.get("error"),
+                "infrastructure_failure": original.get("infrastructure_failure") is True,
+                "process_tree_quiesced": original.get("process_tree_quiesced") is True,
+                "execution_deadline_exceeded": original.get("execution_deadline_exceeded") is True,
                 "validation_python_launcher": original.get("validation_python_launcher", {})})
             if (context or {}).get("campaign_state_dir"):
                 release_qualification_after = read_current_release_qualification(
@@ -3369,8 +5018,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                     validation_environment=environment)
                 if release_qualification_before != release_qualification_after:
                     raise ValueError("release_current_qualification_changed")
-            if original.get("timed_out"):
-                raise TimeoutError("subprocess_timeout")
+            reject_executor_failure(original)
             if original.get("validation_python_launcher", {}).get("sealed") is not True:
                 raise ValueError("sealed_execution_unavailable")
             if original.get("returncode") != 0:
@@ -3384,7 +5032,21 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
             raise ValueError("zero_test_collection")
         if len(required) != len(set(required)) or any(not isinstance(n, str) or not n for n in required):
             raise ValueError("required_test_identity_malformed")
-        if before != _source_freeze(root, extra):
+        # Caller filters and candidate collection hooks may omit a trusted
+        # companion even when its file was already declared. Require its
+        # actual frozen population before executing a passing subset.
+        missing_impacted_checks = [selector for selector in impacted if not any(
+            node == selector or node.startswith(selector + ("[" if "::" in selector else "::"))
+            for node in required)]
+        whole_files = [selector for selector in impacted if "::" not in selector]
+        if whole_files and _pytest_population_filtered(command):
+            # One retained test does not prove a whole companion file ran.
+            # Fail closed instead of collecting its unfiltered matrix again.
+            filtered_whole_file_companions = whole_files
+            missing_impacted_checks = sorted(set(missing_impacted_checks) | set(whole_files))
+        if missing_impacted_checks:
+            raise ValueError("impacted_required_case_missing")
+        if before != _source_freeze(root, freeze_inputs):
             raise ValueError("stale_source_hash")
         executed, phases, (sealed_nodes, imported) = execute("run")
         if required != phases.get("nodeids"):
@@ -3420,13 +5082,15 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         if any(imported.get(p) != h for p, h in collected_hashes.items()):
             raise ValueError("stale_source_hash")
     except (OSError, ValueError, TypeError, KeyError, TimeoutError) as exc:
-        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed"} else "host_measurement_unavailable"
+        if isinstance(exc, _BehavioralDefinitionError):
+            behavioral_definition_diagnostic = exc.diagnostics
+        reason = str(exc) if str(exc) in {"declared_command_failed", "zero_test_collection", "collection_failed", "required_test_identity_malformed", "impacted_required_case_missing", "collection_identity_mismatch", "subprocess_timeout", "missing_output", "missing_phase_manifest", "missing_required_case_phase", "sealed_execution_unavailable", "exit_status_mismatch", "stale_source_hash", "skipped_required_case", "failed_assertion", "junit_required_case_mismatch", "missing_current_ast_seal", "unsupported_behavioral_command", "trusted_replica_acceptance_changed", "private_replica_capability_unavailable", "private_replica_compatibility_unavailable", "existing_behavioral_definition_changed", "release_context_unavailable", "release_current_qualification_changed", "validation_network_guard_unavailable", "new_duplicate_python_module_global", "python_global_preflight_unavailable", "synthetic_browser_http_response", "browser_http_preflight_unavailable", *infrastructure_reasons} else "host_measurement_unavailable"
     try:
         if replica_binding != _private_replica_acceptance_binding(root, task, impacted):
             reason = "trusted_replica_acceptance_changed"
     except (OSError, ValueError):
         reason = "trusted_replica_acceptance_changed"
-    after = _source_freeze(root, extra)
+    after = _source_freeze(root, freeze_inputs)
     try:
         replica_kit_after = _private_replica_kit_qualification(root, state_dir, task, after,
             campaign_state_dir=(context or {}).get("campaign_state_dir"))
@@ -3440,7 +5104,13 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
     imported.update(bootstrap_before)
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import PortalImplementationDaemon
     measured = {"schema": "complaint-owned-behavioral-measurement@1", "reason": reason,
+                "infrastructure_failure": any(row.get("infrastructure_failure") is True for row in results),
                 "preserved_behavioral_definitions": preserved_behavioral_definitions,
+                "missing_impacted_checks": missing_impacted_checks,
+                "filtered_whole_file_companions": filtered_whole_file_companions,
+                "behavioral_definition_diagnostic": behavioral_definition_diagnostic,
+                "python_global_preflight": python_global_preflight,
+                "browser_http_preflight": browser_http_preflight,
                 "trusted_executor": {"module": str(getattr(runner, "__module__", "")), "qualname": str(getattr(runner, "__qualname__", "")),
                     "canonical_native_identity": runner is PortalImplementationDaemon._validation_command_runner,
                     "boundary": "trusted host code; returned sealed marker alone does not authenticate arbitrary callbacks"},
@@ -3448,6 +5118,10 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                 "source_unchanged": before == after and bootstrap_before == bootstrap_after, "imported_sources": imported,
                 "validation_bootstrap": {"pythonpath_roots": list(map(str, bootstrap_roots)),
                                          "before": bootstrap_before, "after": bootstrap_after},
+                "kernel_network_guard": {"policy": network_guard["policy"],
+                    "policy_sha256": network_guard["policy_sha256"],
+                    "plugin_sha256": network_guard["plugin_sha256"],
+                    "proofs": network_proofs, "validation_children_only": True},
                 "task_contract_digest": _digest(contract), "results": results, "artifacts": artifacts,
                 "completion_authority": False, "run_path": str(run),
                 "lane_basis": "native_host_validation", "live_node_verified": False, "impacted_checks": impacted,
@@ -3467,6 +5141,8 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
                     "HOME": "fresh private native command directory; not operator home", "ambient_pytest_injection": False}}
     measured["workspace_path"] = str(root)
     measured["output_paths"] = extra
+    if freeze_inputs != extra:
+        measured["freeze_inputs"] = freeze_inputs
     artifact_rows = [{"relative_path": os.path.relpath(a["path"], root), "path": a["path"],
                       "present": True, "sha256": a["sha256"]} for a in artifacts]
     # These environment fields describe native policy, not access to the real home.
@@ -3515,7 +5191,10 @@ class EvidenceValidationScheduler:
             observed = measure_behavioral_command(root, self.state_dir / "evidence-runs", task, str(spec.command),
                 runner=delegate, environment=environment, timeout_seconds=timeout_seconds,
                 declared_command=task["validation_commands"][spec.ordinal] if spec.ordinal < len(task["validation_commands"]) else None,
-                context={"campaign_state_dir": str(self.state_dir.resolve()),
+                candidate_proposal=args[0] if method == "run_validated" else None,
+                campaign_spec=self.spec,
+                context={"require_python_global_preflight": method == "run_validated",
+                         "campaign_state_dir": str(self.state_dir.resolve()),
                          "target_source_root": str(Path(__file__).resolve().parents[2]),
                          "task_id": native_task.task_id, "task_cid": str(getattr(native_task, "canonical_task_cid", "")),
                          "task_key": str(getattr(native_task, "canonical_task_key", "")),
@@ -3525,13 +5204,43 @@ class EvidenceValidationScheduler:
                          "changed_paths": list(getattr(getattr(args[0], "proposal", None), "changed_paths", ())) if method == "run_validated" else [],
                          "attempt_ordinal": None, "attempt_binding_status": "ordinal_unavailable_from_public_task_hook; native_proposal_context_retained",
                          "repository_tree_id": str(getattr(getattr(args[0], "proposal", None), "repository_tree_id", "")) if method == "run_validated" else "",
+                         **({"campaign_spec_relative": campaign_artifacts(self.spec).spec_relative}
+                            if "campaign" in self.spec else {}),
                          "model_policy": {"model": MODEL, "fallback": False}})
             receipt = gate_task_completion(root, self.state_dir, task, observed,
                 legal_data_version=observed["host_measurement"]["source_before"]["dependencies"].get("external/ipfs_datasets_py", {}).get("head", "unavailable"))
             receipts.append(receipt)
             result = dict(observed.native_result)
+            failure_reason = str(receipt.get("reason") or "")
+            rejected_status = 78
+            if failure_reason == "subprocess_timeout" and result.get("timed_out") is True:
+                rejected_status = 124
+            elif (failure_reason in {"validation_process_cleanup_unverified", "validation_output_limit_exceeded"}
+                    and result.get("infrastructure_failure") is True and result.get("error") == failure_reason):
+                rejected_status = 75
+            if not receipt["admitted"] and rejected_status == 78:
+                # A stronger source/policy refusal must not become an
+                # environment retry just because the raw command timed out.
+                # The owned measurement retains the executor's original facts.
+                result["native_executor_failure"] = {key: result[key] for key in
+                    ("returncode", "error", "timed_out", "infrastructure_failure",
+                     "process_tree_quiesced", "execution_deadline_exceeded") if key in result}
+                result.update(timed_out=False, infrastructure_failure=False,
+                              error=failure_reason or "current_behavioral_evidence_required")
+            if failure_reason in {"new_duplicate_python_module_global", "python_global_preflight_unavailable"}:
+                detail = observed["host_measurement"].get("python_global_preflight") or {}
+                result["output"] = "Host Python global preflight: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
+            if failure_reason == "existing_behavioral_definition_changed":
+                detail = observed["host_measurement"].get("behavioral_definition_diagnostic") or {}
+                result["output"] = "Host behavioral definition guard: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
+            if failure_reason in {"synthetic_browser_http_response", "browser_http_preflight_unavailable"}:
+                detail = observed["host_measurement"].get("browser_http_preflight") or {}
+                result["output"] = "Host complaint browser HTTP preflight: " + json.dumps(detail, sort_keys=True)[:8192]
+                result["preflight_only"] = True
             result.update(command=str(spec.command), raw_command=str(spec.raw_command or spec.command),
-                          returncode=0 if receipt["admitted"] else 78, behavioral_evidence=receipt)
+                          returncode=0 if receipt["admitted"] else rejected_status, behavioral_evidence=receipt)
             return result
         kwargs["runner"] = measured_runner
         # A previous cached return code cannot stand in for current measured cases.
@@ -3621,7 +5330,8 @@ def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof
     # includes validation workers/budget, generated paths, reservations, source
     # root expectations, slices, worktree/merge scope and all custody options.
     REPO_ROOT = Path(repo_root).resolve()
-    daemon = native.PortalImplementationDaemon(
+    from .docker_isolation_capacity import capacity_isolating_daemon
+    daemon = capacity_isolating_daemon(native.PortalImplementationDaemon)(
         assumed_completed_task_ids=args.assume_completed_task_id,
         board_namespace=str(getattr(args, "board_namespace", "") or ""),
         events_path=args.state_dir / f"{args.state_prefix}_events.jsonl",
@@ -3699,20 +5409,16 @@ def _run_evidence_daemon_adapter(argv, *, repo_root, validation_scheduler, proof
 def evidence_daemon_main(argv):
     root = Path(__file__).resolve().parents[2]
     _native_modules(root)
-    from .improvement_plan import load_spec
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as native
     from ipfs_accelerate_py.agent_supervisor.validation.validation_scheduler import ValidationScheduler
     args = native.parse_args(list(argv))
     scheduler = EvidenceValidationScheduler(ValidationScheduler(max_workers=args.validation_max_workers,
         resource_budget=args.validation_resource_budget, default_timeout_seconds=args.implementation_timeout),
-        state_dir=args.state_dir, spec=load_spec(root / SPEC_RELATIVE), defer_readiness=True)
+        state_dir=args.state_dir, spec=_native_campaign_spec(root, args.state_dir,
+            todo_path=args.todo_path, board_namespace=getattr(args, "board_namespace", None)), defer_readiness=True)
     return _run_evidence_daemon_adapter(argv, repo_root=root, validation_scheduler=scheduler, proof_workflow=scheduler.bind_task)
 
 
 if __name__ == "__main__":
     # The native supervisor executes its public daemon_script_path directly.
-    # Bootstrap before relative imports; ordinary application CLI stays intact.
-    if __package__ in {None, ""}:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        __package__ = "integrations.ipfs_accelerate"
     raise SystemExit(evidence_daemon_main(sys.argv[1:]) if "--todo-path" in sys.argv[1:] else main())

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Set
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Protocol, Sequence, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -547,6 +547,182 @@ def migrate_original_complaint(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _graph_revision_label(graph: Mapping[str, Any], fallback: str) -> str:
+    for key in ("graph_revision", "revision", "graph_version"):
+        value = graph.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return fallback
+
+
+def _browser_resume_record(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Exact interview fields sealed for a later process. This does not dispatch."""
+
+    interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    pending = interview.get("pending_inquiry") if isinstance(interview.get("pending_inquiry"), dict) else {}
+    factual = interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {}
+    legal = interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {}
+    gaps = state.get("deferred_gaps")
+    if not isinstance(gaps, list):
+        gaps = interview.get("preserved_gaps") if isinstance(interview.get("preserved_gaps"), list) else interview.get("capped_reasons")
+    if not isinstance(gaps, list):
+        gaps = []
+    corrections = state.get("factual_corrections") if isinstance(state.get("factual_corrections"), list) else []
+    consent = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+    receipts: List[Dict[str, Any]] = []
+    router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+    for item in router.get("receipts") or []:
+        if isinstance(item, dict):
+            receipts.append(dict(item))
+    history = [dict(item) for item in (state.get("intake_history") or []) if isinstance(item, dict)]
+    return {
+        "schema": "gui-encrypted-interview-resume-v1",
+        "case_id": _state_case_id(state, str(state.get("user_id") or "")),
+        "session_revision": interview.get("session_revision", 0),
+        "pending_inquiry": dict(pending),
+        "consent": dict(consent),
+        "factual_graph": dict(factual),
+        "legal_graph": dict(legal),
+        "factual_graph_revision": _graph_revision_label(factual, "unknown"),
+        "legal_graph_revision": _graph_revision_label(legal, "unknown"),
+        "deferred_gaps": [dict(item) if isinstance(item, dict) else item for item in gaps],
+        "corrections": [dict(item) if isinstance(item, dict) else item for item in corrections],
+        "hook_receipts": receipts,
+        "intake_history": history,
+    }
+
+
+def _browser_resume_record_complete(record: Optional[Mapping[str, Any]]) -> bool:
+    if not isinstance(record, Mapping) or record.get("schema") != "gui-encrypted-interview-resume-v1":
+        return False
+    pending = record.get("pending_inquiry")
+    required = ("case_id", "consent", "factual_graph", "legal_graph", "factual_graph_revision", "legal_graph_revision", "deferred_gaps", "corrections")
+    if not isinstance(pending, Mapping) or not str(record.get("case_id") or "").strip():
+        return False
+    if not isinstance(record.get("consent"), Mapping):
+        return False
+    if not isinstance(record.get("factual_graph"), Mapping) or not isinstance(record.get("legal_graph"), Mapping):
+        return False
+    if not isinstance(record.get("deferred_gaps"), list) or not isinstance(record.get("corrections"), list):
+        return False
+    return all(key in record for key in required)
+
+
+def _apply_browser_resume_record(state: Dict[str, Any], record: Mapping[str, Any]) -> None:
+    pending = dict(record["pending_inquiry"])
+    gaps = [dict(item) if isinstance(item, dict) else item for item in record["deferred_gaps"]]
+    state["case_id"] = str(record["case_id"])
+    state["operation_consent"] = dict(record["consent"])
+    state["shared_interview"] = {
+        "schema_version": "shared-interview-session-v1",
+        "contract_version": "interview-transition-v1",
+        "session_id": str(state.get("user_id") or record["case_id"]),
+        "session_revision": record.get("session_revision", 0),
+        "pending_inquiry": pending,
+        "knowledge_graph": dict(record["factual_graph"]),
+        "dependency_graph": dict(record["legal_graph"]),
+        "preserved_gaps": gaps,
+        "capped_reasons": gaps,
+        "unknown_reasons": [],
+        "legal_sufficiency": False,
+    }
+    state["deferred_gaps"] = gaps
+    state["factual_corrections"] = [dict(item) if isinstance(item, dict) else item for item in record["corrections"]]
+    state["factual_graph_binding"] = {
+        "status": "bound",
+        "revision": record["factual_graph_revision"],
+        "graph_id": str((record["factual_graph"] or {}).get("graph_id") or ""),
+    }
+    state["legal_graph_binding"] = {
+        "status": "bound",
+        "revision": record["legal_graph_revision"],
+        "graph_id": str((record["legal_graph"] or {}).get("graph_id") or ""),
+    }
+    state["intake_history"] = [dict(item) if isinstance(item, dict) else item for item in (record.get("intake_history") or [])]
+    state["intake_router"] = {
+        "receipts": [dict(item) if isinstance(item, dict) else item for item in (record.get("hook_receipts") or [])],
+        "provider_replayed": False,
+        "hooks_replayed": False,
+    }
+    state["explained_inquiry"] = {
+        key: pending.get(key)
+        for key in ("inquiry_id", "objective_id", "target_id", "target_revision", "question")
+    }
+
+
+def _encrypted_resume_refusal(user_id: Optional[str], receipt: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": receipt.get("status") or "refused",
+        "message": str(receipt.get("code") or "refused"),
+        "encrypted_resume": dict(receipt),
+        "session": {"user_id": user_id},
+        "stored_as_answer": False,
+        "legal_sufficiency": False,
+        "hooks_replayed": False,
+        "messages_replayed": False,
+        "browser_cache_used": False,
+        "adaptive_inquiry": {
+            "schema": "adaptive-inquiry-v1",
+            "source": "encrypted_interview_snapshot",
+            "pending": False,
+            "from_fixed_intake_fields": False,
+            "browser_cache_used": False,
+        },
+    }
+
+
+def _grounded_owners_from_state(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Read graph, receipt, inquiry, and stop owners already on the session."""
+
+    interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+    factual = dict(state.get("factual_graph_binding") or {}) if isinstance(state.get("factual_graph_binding"), dict) else {}
+    legal = dict(state.get("legal_graph_binding") or {}) if isinstance(state.get("legal_graph_binding"), dict) else {}
+    knowledge = interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {}
+    dependency = interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {}
+    if not factual and knowledge:
+        factual = {
+            "revision": str(knowledge.get("graph_revision") or knowledge.get("graph_version") or ""),
+            "graph_id": str(knowledge.get("graph_id") or ""),
+            "content_hash": str(knowledge.get("content_hash") or ""),
+        }
+    if not legal and dependency:
+        legal = {
+            "revision": str(dependency.get("graph_revision") or dependency.get("revision") or dependency.get("graph_version") or ""),
+            "graph_id": str(dependency.get("graph_id") or ""),
+            "content_hash": str(dependency.get("content_hash") or ""),
+        }
+    pending = interview.get("pending_inquiry") if isinstance(interview.get("pending_inquiry"), dict) else None
+    if pending is None and isinstance(state.get("explained_inquiry"), dict):
+        pending = state.get("explained_inquiry")
+    receipts: List[Dict[str, Any]] = []
+    for container_name in ("intake_router", "router_trace"):
+        container = state.get(container_name) if isinstance(state.get(container_name), dict) else {}
+        pool = container.get("receipts")
+        if isinstance(pool, list):
+            receipts.extend(item for item in pool if isinstance(item, dict))
+    sources: List[Any] = []
+    if isinstance(pending, dict) and isinstance(pending.get("source_references"), list):
+        sources = list(pending.get("source_references") or [])
+    elif isinstance(state.get("source_references"), list):
+        sources = list(state.get("source_references") or [])
+    conditional = state.get("conditional_ir") if isinstance(state.get("conditional_ir"), dict) else interview.get("conditional_ir")
+    external = state.get("external_dependencies") if isinstance(state.get("external_dependencies"), dict) else {
+        "public_law": {"status": "external_unverified"},
+        "ephemeral_index": {"status": "ephemeral"},
+    }
+    return {
+        "factual_graph": factual,
+        "legal_graph": legal,
+        "source_references": sources,
+        "conditional_ir": conditional if isinstance(conditional, dict) else {"status": "unknown"},
+        "proof_statuses": [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)] if isinstance(state.get("proof_history"), list) else [],
+        "hook_receipts": receipts,
+        "pending_inquiry": pending or {"status": "unknown"},
+        "stop_policy": state.get("stop_policy") if isinstance(state.get("stop_policy"), dict) else None,
+        "external_dependencies": external,
+    }
+
+
 def _narrative_record(state: Dict[str, Any]) -> Dict[str, Any]:
     migrate_original_complaint(state)
     record = state.get("original_complaint")
@@ -584,6 +760,283 @@ _UNKNOWN_INTAKE_ANSWERS = {
 }
 
 
+_NON_SOURCE_LABELS = {
+    "",
+    "intake",
+    "assertion",
+    "user",
+    "user_assertion",
+    "fixed_form",
+    "narrative",
+    "interview",
+    "llm",
+    "model",
+    "unbound",
+}
+_FINITE_STOP_LABELS = {
+    "paused": "paused",
+    "cancelled": "cancelled",
+    "provider_unavailable": "unavailable",
+    "blocked_provider": "unavailable",
+    "limit_reached": "capped",
+    "saturated": "saturated",
+    "needs_answer": "awaiting_user",
+    "awaiting_user": "awaiting_user",
+    "deferred_unknown": "unresolved",
+    "deferred_needs_evidence": "unresolved",
+    "needs_review": "unresolved",
+    "no_progress": "capped",
+    "complete": "saturated",
+}
+
+
+def _source_bound_evidence(item: Any) -> bool:
+    """Support counts only when the item names a factual or legal source.
+
+    A fixed-form answer, a bare testimony row, and a finished interview do not.
+    """
+
+    if not isinstance(item, Mapping):
+        return False
+    if item.get("source_bound") is False:
+        return False
+    for key in ("source_references", "source_refs"):
+        refs = item.get(key)
+        if isinstance(refs, list) and any(str(ref or "").strip() for ref in refs):
+            return True
+    for key in ("source_id", "citation_id", "authority_id", "legal_source_id"):
+        if str(item.get(key) or "").strip():
+            return True
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), Mapping) else {}
+    for key in ("source_id", "citation_id", "authority_id", "source_reference"):
+        if str(provenance.get(key) or "").strip():
+            return True
+    source = str(item.get("source") or "").strip()
+    if source.lower() in _NON_SOURCE_LABELS:
+        return False
+    return bool(source)
+
+
+def _pending_interview_question(state: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = shared.get("pending_inquiry") if isinstance(shared.get("pending_inquiry"), Mapping) else None
+    return dict(pending) if pending else None
+
+
+def _user_is_waiting(state: Mapping[str, Any], active_question: Optional[Mapping[str, Any]] = None) -> bool:
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), Mapping) else {}
+    if bool(wait.get("paused")) and bool(wait.get("intentional", True)):
+        return True
+    if _pending_interview_question(state):
+        return True
+    return active_question is not None
+
+
+def _open_question_for_stop(item: Mapping[str, Any]) -> Dict[str, Any]:
+    target = str(item.get("target_id") or item.get("inquiry_id") or item.get("id") or "pending-user-question")
+    revision = str(item.get("target_revision") or item.get("revision") or "1")
+    return {
+        "target_id": target,
+        "question": str(item.get("question") or item.get("prompt") or ""),
+        "unresolved_target": {
+            "target_id": target,
+            "target_revision": revision,
+            "user_answerability": "user_observable",
+            "target_kind": "user_question",
+        },
+    }
+
+
+def _gap_dependencies(state: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    dependencies: List[Dict[str, Any]] = []
+    for gap in shared.get("preserved_gaps") or []:
+        if not isinstance(gap, Mapping):
+            continue
+        dependencies.append({
+            "lane": "review",
+            "target_id": str(gap.get("target_id") or gap.get("inquiry_id") or "preserved-gap"),
+            "target_kind": "review",
+            "reason": str(gap.get("disposition") or "preserved_gap"),
+        })
+    for reason in list(shared.get("unknown_reasons") or []) + list(shared.get("unavailable_reasons") or []):
+        text = str(reason or "").strip()
+        if not text:
+            continue
+        lane = "source_research" if "unavailable" in text or "source" in text else "review"
+        dependencies.append({
+            "lane": lane,
+            "target_id": text,
+            "target_kind": lane,
+            "reason": text,
+        })
+    if not dependencies:
+        dependencies.append({
+            "lane": "source_research",
+            "target_id": "unresolved-legal-source",
+            "target_kind": "legal_source",
+            "reason": "source_bound_support_missing",
+        })
+    return dependencies
+
+
+def _evaluate_finite_stop(state: Dict[str, Any], *, control: Optional[str] = None, active_question: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Ask the interview denoiser for one finite stop. Waiting is not a worker stall."""
+
+    from complaint_phases.denoiser import ComplaintDenoiser
+
+    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = _pending_interview_question(state)
+    waiting = _user_is_waiting(state, active_question)
+    if control == "pause":
+        waiting = True
+    kwargs: Dict[str, Any] = {
+        "worker_stalled": False if waiting or control in {"pause", "cancel", "cap", "unavailable", "saturate"} else bool(state.get("worker_stalled")),
+        "paused": control == "pause",
+        "cancelled": control == "cancel",
+    }
+    if control == "cap":
+        kwargs["iteration_count"] = 1
+        kwargs["iteration_cap"] = 1
+        kwargs["budget_exhausted"] = False
+    elif control == "unavailable":
+        kwargs["provider_status"] = "unavailable"
+    elif control == "saturate":
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = _gap_dependencies(state)
+    elif control == "pause":
+        question = pending or active_question or {"id": "user-pause", "prompt": "paused"}
+        kwargs["open_questions"] = [_open_question_for_stop(question)]
+    elif control == "cancel":
+        question = pending or active_question
+        kwargs["open_questions"] = [_open_question_for_stop(question)] if question else []
+    elif pending or active_question is not None:
+        kwargs["open_questions"] = [_open_question_for_stop(pending or active_question or {})]
+    elif shared.get("capped_reasons") and not pending:
+        kwargs["iteration_count"] = 1
+        kwargs["iteration_cap"] = 1
+    elif shared.get("unavailable_reasons"):
+        kwargs["provider_status"] = "unavailable"
+    elif shared.get("schema_version") and not pending:
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = _gap_dependencies(state)
+    else:
+        kwargs["needs_review"] = True
+        kwargs["open_questions"] = []
+        kwargs["open_dependencies"] = [{
+            "lane": "review",
+            "target_id": "fixed-form-assertions",
+            "target_kind": "review",
+            "reason": "fixed_form_answers_are_not_source_bound_support",
+        }]
+    stop = ComplaintDenoiser().evaluate_interview_stop(**kwargs)
+    if control:
+        stop = dict(stop)
+        stop["control"] = control
+    return stop
+
+
+def _finite_reason_rows(stop: Mapping[str, Any]) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    seen = set()
+
+    def add(code: str, detail: str) -> None:
+        token = str(code or "").strip() or "unresolved"
+        if token in seen:
+            return
+        seen.add(token)
+        rows.append({"code": token, "detail": str(detail or token)})
+
+    summary = stop.get("unresolved_issue_summary") if isinstance(stop.get("unresolved_issue_summary"), Mapping) else {}
+    for item in list(summary.get("items") or []) + list(stop.get("remaining_issues") or []):
+        if not isinstance(item, Mapping):
+            continue
+        code = str(item.get("reason") or item.get("code") or item.get("dependency_lane") or item.get("disposition") or "unresolved")
+        detail = str(item.get("message") or item.get("detail") or item.get("target_id") or code)
+        add(code, detail)
+    for shortcut in summary.get("rejected_shortcuts") or []:
+        add(str(shortcut), f"Rejected shortcut: {shortcut}")
+    state_name = str(stop.get("state") or "")
+    outcome = str(stop.get("outcome") or "")
+    if state_name == "cancelled" or outcome == "cancelled":
+        add("cancellation", "The interview was cancelled. Unresolved issues stay open.")
+    if state_name == "provider_unavailable" or outcome == "blocked_provider":
+        add("capability_unavailable", "A required interview capability is unavailable.")
+    if state_name == "limit_reached" or "iteration_cap" in seen or "question_count_limit" in seen or "budget_exhausted" in seen:
+        add("cap", "A question, iteration, or budget cap stopped the interview.")
+    if outcome == "paused" or state_name == "paused":
+        add("user_pause", "The user paused the interview. This wait is not a development worker stall.")
+    if outcome in {"awaiting_user", "needs_answer"} or state_name == "needs_answer":
+        add("awaiting_user", "The interview is waiting for the user. That wait is not a development worker stall.")
+    add("interview_completion_is_not_legal_sufficiency", "Finishing the interview does not establish legal sufficiency.")
+    return rows
+
+
+def finite_interview_outcome(
+    state: Dict[str, Any],
+    *,
+    active_question: Optional[Mapping[str, Any]] = None,
+    stop: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Public finite-stop view. Support and sufficiency stay false until evidence says otherwise."""
+
+    from complaint_phases.denoiser import project_stopping_policy
+
+    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), Mapping) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    waiting = _user_is_waiting(state, active_question) or paused
+    if stop is None:
+        stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
+        shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        if stored is None and isinstance(shared.get("interview_stop"), dict):
+            stored = shared.get("interview_stop")
+        control = str((stored or {}).get("control") or "")
+        if isinstance(stored, dict) and stored.get("state") and control in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+            stop = stored
+        else:
+            stop = _evaluate_finite_stop(state, active_question=active_question)
+    if waiting and str(stop.get("control") or "") not in {"cancel", "cap", "unavailable", "saturate"}:
+        stop = dict(stop)
+        stop["worker_stalled"] = False
+    policy = project_stopping_policy(dict(stop), paused=paused or str(stop.get("control") or "") == "pause")
+    if waiting and policy.get("outcome") == "no_progress" and str(stop.get("control") or "") not in {"cap", "cancel", "unavailable"}:
+        policy = project_stopping_policy({**dict(stop), "state": "needs_answer", "worker_stalled": False}, paused=paused)
+    outcome = str(policy.get("outcome") or stop.get("state") or "awaiting_user")
+    label = _FINITE_STOP_LABELS.get(outcome, _FINITE_STOP_LABELS.get(str(stop.get("state") or ""), "unresolved"))
+    if str(stop.get("control") or "") == "saturate":
+        label = "saturated"
+    elif str(stop.get("control") or "") == "cap":
+        label = "capped"
+    elif str(stop.get("control") or "") == "unavailable":
+        label = "unavailable"
+    elif str(stop.get("control") or "") == "cancel":
+        label = "cancelled"
+    elif str(stop.get("control") or "") == "pause":
+        label = "paused"
+    reasons = _finite_reason_rows({**dict(stop), "outcome": outcome})
+    interview_complete = bool(stop.get("intake_complete")) or (
+        isinstance(state.get("shared_interview"), Mapping) and _pending_interview_question(state) is None and bool(state.get("shared_interview"))
+    )
+    return {
+        "schema": "finite-interview-outcome-v1",
+        "stop": label,
+        "outcome": outcome,
+        "state": stop.get("state"),
+        "unresolved_reasons": reasons,
+        "reasons_visible": True,
+        "user_waiting": bool(waiting or label in {"awaiting_user", "paused"}),
+        "worker_stalled": False if waiting or label in {"awaiting_user", "paused", "saturated", "capped", "cancelled", "unavailable"} else bool(stop.get("worker_stalled")),
+        "user_waiting_is_worker_stall": False,
+        "legal_sufficiency": False,
+        "interview_complete": bool(interview_complete) and label == "saturated",
+        "interview_completion_means_legal_sufficiency": False,
+        "filing_ready": False,
+        "core_facts_complete": False,
+        "proof_requirements_satisfied": False,
+        "support_requires_source_bound_evidence": True,
+    }
+
+
 def _workspace_stopping_policy(
     state: Dict[str, Any],
     *,
@@ -593,41 +1046,118 @@ def _workspace_stopping_policy(
     """Workspace view of the same stopping outcomes the interview denoiser returns."""
     from complaint_phases.denoiser import project_stopping_policy
 
-    wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
-    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    view = finite_interview_outcome(state, active_question=active_question)
     stored = state.get("interview_stop") if isinstance(state.get("interview_stop"), dict) else None
-    shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
-    if stored is None and isinstance(shared.get("interview_stop"), dict):
-        stored = shared.get("interview_stop")
     if isinstance(stored, dict) and stored.get("state"):
-        return project_stopping_policy(stored, paused=paused)
+        waiting = _user_is_waiting(state, active_question)
+        payload = dict(stored)
+        if waiting:
+            payload["worker_stalled"] = False
+        wait = state.get("intentional_user_wait") if isinstance(state.get("intentional_user_wait"), dict) else {}
+        paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+        policy = project_stopping_policy(payload, paused=paused or view.get("stop") == "paused")
+        if waiting and policy.get("outcome") == "no_progress" and view.get("stop") not in {"capped", "cancelled", "unavailable"}:
+            policy = project_stopping_policy({**payload, "state": "needs_answer", "worker_stalled": False}, paused=paused)
+        return policy
 
     values = [str(value or "").strip().lower() for value in (answers or {}).values() if str(value or "").strip()]
     unknown_only = bool(values) and all(value in _UNKNOWN_INTAKE_ANSWERS for value in values)
-    if paused:
+    if view.get("stop") == "paused":
         state_name = "paused"
-    elif active_question is not None:
+    elif active_question is not None or view.get("user_waiting"):
         state_name = "needs_answer"
     elif unknown_only:
         state_name = "deferred_unknown"
-    else:
+    elif view.get("stop") == "saturated":
         state_name = "saturated"
+    elif view.get("stop") == "capped":
+        state_name = "limit_reached"
+    elif view.get("stop") == "cancelled":
+        state_name = "cancelled"
+    elif view.get("stop") == "unavailable":
+        state_name = "provider_unavailable"
+    else:
+        state_name = "needs_review"
     stop = {
         "state": state_name,
+        "worker_stalled": False,
         "intake_complete": False,
         "filing_ready": False,
         "legal_sufficiency": False,
         "core_facts_complete": False,
         "unresolved_issue_summary": {
-            "items": [{"reason": "unknown_only_session" if unknown_only else "structured_questions_are_not_legal_sufficiency"}],
+            "items": [{"reason": item["code"], "detail": item["detail"]} for item in view.get("unresolved_reasons") or []],
             "open_answerable_count": 1 if active_question is not None else 0,
             "legal_sufficiency": False,
             "core_facts_complete": False,
             "proof_requirements_satisfied": False,
-            "rejected_shortcuts": ["empty_question_list"] if active_question is None else [],
+            "rejected_shortcuts": ["empty_question_list", "fixed_form_completion"] if active_question is None else [],
         },
     }
-    return project_stopping_policy(stop, paused=paused)
+    if unknown_only:
+        stop["unresolved_issue_summary"]["items"].append({"reason": "unknown_only_session"})
+    return project_stopping_policy(stop, paused=state_name == "paused")
+
+
+def publish_workspace_dependency_action(state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Publish the stored interview's next source, evidence, or review action.
+
+    The workspace reuses the denoiser projection. It does not start another
+    stop engine, wait on stdin, or treat a hook receipt as sufficiency.
+    """
+    from complaint_phases.denoiser import dependency_lane_for, project_stopping_policy, publish_authorized_dependency_action
+
+    session = state if isinstance(state, dict) else {}
+    wait = session.get("intentional_user_wait") if isinstance(session.get("intentional_user_wait"), dict) else {}
+    paused = bool(wait.get("paused")) and bool(wait.get("intentional", True))
+    stored = session.get("interview_stop") if isinstance(session.get("interview_stop"), dict) else None
+    dependencies = [item for item in (session.get("open_dependencies") or []) if isinstance(item, dict)]
+    if stored is None and dependencies:
+        lane = dependency_lane_for(dependencies[0])
+        stored = {
+            "state": "saturated" if lane == "source_research" else (
+                "needs_review" if lane == "review" else "deferred_needs_evidence"
+            ),
+            "dependency_lane": lane,
+            "intake_complete": False,
+            "legal_sufficiency": False,
+            "worker_stalled": bool(session.get("worker_stalled")),
+            "unresolved_issue_summary": {
+                "items": dependencies,
+                "open_answerable_count": 0,
+                "legal_sufficiency": False,
+                "core_facts_complete": False,
+                "proof_requirements_satisfied": False,
+                "rejected_shortcuts": ["completed_hook"] if session.get("hook_completed") else [],
+            },
+        }
+    policy = project_stopping_policy(stored or {"state": "needs_answer"}, paused=paused)
+    pending_question = _pending_interview_question(session)
+    user_waiting = paused or pending_question is not None
+    if user_waiting:
+        policy = project_stopping_policy(
+            {**(stored or {"state": "needs_answer"}), "worker_stalled": False},
+            paused=paused,
+        )
+    elif session.get("worker_stalled") and policy.get("outcome") in {"awaiting_user", "paused"}:
+        policy = project_stopping_policy({**(stored or {}), "state": "no_progress", "worker_stalled": True}, paused=False)
+    context = session.get("dependency_action_context") if isinstance(session.get("dependency_action_context"), dict) else {}
+    if dependencies and not context.get("target_id"):
+        context = {
+            **context,
+            "target_id": dependencies[0].get("target_id"),
+            "target_revision": dependencies[0].get("target_revision"),
+        }
+    try:
+        attempt = int(context.get("attempt") or 0)
+    except (TypeError, ValueError):
+        attempt = 0
+    return publish_authorized_dependency_action(
+        policy,
+        attempt=attempt,
+        context=context,
+        hook_completed=bool(session.get("hook_completed")),
+    )
 
 
 _CLAIM_TYPE_LABELS: Dict[str, str] = {
@@ -1016,6 +1546,38 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
 }
 
 
+def format_legal_research_result(receipt: Dict[str, Any]) -> str:
+    """Public counts and the next resumable step. Research is not proof."""
+
+    counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+    retrieved = int(counts.get("retrieved") or 0)
+    admitted = int(counts.get("admitted") or 0)
+    rejected = int(counts.get("rejected") or 0)
+    unavailable = int(counts.get("unavailable") or 0)
+    next_action = str(receipt.get("next_action") or "continue_pending_inquiry")
+    return (
+        f"Legal research retrieved={retrieved} admitted={admitted} "
+        f"rejected={rejected} unavailable={unavailable}. "
+        f"Next action: {next_action}. The pending question is unchanged."
+    )
+
+
+def _public_why_inquiry(inquiry: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Show host bindings. Missing objective or target stays the word unknown."""
+    if not isinstance(inquiry, dict):
+        return None
+    if not (str(inquiry.get("question") or "").strip() or str(inquiry.get("why_it_matters") or "").strip()):
+        return None
+    chosen = dict(inquiry)
+    if not str(chosen.get("objective_id") or "").strip():
+        chosen["objective_id"] = "unknown"
+        chosen["grounding_status"] = "unknown"
+    if not str(chosen.get("target_id") or "").strip():
+        chosen["target_id"] = "unknown"
+        chosen["grounding_status"] = "unknown"
+    return chosen
+
+
 def format_terminal_why(
     inquiry: Optional[Dict[str, Any]] = None,
     *,
@@ -1026,19 +1588,17 @@ def format_terminal_why(
 
     chosen = inquiry if isinstance(inquiry, dict) else None
     if chosen is None and isinstance(state, dict):
-        stored = state.get("explained_inquiry")
-        if isinstance(stored, dict):
-            chosen = stored
-        else:
-            projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
-            pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
-            phase_inquiry = None
-            phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
-            intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
-            if isinstance(intake.get("current_explained_inquiry"), dict):
-                phase_inquiry = intake.get("current_explained_inquiry")
-            chosen = phase_inquiry or (pending or None)
-    return render_terminal_why(chosen)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else None
+        stored = state.get("explained_inquiry") if isinstance(state.get("explained_inquiry"), dict) else None
+        phase_inquiry = None
+        phase_data = state.get("phase_data") if isinstance(state.get("phase_data"), dict) else {}
+        intake = phase_data.get("intake") if isinstance(phase_data.get("intake"), dict) else {}
+        if isinstance(intake.get("current_explained_inquiry"), dict):
+            phase_inquiry = intake.get("current_explained_inquiry")
+        # The shared pending inquiry is the question the service is actually asking.
+        chosen = pending or stored or phase_inquiry
+    return render_terminal_why(_public_why_inquiry(chosen))
 
 
 def publish_explained_inquiry(state: Dict[str, Any], selection: Dict[str, Any]) -> Dict[str, Any]:
@@ -2497,16 +3057,49 @@ def _state_case_id(state: Mapping[str, Any], user_id: str) -> str:
     return case_id or str(user_id or "")
 
 
+def _sync_operation_consent_state(state: Dict[str, Any], user_id: str, case_id: str) -> None:
+    """Bump the case consent generation when the saved processing choice changes."""
+
+    from integrations.ipfs_datasets.llm import (
+        OPERATION_CONSENT_CONTRACT,
+        OPERATION_CONSENT_VERSION,
+        PRIVACY_PROCESSING_GROK,
+    )
+
+    prior = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+    raw_generation = prior.get("generation")
+    generation = raw_generation + 1 if type(raw_generation) is int and not isinstance(raw_generation, bool) and raw_generation >= 0 else 1
+    mode = str((state.get("privacy_policy") or {}).get("processing_mode") or "")
+    state["operation_consent"] = {
+        "contract": OPERATION_CONSENT_CONTRACT,
+        "version": OPERATION_CONSENT_VERSION,
+        "user_id": user_id,
+        "case_id": case_id,
+        "generation": generation,
+        "revoked": mode != PRIVACY_PROCESSING_GROK,
+        "grants": [],
+    }
+
+
 def _apply_effective_privacy_policy(state: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     helpers = _privacy_helpers()
     case_id = _state_case_id(state, user_id)
     state["case_id"] = case_id
+    raw_policy = state.get("privacy_policy")
+    public_local = str(state.get("public_processing_mode") or "") == "local"
+    if isinstance(raw_policy, dict) and str(raw_policy.get("processing_mode") or "") == "local":
+        public_local = True
+        raw_policy = dict(raw_policy)
+        raw_policy["processing_mode"] = "local_private"
     inspection = helpers["inspect_privacy_policy"](
-        state.get("privacy_policy"),
+        raw_policy,
         user_id=user_id,
         case_id=case_id,
     )
-    state["privacy_policy"] = inspection["policy"]
+    policy = inspection["policy"]
+    if public_local and policy.get("cloud_processing_enabled") is not True:
+        state["public_processing_mode"] = "local"
+    state["privacy_policy"] = policy
     state["privacy_policy_load"] = {
         "admitted": bool(inspection["admitted"]),
         "reason": str(inspection["reason"] or ""),
@@ -2549,12 +3142,81 @@ def _default_state(user_id: str) -> Dict[str, Any]:
     return _apply_effective_privacy_policy(state, user_id)
 
 
+def _canonical_review_sha(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class _ReviewFactAcceptance:
+    """Private server context; no public wrapper or JSON field accepts it."""
+    workspace: Any
+    review_service: Any
+    authority: Any
+    actor: str
+    canonical: str
+    case_id: str
+    proposal: Dict[str, Any]
+    request_id: str
+    request_sha256: str
+    state_identity: Any
+    graph_revision: str
+    private_revision: str
+    session_revision: int
+
+    def check_preimage(self, state: Mapping[str, Any], *, workspace: Any, actor: str, case_id: str) -> None:
+        if (workspace is not self.workspace or actor != self.actor or case_id != self.case_id
+                or state.get("user_id") != self.canonical):
+            raise WorkspaceAuthorizationDenied()
+        if self.workspace._case_legal_context_identity(state) != self.state_identity:
+            raise WorkspacePersistenceError("Acceptance source changed.", code="revision_conflict", public_status="conflict")
+        self.authority.revalidate(actor_principal_id=self.actor, workspace=self.workspace, require_owner=True)
+
+    def reprove_review(self) -> None:
+        # The caller's canonical writer already owns the source lock. This
+        # public service operation acquires ONLY its review lock, in that order.
+        record = self.review_service.reprove_proposal_for_owner(self.actor,
+            case_id=self.case_id, proposal_id=self.proposal["proposal_id"], authority=self.authority,
+            expected_review_revision=self.proposal["review_revision"],
+            expected_record_sha256=self.proposal["record_sha256"])
+        if _canonical_review_sha(record) != self.proposal["record_sha256"]:
+            raise WorkspacePersistenceError("Review changed before publication.", code="revision_conflict", public_status="conflict")
+
+    def write_receipt(self, state: Dict[str, Any], correction: Mapping[str, Any], projection: Mapping[str, Any]) -> None:
+        ledger = state.setdefault("canonical_review_acceptances", {})
+        if not isinstance(ledger, dict) or self.request_id in ledger:
+            raise WorkspacePersistenceError("Acceptance preimage changed.", code="revision_conflict", public_status="conflict")
+        receipt = {"schema": "case-review-canonical-fact-acceptance@1", "task_id": "CIMP-GUI-47",
+            "status": "accepted", "applied": True, "acceptance_persisted": True,
+            "request_id": self.request_id, "request_sha256": self.request_sha256,
+            "proposal_id": self.proposal["proposal_id"], "proposal_record_sha256": self.proposal["record_sha256"],
+            "review_revision": self.proposal["review_revision"],
+            "review_ledger_sha256": self.proposal["review_ledger_sha256"],
+            "base_source": deepcopy(self.proposal["source_base"]),
+            "accepting_owner_actor": self.actor, "canonical_owner_principal_id": self.canonical,
+            "case_id": self.case_id, "target_stable_id": self.proposal["record"]["target_id"],
+            "replacement_stable_id": correction.get("replacement_stable_id"),
+            "base_graph_revision": self.graph_revision, "base_session_revision": self.session_revision,
+            "base_private_revision": self.private_revision,
+            "result_graph_revision": correction.get("graph_revision"),
+            "result_session_revision": projection.get("session_revision"),
+            "result_private_revision": str(int(self.private_revision) + 1),
+            "invalidated_support_targets": deepcopy(correction.get("affected_support_targets") or []),
+            "actual_factual_correction": deepcopy(dict(correction)),
+            "review_status_repository_updated": False, "governing_legal_authority": False,
+            "legal_sufficiency": False, "executed_proof": False}
+        receipt["receipt_sha256"] = _canonical_review_sha(receipt)
+        ledger[self.request_id] = receipt
+
+
 class _ComplaintWorkspaceHandlerBackend(Protocol):
     """Narrow service contract required by the request-handler boundary."""
 
     def _load_state(self, user_id: str) -> Dict[str, Any]: ...
 
-    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+    def _save_state(self, state: Dict[str, Any], *, before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]: ...
+
+    def _terminal_graph_edit_publication_guard(self, state: Mapping[str, Any], *, actor_principal_id: str,
+                                             case_id: str) -> Optional[Callable[[], Any]]: ...
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]: ...
 
@@ -2597,6 +3259,681 @@ class _ComplaintWorkspaceHandlerBackend(Protocol):
     ) -> Dict[str, Any]: ...
 
 
+def _encrypted_head(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Public identity of the current encrypted case head.
+
+    The ciphertext itself stays in private storage. Callers compare this
+    revision to detect a reply that is older than the head they already show.
+    """
+
+    return {
+        "schema": "encrypted-case-head-v1",
+        "case_id": str(state.get("case_id") or ""),
+        "private_revision": str(state.get("private_revision") or "0"),
+    }
+
+
+def _legal_graph_digest(graph: Any) -> str:
+    if not isinstance(graph, Mapping):
+        return ""
+    try:
+        body = json.dumps(graph, sort_keys=True, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _relationship_rows(graph: Any) -> List[Dict[str, str]]:
+    raw = graph.get("relationships") if isinstance(graph, Mapping) else None
+    values = raw.values() if isinstance(raw, Mapping) else list(raw or [])
+    rows: List[Dict[str, str]] = []
+    for rel in values:
+        if not isinstance(rel, Mapping):
+            continue
+        attributes = rel.get("attributes") if isinstance(rel.get("attributes"), Mapping) else {}
+        rows.append({
+            "relationship_id": str(rel.get("id") or ""),
+            "relation_type": str(rel.get("relation_type") or rel.get("type") or ""),
+            "source_id": str(rel.get("source_id") or ""),
+            "target_id": str(rel.get("target_id") or ""),
+            "activity_status": str(attributes.get("activity_status") or ""),
+        })
+    rows.sort(key=lambda item: (item["relationship_id"], item["source_id"], item["target_id"], item["activity_status"]))
+    return rows
+
+
+def _record_support_projection(
+    state: Dict[str, Any],
+    *,
+    effect_id: str,
+    kind: str,
+    inquiry_id: str,
+    revision: Any,
+    before_graph: Any,
+    after_graph: Any,
+    legal_digest: str,
+    affected: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """Append one support projection for an accepted answer or correction.
+
+    The same effect id is a replay. It does not append a second row and it
+    does not rewrite the legal-graph digest stored with the first row.
+    """
+
+    ledger = state.get("affected_support_projection")
+    if not isinstance(ledger, list):
+        ledger = []
+        state["affected_support_projection"] = ledger
+    for item in ledger:
+        if isinstance(item, dict) and item.get("effect_id") == effect_id:
+            return {"applied": False, "duplicate": True, "entry": item, "count": len(ledger)}
+    before_rows = _relationship_rows(before_graph)
+    after_rows = _relationship_rows(after_graph)
+    before_keys = {(row["relationship_id"], row["activity_status"], row["source_id"], row["target_id"]) for row in before_rows}
+    changed = [
+        row for row in after_rows
+        if (row["relationship_id"], row["activity_status"], row["source_id"], row["target_id"]) not in before_keys
+    ]
+    if isinstance(affected, list) and affected:
+        changed = [dict(item) if isinstance(item, Mapping) else {"target_id": str(item)} for item in affected]
+    after_mapping = after_graph if isinstance(after_graph, Mapping) else {}
+    before_mapping = before_graph if isinstance(before_graph, Mapping) else {}
+    entry = {
+        "effect_id": effect_id,
+        "kind": kind,
+        "inquiry_id": str(inquiry_id or ""),
+        "expected_question_revision": revision,
+        "graph_version": str(after_mapping.get("graph_version") or ""),
+        "previous_graph_version": str(before_mapping.get("graph_version") or ""),
+        "factual_graph_changed": _legal_graph_digest(after_mapping) != _legal_graph_digest(before_mapping),
+        "affected": changed,
+        "legal_graph_sha256": legal_digest,
+        "changes_law": False,
+    }
+    ledger.append(entry)
+    return {"applied": True, "duplicate": False, "entry": entry, "count": len(ledger)}
+
+
+def _pending_inquiry_copy(state: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection, Mapping) else None
+    if isinstance(pending, Mapping):
+        return dict(pending)
+    controls = state.get("terminal_controls") if isinstance(state.get("terminal_controls"), Mapping) else {}
+    stored = controls.get("pending_inquiry") if isinstance(controls, Mapping) else None
+    return dict(stored) if isinstance(stored, Mapping) else None
+
+
+def _terminal_edit_receipt(
+    *,
+    status: str,
+    message: str,
+    error_code: Optional[str] = None,
+    pending_inquiry: Optional[Mapping[str, Any]] = None,
+    pending_reselected: bool = False,
+    correction: Optional[Mapping[str, Any]] = None,
+    graph_revision: str = "",
+    session_revision: int = 0,
+    actor_principal_id: str = "",
+    canonical_owner_principal_id: str = "",
+) -> Dict[str, Any]:
+    error = None
+    if error_code:
+        error = {"code": error_code, "resumable": error_code != "event_conflict", "legal_sufficiency": False}
+    receipt = {
+        "contract_version": "terminal-graph-edit-v1",
+        "status": status,
+        "message": message,
+        "display_only": False,
+        "legal_sufficiency": False,
+        "awaiting_user": False,
+        "worker_stalled": False,
+        "pending_reselected": bool(pending_reselected),
+        "pending_inquiry": dict(pending_inquiry) if isinstance(pending_inquiry, Mapping) else None,
+        "graph_revision": graph_revision,
+        "session_revision": session_revision,
+        "correction": dict(correction) if isinstance(correction, Mapping) else None,
+        "actor_principal_id": str(actor_principal_id or ""),
+        "canonical_owner_principal_id": str(canonical_owner_principal_id or ""),
+        "actor_matches_canonical_owner": bool(canonical_owner_principal_id) and str(actor_principal_id or "") == str(canonical_owner_principal_id),
+        "error": error,
+    }
+    if error_code:
+        receipt["error_code"] = error_code
+    return receipt
+
+
+def _edit_source_context(envelope: Mapping[str, Any], replacement: str, event_id: str) -> Dict[str, Any]:
+    from integrations.ipfs_datasets.types import source_byte_hash
+
+    message_id = f"edit-{event_id}"
+    return {
+        "source_text": replacement,
+        "source_kind": str(envelope.get("source_kind") or "user_statement"),
+        "source_id": message_id,
+        "message_id": message_id,
+        "assertion_status": "asserted",
+        "extractor_version": str(envelope.get("extractor_version") or "complaint-mediator"),
+        "source_hash": source_byte_hash(replacement),
+        "source_span": {
+            "start": 0,
+            "end": len(replacement.encode("utf-8")),
+            "text": replacement,
+            "unit": "byte",
+        },
+        "subject_key": str(envelope.get("subject_key") or "fact"),
+    }
+
+
+def _active_assertion_matches(knowledge: Any, answer: str) -> list[tuple[int, str, Dict[str, Any]]]:
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+    indexes: Dict[str, int] = {}
+    for record in revisions:
+        if not isinstance(record, Mapping):
+            continue
+        stable = str(record.get("stable_id") or record.get("new_stable_id") or "")
+        if stable:
+            indexes[stable] = max(indexes.get(stable, 0), int(record.get("revision_index") or 0))
+    matches: list[tuple[int, str, Dict[str, Any]]] = []
+    for stable_id, record in states.items():
+        if not isinstance(record, Mapping) or str(record.get("status") or "") != "active":
+            continue
+        envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+        span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+        text = str(span.get("text") or envelope.get("source_text") or "")
+        if text != answer:
+            continue
+        matches.append((indexes.get(str(stable_id), 0), str(stable_id), dict(envelope)))
+    return matches
+
+
+def _contained_assertion_matches(knowledge: Any, answer: str) -> list[tuple[int, str, Dict[str, Any]]]:
+    """One active source that contains the answer, or that the answer contains."""
+
+    needle = str(answer or "").strip()
+    if len(needle) < 4:
+        return []
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    revisions = ledger.get("revisions") if isinstance(ledger.get("revisions"), list) else []
+    indexes: Dict[str, int] = {}
+    for record in revisions:
+        if not isinstance(record, Mapping):
+            continue
+        stable = str(record.get("stable_id") or record.get("new_stable_id") or "")
+        if stable:
+            indexes[stable] = max(indexes.get(stable, 0), int(record.get("revision_index") or 0))
+    matches: list[tuple[int, str, Dict[str, Any]]] = []
+    for stable_id, record in states.items():
+        if not isinstance(record, Mapping) or str(record.get("status") or "") != "active":
+            continue
+        envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+        span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+        text = str(span.get("text") or envelope.get("source_text") or "").strip()
+        if not text or text == needle:
+            continue
+        if needle in text or text in needle:
+            matches.append((indexes.get(str(stable_id), 0), str(stable_id), dict(envelope)))
+    return matches
+
+
+def _last_eligible_accepted_answer(state: Mapping[str, Any], knowledge: Any) -> Optional[Dict[str, Any]]:
+    """Last accepted answer that still has one active assertion."""
+
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    ineligible = {"skipped", "unknown", "refused", "deferred"}
+    for item in reversed(history):
+        if not isinstance(item, Mapping):
+            continue
+        disposition = str(item.get("disposition") or "accepted").strip().lower()
+        if disposition in ineligible:
+            continue
+        answer = str(item.get("answer") or "").strip()
+        if not answer or answer.lower() in _UNKNOWN_INTAKE_ANSWERS:
+            continue
+        stable_id = str(item.get("target_stable_id") or item.get("stable_id") or "").strip()
+        ledger = knowledge.factual_ledger()
+        states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+        if stable_id:
+            record = states.get(stable_id) if isinstance(states.get(stable_id), Mapping) else {}
+            if str(record.get("status") or "") == "active":
+                envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+                return {
+                    "question_id": str(item.get("question_id") or ""),
+                    "answer": answer,
+                    "stable_id": stable_id,
+                    "entity_id": str(record.get("entity_id") or ""),
+                    "envelope": dict(envelope),
+                    "history_audit": str(item.get("audit_id") or ""),
+                }
+        matches = _active_assertion_matches(knowledge, answer)
+        if not matches:
+            contained = _contained_assertion_matches(knowledge, answer)
+            matches = contained if len(contained) == 1 else []
+        if not matches:
+            continue
+        _index, matched_id, envelope = sorted(matches)[-1]
+        record = states.get(matched_id) if isinstance(states.get(matched_id), Mapping) else {}
+        return {
+            "question_id": str(item.get("question_id") or ""),
+            "answer": answer,
+            "stable_id": matched_id,
+            "entity_id": str(record.get("entity_id") or ""),
+            "envelope": envelope,
+            "history_audit": str(item.get("audit_id") or ""),
+        }
+    return None
+
+
+def _correction_actor_ids(state: Mapping[str, Any]) -> tuple[str, str]:
+    """Actual actor, then canonical owner. They are not copied from each other."""
+
+    from .workspace_case_authority import current_workspace_case_authority
+
+    authority = current_workspace_case_authority()
+    if authority is not None:
+        return str(authority.actor_principal_id or ""), str(authority.canonical_owner_principal_id or "")
+    return str(state.get("user_id") or ""), ""
+
+
+def _assertion_owner(state: Mapping[str, Any], stable_id: str, envelope: Mapping[str, Any]) -> tuple[str, bool]:
+    env_actor = str((envelope or {}).get("actor") or "").strip()
+    history_actor = ""
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        linked = {str(item.get("target_stable_id") or ""), str(item.get("stable_id") or "")}
+        if stable_id not in linked:
+            continue
+        actor = str(item.get("actor_principal_id") or "").strip()
+        if actor:
+            history_actor = actor
+    if env_actor and history_actor and env_actor != history_actor:
+        return "", True
+    return env_actor or history_actor, False
+
+
+def _target_from_stable(state: Mapping[str, Any], knowledge: Any, stable_id: str) -> Optional[Dict[str, Any]]:
+    ledger = knowledge.factual_ledger()
+    states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+    record = states.get(stable_id) if isinstance(states.get(stable_id), Mapping) else {}
+    if str(record.get("status") or "") != "active":
+        return None
+    envelope = record.get("envelope") if isinstance(record.get("envelope"), Mapping) else {}
+    span = envelope.get("source_span") if isinstance(envelope.get("source_span"), Mapping) else {}
+    text = str(span.get("text") or envelope.get("source_text") or "")
+    question_id = ""
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    for item in history:
+        if not isinstance(item, Mapping):
+            continue
+        if stable_id not in {str(item.get("target_stable_id") or ""), str(item.get("stable_id") or "")}:
+            continue
+        question_id = str(item.get("question_id") or question_id)
+        if not text:
+            text = str(item.get("answer") or "")
+    return {
+        "question_id": question_id,
+        "answer": text,
+        "stable_id": stable_id,
+        "entity_id": str(record.get("entity_id") or ""),
+        "envelope": dict(envelope),
+    }
+
+
+def _eligible_correction_for_actor(
+    state: Mapping[str, Any],
+    knowledge: Any,
+    actor: str,
+    target_stable_id: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The caller's active assertion. Another participant's fact is not eligible."""
+
+    requested = str(target_stable_id or "").strip()
+    if requested:
+        target = _target_from_stable(state, knowledge, requested)
+        if target is None:
+            return None, "missing_target"
+        owner, conflict = _assertion_owner(state, requested, target.get("envelope") or {})
+        if conflict or (owner and owner != actor):
+            return None, "unauthorized_actor"
+        return target, None
+    history = state.get("intake_history") if isinstance(state.get("intake_history"), list) else []
+    ineligible = {"skipped", "unknown", "refused", "deferred"}
+    for item in reversed(history):
+        if not isinstance(item, Mapping):
+            continue
+        disposition = str(item.get("disposition") or "accepted").strip().lower()
+        if disposition in ineligible:
+            continue
+        answer = str(item.get("answer") or "").strip()
+        if not answer or answer.lower() in _UNKNOWN_INTAKE_ANSWERS:
+            continue
+        stable_id = str(item.get("target_stable_id") or item.get("stable_id") or "").strip()
+        owner, conflict = _assertion_owner(state, stable_id, {})
+        if conflict or (owner and owner != actor):
+            continue
+        if stable_id:
+            target = _target_from_stable(state, knowledge, stable_id)
+            if target is not None:
+                owner, conflict = _assertion_owner(state, stable_id, target.get("envelope") or {})
+                if conflict or (owner and owner != actor):
+                    continue
+                return target, None
+        matches = _active_assertion_matches(knowledge, answer)
+        if len(matches) != 1:
+            contained = _contained_assertion_matches(knowledge, answer)
+            matches = contained if len(contained) == 1 else []
+        if len(matches) != 1:
+            continue
+        _index, matched_id, envelope = matches[0]
+        owner, conflict = _assertion_owner(state, matched_id, envelope)
+        if conflict or (owner and owner != actor):
+            continue
+        ledger = knowledge.factual_ledger()
+        states = ledger.get("assertion_states") if isinstance(ledger.get("assertion_states"), Mapping) else {}
+        record = states.get(matched_id) if isinstance(states.get(matched_id), Mapping) else {}
+        return {
+            "question_id": str(item.get("question_id") or ""),
+            "answer": answer,
+            "stable_id": matched_id,
+            "entity_id": str(record.get("entity_id") or ""),
+            "envelope": envelope,
+        }, None
+    return None, "missing_target"
+
+
+def _stored_graph_revision(state: Mapping[str, Any]) -> str:
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    raw = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return ""
+    try:
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        return graph_revision_token(KnowledgeGraph.from_dict(dict(raw)))
+    except Exception:
+        return ""
+
+
+def _factual_correction_offer(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Revisions the browser must send back. This view does not change the graph."""
+
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    actor, canonical_owner = _correction_actor_ids(state)
+    session_revision = int(projection.get("session_revision") or 0) if isinstance(projection, Mapping) else 0
+    token = _stored_graph_revision(state)
+    target: Optional[Dict[str, Any]] = None
+    raw = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+    if isinstance(raw, Mapping) and actor:
+        try:
+            from complaint_phases.knowledge_graph import KnowledgeGraph
+
+            target, _code = _eligible_correction_for_actor(state, KnowledgeGraph.from_dict(dict(raw)), actor, "")
+        except Exception:
+            target = None
+    return {
+        "schema": "gui-factual-correction-v1",
+        "actor_principal_id": actor,
+        "canonical_owner_principal_id": canonical_owner,
+        "actor_matches_canonical_owner": bool(canonical_owner) and actor == canonical_owner,
+        "expected_graph_revision": token,
+        "expected_session_revision": session_revision,
+        "target_stable_id": str((target or {}).get("stable_id") or ""),
+        "prior_answer": str((target or {}).get("answer") or ""),
+        "requires_expected_revision": True,
+        "legal_sufficiency": False,
+    }
+
+
+def _parse_gui_correction_message(
+    message: Optional[str],
+    *,
+    expected_graph_revision: Optional[str],
+    expected_session_revision: Optional[int],
+) -> Dict[str, Any]:
+    raw = str(message or "").strip()
+    body = raw[5:].strip() if raw.lower().startswith("/edit") else raw
+    parsed: Dict[str, Any] = {}
+    if body.startswith("{"):
+        try:
+            loaded = json.loads(body)
+        except json.JSONDecodeError:
+            loaded = None
+        if isinstance(loaded, dict):
+            parsed = loaded
+    replacement = str(parsed.get("replacement") or "").strip() if parsed else body
+    graph_value = parsed.get("expected_graph_revision", expected_graph_revision)
+    session_value = parsed.get("expected_session_revision", expected_session_revision)
+    conflict = ""
+    if expected_graph_revision not in {None, ""} and parsed.get("expected_graph_revision") not in {None, ""}:
+        if str(parsed.get("expected_graph_revision")) != str(expected_graph_revision):
+            conflict = "stale_target"
+    if expected_session_revision is not None and parsed.get("expected_session_revision") not in {None, ""}:
+        if str(parsed.get("expected_session_revision")) != str(expected_session_revision):
+            conflict = conflict or "stale_target"
+    session_revision: Optional[int]
+    if session_value in {None, ""}:
+        session_revision = None
+    else:
+        try:
+            session_revision = int(session_value)
+        except (TypeError, ValueError):
+            session_revision = None
+            conflict = conflict or "stale_target"
+    graph_revision = None if graph_value in {None, ""} else str(graph_value)
+    return {
+        "replacement": replacement,
+        "expected_graph_revision": graph_revision,
+        "expected_session_revision": session_revision,
+        "actor_principal_id": str(parsed.get("actor_principal_id") or "").strip(),
+        "target_stable_id": str(parsed.get("target_stable_id") or "").strip(),
+        "conflict": conflict,
+    }
+
+
+def _append_correction_history(
+    state: Dict[str, Any],
+    target: Mapping[str, Any],
+    replacement: str,
+    receipt: Mapping[str, Any],
+    *,
+    actor_principal_id: str = "",
+) -> None:
+    question_id = str(target.get("question_id") or "")
+    answers = state.setdefault("intake_answers", {})
+    if not isinstance(answers, dict):
+        answers = {}
+        state["intake_answers"] = answers
+    if question_id:
+        answers[question_id] = replacement
+    history = state.setdefault("intake_history", [])
+    if not isinstance(history, list):
+        history = []
+        state["intake_history"] = history
+    history.append({
+        "question_id": question_id,
+        "answer": replacement,
+        "previous_answer": str(target.get("answer") or ""),
+        "disposition": "corrected",
+        "target_stable_id": str(receipt.get("replacement_stable_id") or ""),
+        "supersedes_stable_id": str(target.get("stable_id") or ""),
+        "captured_at": state.get("updated_at"),
+        "display_only": False,
+        "actor_principal_id": str(actor_principal_id or receipt.get("actor_principal_id") or ""),
+    })
+
+
+def _reselect_affected_pending(
+    actions: Any,
+    knowledge: Any,
+    target: Mapping[str, Any],
+    pending_before: Optional[Mapping[str, Any]],
+) -> tuple[Dict[str, Any], bool]:
+    meta = getattr(actions, "_interview_meta", None)
+    if not isinstance(meta, dict):
+        return dict(pending_before or {}), False
+    pending = dict(meta.get("pending_inquiry") or pending_before or {})
+    entity_id = str(target.get("entity_id") or "")
+    stable_id = str(target.get("stable_id") or "")
+    bound = str(pending.get("target_id") or "")
+    affected = bound not in {"", "unknown"} and bound in {entity_id, stable_id}
+    ledger = knowledge.factual_ledger()
+    for inquiry in ledger.get("inquiry_targets") or []:
+        if not isinstance(inquiry, Mapping):
+            continue
+        same_inquiry = str(inquiry.get("inquiry_id") or "") == str(pending.get("inquiry_id") or "")
+        same_target = str(inquiry.get("entity_id") or "") == entity_id or str(inquiry.get("stable_id") or "") == stable_id
+        if same_inquiry and same_target and str(inquiry.get("status") or "") == "reopened":
+            affected = True
+    if not affected:
+        meta["pending_inquiry"] = pending
+        return pending, False
+    question_text = str(pending.get("question") or "")
+    for question in ledger.get("reopened_questions") or []:
+        if not isinstance(question, Mapping):
+            continue
+        context = question.get("context") if isinstance(question.get("context"), Mapping) else {}
+        if str(context.get("inquiry_id") or "") == str(pending.get("inquiry_id") or ""):
+            question_text = str(question.get("question") or question_text)
+            break
+    revision = int(meta.get("question_revision") or pending.get("revision") or 0) + 1
+    meta["question_revision"] = revision
+    pending["question"] = question_text
+    pending["revision"] = revision
+    pending["reopened"] = True
+    pending["target_id"] = bound or entity_id
+    meta["pending_inquiry"] = pending
+    return pending, True
+
+
+_ADAPTIVE_NON_FACT_ANSWERS = {
+    "unknown": "unknown",
+    "i do not know": "unknown",
+    "i don't know": "unknown",
+    "i dont know": "unknown",
+    "idk": "unknown",
+    "not sure": "unknown",
+    "unsure": "unknown",
+    "deferred": "deferred",
+    "defer": "deferred",
+    "later": "deferred",
+    "not now": "deferred",
+    "ask me later": "deferred",
+}
+
+
+def _adaptive_non_fact_kind(message: Optional[str]) -> Optional[str]:
+    return _ADAPTIVE_NON_FACT_ANSWERS.get(str(message or "").strip().lower())
+
+
+def _preserve_adaptive_gap(state: Dict[str, Any], message: Optional[str], prior: Mapping[str, Any]) -> None:
+    """Keep an unknown or deferred answer as an open gap.
+
+    The answered inquiry is recorded on the shared projection. It does not
+    become a fact and it does not satisfy the graph target.
+    """
+
+    kind = _adaptive_non_fact_kind(message)
+    inquiry_id = str(prior.get("inquiry_id") or "")
+    if not kind or not inquiry_id:
+        return
+    projection = state.get("shared_interview")
+    if not isinstance(projection, dict):
+        return
+    marker = "user_answer_unknown" if kind == "unknown" else "user_answer_deferred"
+    reasons = [str(item) for item in (projection.get("unknown_reasons") or []) if str(item or "").strip()]
+    if marker not in reasons:
+        reasons.append(marker)
+    projection["unknown_reasons"] = reasons
+    gaps = [item for item in (projection.get("preserved_gaps") or []) if isinstance(item, dict)]
+    gaps.append({
+        "inquiry_id": inquiry_id,
+        "target_id": prior.get("target_id"),
+        "objective_id": prior.get("objective_id"),
+        "target_revision": prior.get("target_revision"),
+        "disposition": kind,
+        "preserved": True,
+        "creates_fact": False,
+        "satisfies_requirement": False,
+    })
+    projection["preserved_gaps"] = gaps[-32:]
+
+
+def _adaptive_inquiry_view(state: Mapping[str, Any]) -> Dict[str, Any]:
+    """Pending question from the shared mediator, never the fixed intake list."""
+
+    projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+    pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), Mapping) else None
+    inquiry_id = str((pending or {}).get("inquiry_id") or "")
+    pending_open = bool(inquiry_id)
+    fixed_ids = [str(question["id"]) for question in _INTAKE_QUESTIONS]
+    return {
+        "schema": "adaptive-inquiry-v1",
+        "source": "shared_mediator",
+        "pending": pending_open,
+        "inquiry_id": inquiry_id or None,
+        "revision": (pending or {}).get("revision") if pending_open else None,
+        "prompt": str((pending or {}).get("question") or "") if pending_open else "",
+        "objective_id": (pending or {}).get("objective_id") if pending_open else None,
+        "target_id": (pending or {}).get("target_id") if pending_open else None,
+        "target_revision": (pending or {}).get("target_revision") if pending_open else None,
+        "from_fixed_intake_fields": False,
+        "fixed_intake_question_ids": fixed_ids,
+        "unknown_reasons": [str(item) for item in (projection.get("unknown_reasons") or [])],
+        "preserved_gaps": [dict(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, Mapping)],
+        "legal_sufficiency": False,
+        "factual_correction": _factual_correction_offer(state),
+    }
+
+
+def _note_terminal_edit_controls(
+    state: Dict[str, Any],
+    *,
+    pending: Mapping[str, Any],
+    question_id: str,
+    previous: str,
+    replacement: str,
+    target_stable_id: str,
+    replacement_stable_id: str,
+    graph_token: str,
+    session_revision: int,
+) -> None:
+    controls = state.get("terminal_controls")
+    if not isinstance(controls, dict):
+        controls = {}
+        state["terminal_controls"] = controls
+    controls.setdefault("schema", "terminal-controls-v1")
+    controls["paused"] = False
+    controls["pending_inquiry"] = dict(pending)
+    controls["objective_id"] = pending.get("objective_id")
+    controls["graph_revision"] = int(pending.get("revision") or 0)
+    narrative = state.get("original_complaint") if isinstance(state.get("original_complaint"), Mapping) else {}
+    controls["fingerprint"] = {
+        "inquiry_id": str(pending.get("inquiry_id") or ""),
+        "question_revision": int(pending.get("revision") or 0),
+        "session_revision": int(session_revision),
+        "history_len": len(state.get("intake_history") or []),
+        "narrative_revision": int(narrative.get("revision") or 0),
+        "objective_id": str(pending.get("objective_id") or ""),
+        "graph_revision_token": graph_token,
+    }
+    edits = list(controls.get("edits") or [])
+    edits.append({
+        "question_id": question_id,
+        "previous": previous,
+        "replacement": replacement,
+        "target_stable_id": target_stable_id,
+        "replacement_stable_id": replacement_stable_id,
+        "display_only": False,
+    })
+    controls["edits"] = edits
+
+
 class ComplaintWorkspaceRequestHandlers:
     """Request-facing mutations isolated from workspace state-shaping helpers.
 
@@ -2617,6 +3954,15 @@ class ComplaintWorkspaceRequestHandlers:
 
     @staticmethod
     def _normalize_user_id(user_id: Optional[str]) -> str:
+        if user_id is None:
+            from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+                current_workspace_case_authority)
+            try:
+                authority = current_workspace_case_authority()
+            except WorkspaceCaseAuthorityError:
+                raise WorkspaceAuthorizationDenied() from None
+            if authority is not None:
+                return authority.actor_principal_id
         return str(user_id or DEFAULT_USER_ID)
 
     def _load_state(self, user_id: Optional[str]) -> Dict[str, Any]:
@@ -2635,10 +3981,24 @@ class ComplaintWorkspaceRequestHandlers:
             "next_question": self.workspace._next_question(answers),
             "review": self.workspace._build_review(state),
             "case_synopsis": self.workspace._build_case_synopsis(state),
+            "adaptive_inquiry": _adaptive_inquiry_view(state),
+            "finite_interview_outcome": finite_interview_outcome(
+                state,
+                active_question=self.workspace._next_question(answers),
+            ),
+            "legal_sufficiency": False,
+            "changes_law": False,
+            "encrypted_head": _encrypted_head(state),
+            "affected_support_projection": [
+                dict(item) for item in (state.get("affected_support_projection") or []) if isinstance(item, dict)
+            ],
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        state = self.workspace._save_state(self._load_state(user_id))
+        state = self._load_state(user_id)
+        authority = self.workspace._owner_case_authority()
+        if authority is None or authority.action in {"case.update", "case.message.send", "case.processing.choose"}:
+            state = self.workspace._save_state(state)
         return self._build_session_payload(state)
 
     def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
@@ -2663,8 +4023,14 @@ class ComplaintWorkspaceRequestHandlers:
         question_id: Optional[str] = None,
         expected_question_revision: Optional[int] = None,
         interview_action: Optional[str] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
+        if str(interview_action or "").strip().lower() == "encrypted_resume":
+            # Resume opens the encrypted snapshot before any session read so a
+            # locked or missing key stays explicit and a browser cache is ignored.
+            return workspace.resume_encrypted_browser_interview(user_id, browser_cache=message)
         state = self._load_state(user_id)
         normalized_message = str(message or "").strip()
         if normalized_message.lower() == "/why":
@@ -2674,9 +4040,38 @@ class ComplaintWorkspaceRequestHandlers:
             payload["command"] = "/why"
             payload["stored_as_answer"] = False
             payload["awaiting_user"] = True
+            payload["worker_stalled"] = False
+            payload["legal_sufficiency"] = False
+            payload["question_support"] = why.get("question_support")
+            payload["diagnostic_receipt"] = why.get("diagnostic_receipt")
             payload["message"] = why["display"]
             return payload
+        if normalized_message.lower() == "/research":
+            research = workspace.run_legal_research(
+                str(state.get("user_id") or user_id),
+                expected_graph_revision=expected_graph_revision,
+                expected_session_revision=expected_session_revision,
+            )
+            fresh = workspace._load_state(str(state.get("user_id") or user_id))
+            payload = workspace._build_intake_chat_payload(fresh)
+            payload["legal_research"] = research
+            payload["command"] = "/research"
+            payload["stored_as_answer"] = False
+            payload["awaiting_user"] = research.get("error_code") != "stale_research"
+            payload["legal_sufficiency"] = False
+            payload["status"] = research.get("status")
+            payload["message"] = str(research.get("display") or format_legal_research_result(research))
+            return payload
         normalized_action = str(interview_action or "").strip().lower()
+        if normalized_action in {"pause", "cancel", "cap", "unavailable", "saturate"}:
+            return workspace.record_finite_interview_stop(state, normalized_action)
+        if normalized_action == "correct" or normalized_message.lower().startswith("/edit"):
+            return self._apply_gui_factual_correction(
+                state,
+                message=normalized_message,
+                expected_graph_revision=expected_graph_revision,
+                expected_session_revision=expected_session_revision,
+            )
         if normalized_action == "resume":
             interview = workspace.apply_shared_interview(
                 state,
@@ -2691,6 +4086,9 @@ class ComplaintWorkspaceRequestHandlers:
             payload["interview"] = interview
             return payload
         normalized_question_id = str(question_id or "").strip()
+        interview_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        before_factual = deepcopy(interview_projection.get("knowledge_graph") or {})
+        before_legal_digest = _legal_graph_digest(interview_projection.get("dependency_graph"))
         narrative_turn = normalized_question_id == ORIGINAL_COMPLAINT_QUESTION_ID or (
             not normalized_question_id and _narrative_is_open(state)
         )
@@ -2723,6 +4121,7 @@ class ComplaintWorkspaceRequestHandlers:
                 case_id,
                 mode,
             )
+            state["public_processing_mode"] = "grok" if mode == "grok" else "local"
             state["privacy_notice_shown"] = True
             workspace._save_state(state)
             payload = workspace._build_intake_chat_payload(
@@ -2802,7 +4201,28 @@ class ComplaintWorkspaceRequestHandlers:
         if interview.get("status") == "refused":
             payload = workspace._build_intake_chat_payload(state)
             payload["interview"] = interview
+            payload["support_projection_updated"] = False
+            payload["changes_law"] = False
             return payload
+        accepted_graph_answer = bool(
+            normalized_message
+            and interview.get("status") not in {"refused", "unavailable"}
+            and (graph_inquiry or normalized_action == "answer")
+            and normalized_action not in {"status", "resume", "review", "why"}
+        )
+        support_update = {"applied": False, "duplicate": False, "count": len(state.get("affected_support_projection") or [])}
+        if accepted_graph_answer:
+            after_interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+            support_update = _record_support_projection(
+                state,
+                effect_id=f"answer:{normalized_question_id}:{expected_question_revision}",
+                kind="answer",
+                inquiry_id=normalized_question_id,
+                revision=expected_question_revision,
+                before_graph=before_factual,
+                after_graph=after_interview.get("knowledge_graph") or {},
+                legal_digest=before_legal_digest,
+            )
         if joined_effect is not None:
             workspace._commit_joined_snapshot(state, effect_id=joined_effect,
                 question_id=identity_question, answer=normalized_message)
@@ -2814,11 +4234,382 @@ class ComplaintWorkspaceRequestHandlers:
             requested_question_id=None if accepted_answer is not None or graph_inquiry else question_id,
         )
         payload["interview"] = interview
+        payload["support_projection_updated"] = bool(support_update.get("applied"))
+        payload["support_projection_duplicate"] = bool(support_update.get("duplicate"))
+        payload["changes_law"] = False
         if show_privacy_notice:
             payload["privacy_notice"] = _PRIVACY_MODE_NOTICE
             if str(payload.get("message") or "").startswith("Let's start with the basics."):
                 payload["message"] = f"{_PRIVACY_MODE_NOTICE}\n\n{payload['message']}"
         return payload
+
+    def _apply_gui_factual_correction(
+        self,
+        state: Dict[str, Any],
+        *,
+        message: str,
+        expected_graph_revision: Optional[str],
+        expected_session_revision: Optional[int],
+    ) -> Dict[str, Any]:
+        """Correct one fact through the canonical mediator path.
+
+        The browser sends the revisions it was shown. A stale revision or an
+        edit of another participant's assertion is refused and does not write.
+        """
+
+        prior_support_effects = {
+            str(item.get("effect_id") or "") for item in (state.get("affected_support_projection") or [])
+            if isinstance(item, Mapping)
+        }
+        parsed = _parse_gui_correction_message(
+            message,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
+        )
+        pending = _pending_inquiry_copy(state)
+        actor_id, canonical_owner = _correction_actor_ids(state)
+        if parsed["conflict"]:
+            receipt = _terminal_edit_receipt(
+                status="refused",
+                message="Stale concurrent edit rejected. The pending inquiry was kept.",
+                error_code=parsed["conflict"],
+                pending_inquiry=pending,
+                actor_principal_id=actor_id,
+                canonical_owner_principal_id=canonical_owner,
+            )
+        else:
+            receipt = self.apply_terminal_graph_edit(
+                str(state.get("user_id") or ""),
+                parsed["replacement"],
+                expected_graph_revision=parsed["expected_graph_revision"],
+                expected_session_revision=parsed["expected_session_revision"],
+                target_stable_id=parsed["target_stable_id"] or None,
+                actor_principal_id=parsed["actor_principal_id"] or None,
+                require_expected_revision=True,
+            )
+        try:
+            fresh = self._load_state(str(state.get("user_id") or ""))
+        except WorkspacePersistenceError:
+            # An issued browser request cannot publish the old private DTO
+            # after its live key/read boundary failed. Local legacy behavior
+            # remains available only without an issued owner capability.
+            if self.workspace._owner_case_authority() is not None:
+                raise
+            fresh = state
+        payload = self.workspace._build_intake_chat_payload(fresh)
+        payload["factual_correction"] = receipt
+        new_correction_effects = [
+            item for item in payload.get("affected_support_projection", [])
+            if isinstance(item, Mapping) and item.get("kind") == "correction"
+            and str(item.get("effect_id") or "") not in prior_support_effects
+        ]
+        payload["support_projection_updated"] = receipt.get("status") == "applied" and bool(new_correction_effects)
+        correction = receipt.get("correction") if isinstance(receipt.get("correction"), Mapping) else {}
+        payload["support_projection_duplicate"] = (
+            receipt.get("status") == "applied" and correction.get("idempotent_replay") is True
+            and not new_correction_effects
+        )
+        payload["stored_as_answer"] = receipt.get("status") == "applied"
+        payload["command"] = "correct"
+        payload["legal_sufficiency"] = False
+        payload["message"] = str(receipt.get("message") or payload.get("message") or "")
+        return payload
+
+    def apply_terminal_graph_edit(
+        self,
+        user_id: Optional[str],
+        replacement: str,
+        *,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
+        target_stable_id: Optional[str] = None,
+        actor_principal_id: Optional[str] = None,
+        require_expected_revision: bool = False,
+        _review_acceptance: Optional[_ReviewFactAcceptance] = None,
+    ) -> Dict[str, Any]:
+        """Correct the last eligible accepted answer on the shared factual graph.
+
+        Display history is not a second source of truth. The public correction
+        keeps the previous assertion and appends a revision. An unrelated
+        pending question stays pending. A pending question bound to the corrected
+        target is reopened. A stale graph or session revision is refused.
+        """
+
+        text = str(replacement or "").strip()
+        if not text:
+            return _terminal_edit_receipt(
+                status="refused",
+                message="Edit needs replacement text. The pending question is unchanged.",
+                error_code="correction_required",
+            )
+        try:
+            state = self._load_state(user_id)
+        except WorkspacePersistenceError as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'unavailable'}). The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"),
+            )
+        user = str(state.get("user_id") or user_id or DEFAULT_USER_ID)
+        case_id = _state_case_id(state, user)
+        actor_id, canonical_owner = _correction_actor_ids(state)
+        claimed_actor = str(actor_principal_id or "").strip()
+        if _review_acceptance is not None:
+            if type(_review_acceptance) is not _ReviewFactAcceptance:
+                raise WorkspaceAuthorizationDenied()
+            _review_acceptance.check_preimage(state, workspace=self.workspace, actor=actor_id, case_id=case_id)
+
+        def finish(receipt: Dict[str, Any]) -> Dict[str, Any]:
+            receipt["actor_principal_id"] = actor_id
+            receipt["canonical_owner_principal_id"] = canonical_owner
+            receipt["actor_matches_canonical_owner"] = bool(canonical_owner) and actor_id == canonical_owner
+            if _review_acceptance is not None and receipt.get("status") == "applied":
+                receipt["review_acceptance"] = deepcopy(state["canonical_review_acceptances"][_review_acceptance.request_id])
+            return receipt
+
+        if claimed_actor and claimed_actor != actor_id:
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="This actor cannot edit that answer. Other participants were left unchanged.",
+                error_code="unauthorized_actor",
+                pending_inquiry=_pending_inquiry_copy(state),
+            ))
+        if require_expected_revision and (
+            expected_graph_revision is None or str(expected_graph_revision).strip() == "" or expected_session_revision is None
+        ):
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="A correction needs the expected graph and session revisions. Nothing was changed.",
+                error_code="stale_target",
+                pending_inquiry=_pending_inquiry_copy(state),
+            ))
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else None
+        before_factual = deepcopy(projection.get("knowledge_graph") or {}) if isinstance(projection, dict) else {}
+        legal_snapshot = deepcopy(projection.get("dependency_graph")) if isinstance(projection, dict) and isinstance(projection.get("dependency_graph"), dict) else None
+        legal_digest = _legal_graph_digest(legal_snapshot)
+        if not isinstance(projection, dict) or projection.get("schema_version") != "shared-interview-session-v1":
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (session_missing). The pending question is unchanged.",
+                error_code="session_missing",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        try:
+            publication_guard = self.workspace._terminal_graph_edit_publication_guard(
+                state, actor_principal_id=actor_id, case_id=case_id)
+        except WorkspacePersistenceError as exc:
+            return finish(_terminal_edit_receipt(status="unavailable",
+                message="Edit is unavailable. The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"), pending_inquiry=_pending_inquiry_copy(state)))
+        before_case_publish = publication_guard
+        if _review_acceptance is not None:
+            if publication_guard is None:
+                raise WorkspaceAuthorizationDenied()
+            def before_case_publish():
+                publication_guard()
+                _review_acceptance.reprove_review()
+        try:
+            # Never publish a request-local draft through the shared cache,
+            # even briefly between factory construction and its removal.
+            mediator = self.workspace._mediator_for_shared_interview(user, case_id,
+                **({"cache": False} if publication_guard is not None else {}))
+            actions = mediator.workflow_actions
+            if not actions.interview_started:
+                restored = actions.restore_session_projection(projection)
+                if restored.get("error"):
+                    code = str((restored.get("error") or {}).get("code") or "session_missing")
+                    return _terminal_edit_receipt(
+                        status="unavailable",
+                        message=f"Edit is unavailable ({code}). The pending question is unchanged.",
+                        error_code=code,
+                        pending_inquiry=_pending_inquiry_copy(state),
+                    )
+            actions.bind_interview_privacy(state.get("privacy_policy"), user_id=user, case_id=case_id)
+            router_state = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
+            router_session = str(router_state.get("session_id") or "")
+            if not re.fullmatch(r"[0-9a-f]{32}", router_session):
+                router_session = uuid.uuid4().hex
+            begin_router = getattr(mediator, "begin_intake_router_action", None)
+            if callable(begin_router):
+                begin_router(
+                    owner_id=user,
+                    case_id=case_id,
+                    session_id=router_session,
+                    revision=int((actions._interview_meta or {}).get("session_revision") or 0),
+                    previous=router_state,
+                )
+        except WorkspacePersistenceError as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'unavailable'}). The pending question is unchanged.",
+                error_code=str(exc.code or "unavailable"),
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        except Exception as exc:
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({type(exc).__name__}). The pending question is unchanged.",
+                error_code="capability_unavailable",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        from complaint_phases.phase_manager import ComplaintPhase
+
+        knowledge = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "knowledge_graph")
+        if knowledge is None or not hasattr(knowledge, "factual_ledger"):
+            return _terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (capability_unavailable). The pending question is unchanged.",
+                error_code="capability_unavailable",
+                pending_inquiry=_pending_inquiry_copy(state),
+            )
+        metadata = getattr(knowledge, "metadata", None)
+        if isinstance(metadata, dict) and not str(metadata.get("case_id") or "").strip():
+            metadata["case_id"] = case_id
+        pending_before = _pending_inquiry_copy(state)
+        from mediator.hook_runtime import graph_revision_token
+
+        current_token = graph_revision_token(knowledge)
+        current_session = int((actions._interview_meta or {}).get("session_revision") or 0)
+        if require_expected_revision and (
+            str(expected_graph_revision) != current_token or int(expected_session_revision or 0) != current_session
+        ):
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message="Stale concurrent edit rejected. The pending inquiry was kept.",
+                error_code="stale_target",
+                pending_inquiry=pending_before,
+            ))
+        if require_expected_revision:
+            target, selection_code = _eligible_correction_for_actor(
+                state, knowledge, actor_id, str(target_stable_id or ""),
+            )
+        else:
+            target, selection_code = _last_eligible_accepted_answer(state, knowledge), None
+        if target is None:
+            code = selection_code or "missing_target"
+            if code == "unauthorized_actor":
+                message = "This actor cannot edit that answer. Other participants were left unchanged."
+            else:
+                message = "Nothing to edit yet. The pending question is unchanged."
+            return finish(_terminal_edit_receipt(
+                status="refused",
+                message=message,
+                error_code=code,
+                pending_inquiry=pending_before,
+            ))
+        if require_expected_revision:
+            graph_token = str(expected_graph_revision)
+            session_revision = int(expected_session_revision or 0)
+        else:
+            graph_token = current_token if expected_graph_revision is None else str(expected_graph_revision)
+            session_revision = current_session if expected_session_revision is None else int(expected_session_revision)
+        event_id = "edit-" + hashlib.sha256(
+            f"{target['stable_id']}|{text}".encode("utf-8")
+        ).hexdigest()[:24]
+        source_context = _edit_source_context(target.get("envelope") or {}, text, event_id)
+        receipt = mediator.apply_factual_correction(
+            action="correct",
+            target_stable_id=target["stable_id"],
+            replacement=text,
+            source_context=source_context,
+            event_id=event_id,
+            case_id=case_id,
+            expected_graph_revision=graph_token,
+            expected_session_revision=session_revision,
+        )
+        status = str(receipt.get("status") or "")
+        error = receipt.get("error") if isinstance(receipt.get("error"), dict) else {}
+        error_code = str(error.get("code") or "")
+        if status != "applied":
+            if error_code == "stale_target":
+                message = "Stale concurrent edit rejected. The pending inquiry was kept."
+            elif error_code == "missing_target":
+                message = "Nothing to edit yet. The pending question is unchanged."
+            elif status == "unavailable":
+                message = f"Edit is unavailable ({error_code or 'unavailable'}). The pending question is unchanged."
+            else:
+                message = f"Edit was refused ({error_code or status or 'refused'}). The pending question is unchanged."
+            return finish(_terminal_edit_receipt(
+                status=status or "refused",
+                message=message,
+                error_code=error_code or None,
+                pending_inquiry=pending_before,
+                correction=receipt,
+            ))
+        pending, reselected = _reselect_affected_pending(actions, knowledge, target, pending_before)
+        exported = actions.export_session_projection()
+        if isinstance(exported, dict) and legal_snapshot is not None:
+            # A factual correction may invalidate support. It must not rewrite
+            # the admitted legal dependency graph that was current at the edit.
+            exported["dependency_graph"] = legal_snapshot
+        if not isinstance(exported, dict):
+            return finish(_terminal_edit_receipt(
+                status="unavailable",
+                message="Edit is unavailable (projection_invalid). The pending question is unchanged.",
+                error_code="projection_invalid",
+                pending_inquiry=pending_before,
+                correction=receipt,
+            ))
+        state["shared_interview"] = exported
+        if receipt.get("idempotent_replay") is not True:
+            _append_correction_history(
+                state, target, text, receipt,
+                actor_principal_id=actor_id if require_expected_revision else "",
+            )
+            _record_support_projection(
+                state,
+                effect_id="correction:" + str(receipt.get("event_id") or target.get("stable_id") or ""),
+                kind="correction",
+                inquiry_id=str(target.get("question_id") or ""),
+                revision=expected_session_revision,
+                before_graph=before_factual,
+                after_graph=exported.get("knowledge_graph") or {},
+                legal_digest=legal_digest,
+                affected=list(receipt.get("affected_support_targets") or []),
+            )
+        _note_terminal_edit_controls(
+            state,
+            pending=pending,
+            question_id=str(target.get("question_id") or ""),
+            previous=str(target.get("answer") or ""),
+            replacement=text,
+            target_stable_id=str(target.get("stable_id") or ""),
+            replacement_stable_id=str(receipt.get("replacement_stable_id") or ""),
+            graph_token=str(receipt.get("graph_revision") or ""),
+            session_revision=int(exported.get("session_revision") or 0),
+        )
+        if _review_acceptance is not None:
+            _review_acceptance.write_receipt(state, receipt, exported)
+        try:
+            if publication_guard is not None:
+                publication_guard()
+                self.workspace._save_state(state, before_publish=before_case_publish)
+            else:
+                self.workspace._save_state(state)
+        except WorkspacePersistenceError as exc:
+            return finish(_terminal_edit_receipt(
+                status="unavailable",
+                message=f"Edit is unavailable ({exc.code or 'durability_unproven'}). The pending question is unchanged.",
+                error_code=str(exc.code or "durability_unproven"),
+                pending_inquiry=pending_before,
+                correction=receipt,
+            ))
+        finally:
+            if publication_guard is not None:
+                self.workspace._interview_mediators.pop((user, case_id), None)
+        if reselected:
+            message = "Edited the last recorded answer. The pending question was reopened because its target changed."
+        else:
+            message = "Edited the last recorded answer. The pending question is unchanged."
+        return finish(_terminal_edit_receipt(
+            status="applied",
+            message=message,
+            pending_inquiry=pending,
+            pending_reselected=reselected,
+            correction=receipt,
+            graph_revision=str(receipt.get("graph_revision") or ""),
+            session_revision=int(exported.get("session_revision") or 0),
+        ))
 
     def save_evidence(
         self,
@@ -3046,20 +4837,42 @@ class _WorkspaceCaseKeyProvider:
     requests or an operator lock does not retain either capability.
     """
 
-    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+    def __init__(self, workspace: "ComplaintWorkspaceService", *, request_authority: Any = None) -> None:
         self._workspace = workspace
+        self._request_binding = (request_authority.canonical_owner_principal_id,
+            request_authority.case_id, request_authority.resource_id) if request_authority is not None else None
 
     def resolve(self, binding):
         from integrations.private_storage import PrivateArtifactBinding, canonical_associated_data
 
         if not isinstance(binding, PrivateArtifactBinding):
             raise WorkspaceAuthorizationDenied()
+        if self._request_binding is not None:
+            current = self._workspace._owner_case_authority()
+            if current is None or (current.canonical_owner_principal_id,
+                    current.case_id, current.resource_id) != self._request_binding:
+                raise WorkspaceAuthorizationDenied()
         self._workspace._require_private_case_key_access(
             binding.tenant_id, binding.case_id, principal_id=binding.principal_id
         )
         canonical_associated_data(binding)
         return self._workspace._private_key_session().provider().resolve(binding)
 
+
+
+def case_legal_source_scope(state: Mapping[str, Any], *, case_id: str) -> str:
+    """Hash canonical case sources; this pure value grants no access authority."""
+    shared = state["shared_interview"]
+    case_file = shared["intake_case_file"]
+    context = case_file.get("legal_context") or {}
+    selected_context = {name: context.get(name) for name in ("jurisdiction", "jurisdiction_explicit",
+        "jurisdiction_applicability", "candidate_jurisdiction", "context_revision", "applicable_law_date",
+        "event_date", "event_dates", "filing_reference_date", "corpus_retrieval_date")}
+    return hashlib.sha256(json.dumps({"case_id": case_id, "session_id": shared.get("session_id"),
+        "knowledge_graph": shared.get("knowledge_graph"), "narrative": _narrative_record(state),
+        "legal_context": selected_context, "forum": case_file.get("legal_context_forum"),
+        "applicability": case_file.get("legal_context_applicability")},
+        sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 class ComplaintWorkspaceService:
     def __init__(
@@ -3083,6 +4896,103 @@ class ComplaintWorkspaceService:
         self._authorizer = authorizer or WorkspaceAuthorizer()
         self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
         self._interview_mediators: Dict[tuple[str, str], Any] = {}
+        self._case_directory: Any = None
+
+    def open_case_directory(self, *, key: bytes, key_id: str) -> Any:
+        """Open the sealed case namespace index for the authenticated principal.
+
+        The directory lives beside this workspace. Callers select cases by the
+        authenticated principal and an explicit case id. A request ``user_id``
+        is not a selector. The injected key is not written.
+        """
+
+        from applications.case_directory import CaseDirectory
+
+        self._authenticated_case_actor()
+        directory = CaseDirectory(self._session_dir / "case-namespaces", key=key, key_id=key_id)
+        self._case_directory = directory
+        return directory
+
+    def create_independent_case(self, *, supplied_user_id: Optional[str] = None, unreadable_legacy_envelope: Optional[bytes] = None) -> Dict[str, Any]:
+        """Mint one owner-only case under the authenticated principal."""
+
+        actor = self._require_case_directory_actor()
+        record = self._case_directory.create_case(
+            actor_principal_id=actor,
+            supplied_user_id=supplied_user_id,
+            unreadable_legacy_envelope=unreadable_legacy_envelope,
+        )
+        return record.identity()
+
+    def adopt_owner_only_case(self, envelope: bytes, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Read a legacy owner-only envelope and record its namespace.
+
+        Missing keys raise ``CaseDirectoryError`` and do not create a case.
+        Session plaintext is not stored in the directory.
+        """
+
+        actor = self._require_case_directory_actor()
+        record, payload = self._case_directory.adopt_owner_only_case(
+            actor_principal_id=actor,
+            envelope=envelope,
+            supplied_user_id=supplied_user_id,
+        )
+        return {
+            "case": record.identity(),
+            "legacy_session": payload,
+            "persisted_session_plaintext": False,
+        }
+
+    def read_owner_only_case(self, envelope: bytes, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Open a legacy owner-only envelope without creating a case."""
+
+        actor = self._require_case_directory_actor()
+        return self._case_directory.read_owner_only_case(
+            actor_principal_id=actor,
+            envelope=envelope,
+            supplied_user_id=supplied_user_id,
+        )
+
+    def list_independent_cases(self, *, supplied_user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        actor = self._require_case_directory_actor()
+        records = self._case_directory.list_cases(actor_principal_id=actor, supplied_user_id=supplied_user_id)
+        return [record.identity() for record in records]
+
+    def select_independent_case(self, case_id: str, *, supplied_user_id: Optional[str] = None) -> Dict[str, Any]:
+        actor = self._require_case_directory_actor()
+        record = self._case_directory.select_case(
+            actor_principal_id=actor,
+            case_id=case_id,
+            supplied_user_id=supplied_user_id,
+        )
+        return record.identity()
+
+    def _authenticated_case_actor(self) -> str:
+        access = self._effective_access()
+        if access.trust != "authenticated" or not isinstance(access.principal_id, str) or not access.principal_id:
+            raise WorkspaceAuthorizationDenied()
+        return str(access.principal_id)
+
+    def _require_case_directory_actor(self) -> str:
+        actor = self._authenticated_case_actor()
+        if self._case_directory is None:
+            raise WorkspacePersistenceError(
+                "Case directory is not open.",
+                code="case_directory_closed",
+                public_status="unavailable",
+            )
+        return actor
+
+    def remember_invocation_associations(self, user_id: Optional[str], entries: Any) -> Dict[str, Any]:
+        """Store invocation associations in the encrypted session without a provider call."""
+
+        from mediator.hook_runtime import merge_router_trace
+
+        state = self._load_state(user_id)
+        state["router_trace"] = merge_router_trace(state.get("router_trace"), entries if isinstance(entries, list) else [])
+        self._save_state(state)
+        receipts = list((state.get("router_trace") or {}).get("receipts") or [])
+        return {"provider_replayed": False, "receipts": receipts, "invocations": len(receipts)}
 
     def apply_shared_interview(
         self,
@@ -3112,7 +5022,12 @@ class ComplaintWorkspaceService:
                 "error": None,
             }
         try:
-            mediator = self._mediator_for_shared_interview(user_id, case_id)
+            # GUI mutations operate on the authenticated DTO in this request.
+            # A refused publication must not leave an advanced mediator in the
+            # process cache and turn the next legitimate retry into stale input.
+            mediator = (self._mediator_for_shared_interview(user_id, case_id, cache=False)
+                if self._owner_case_authority() is not None
+                else self._mediator_for_shared_interview(user_id, case_id))
             begin_router = getattr(mediator, "begin_intake_router_action", None)
             if callable(begin_router):
                 previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
@@ -3132,6 +5047,14 @@ class ComplaintWorkspaceService:
                 restored = mediator.transition_shared_interview(action="resume", session_projection=projection, **kwargs)
                 if restored.get("error"):
                     return restored
+            prior_pending = None
+            legal_snapshot = None
+            if graph_question or action == "answer":
+                current_projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+                current_pending = current_projection.get("pending_inquiry") if isinstance(current_projection.get("pending_inquiry"), dict) else None
+                prior_pending = dict(current_pending) if current_pending else None
+                if isinstance(current_projection.get("dependency_graph"), dict):
+                    legal_snapshot = deepcopy(current_projection.get("dependency_graph"))
             if action == "resume":
                 receipt = mediator.transition_shared_interview(action="resume", **kwargs)
             elif narrative_turn or action == "start":
@@ -3156,21 +5079,87 @@ class ComplaintWorkspaceService:
             if receipt.get("status") == "refused":
                 return receipt
             exported = mediator.workflow_actions.export_session_projection()
+            if isinstance(exported, dict) and legal_snapshot is not None:
+                exported["dependency_graph"] = legal_snapshot
             if exported:
                 state["shared_interview"] = exported
+                pending = exported.get("pending_inquiry") if isinstance(exported.get("pending_inquiry"), dict) else None
+                if isinstance(pending, dict):
+                    state["explained_inquiry"] = {
+                        key: pending.get(key)
+                        for key in (
+                            "inquiry_id",
+                            "objective_id",
+                            "target_id",
+                            "target_revision",
+                            "why_it_matters",
+                            "expected_answer_contract",
+                            "expected_update_contract",
+                            "source_references",
+                            "source_references_status",
+                            "grounding_status",
+                            "question",
+                        )
+                    }
             snapshot_router = getattr(mediator, "intake_router_snapshot", None)
             if callable(snapshot_router):
                 snapshot = snapshot_router()
                 previous_router = state.get("intake_router") if isinstance(state.get("intake_router"), dict) else {}
                 prior_receipts = []
+                association_keys = {
+                    "schema", "invocation_label", "purpose", "case_id", "session_id",
+                    "accepted_graph_revision", "live_model_identity_verified", "prompt_logged",
+                    "provider_replayed",
+                }
                 for item in previous_router.get("receipts") or []:
-                    if (isinstance(item, dict) and set(item) == {"operation", "request_id", "binding_id", "status", "intake_complete"}
-                            and item.get("operation") in {"extract_facts", "propose_questions"}
+                    if not isinstance(item, dict):
+                        continue
+                    keys = set(item)
+                    core = {"operation", "request_id", "binding_id", "status", "intake_complete"}
+                    if not core <= keys or keys - core - association_keys:
+                        continue
+                    if (item.get("operation") in {"extract_facts", "propose_questions"}
                             and item.get("status") in {"available", "privacy_denied", "provider_unavailable", "malformed_output", "quota", "timeout", "cancelled", "stale_request"}
-                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))):
+                            and all(isinstance(item.get(key), str) and re.fullmatch(r"[0-9a-f]{32}", item[key]) for key in ("request_id", "binding_id"))
+                            and (item.get("invocation_label") in {None, "real", "fake"})):
                         prior_receipts.append(dict(item))
                 seen = {item["request_id"] for item in prior_receipts}
-                prior_receipts.extend(item for item in snapshot["receipts"] if item["request_id"] not in seen)
+                from mediator.hook_runtime import invocation_association, invocation_label_for_receipt
+
+                graph_payload = exported.get("knowledge_graph") if isinstance(exported, dict) else None
+                accepted_revision = ""
+                if isinstance(graph_payload, dict):
+                    try:
+                        from complaint_phases.knowledge_graph import KnowledgeGraph
+                        from mediator.hook_runtime import graph_revision_token
+                        accepted_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+                    except Exception:
+                        accepted_revision = ""
+                backend = getattr(mediator, "_terminal_router_backend", None)
+                if backend is None:
+                    backends = getattr(mediator, "backends", None) or []
+                    backend = backends[0] if backends else None
+                backend_by_request = {}
+                for backend_receipt in getattr(backend, "task_receipts", []) or []:
+                    if isinstance(backend_receipt, dict) and type(backend_receipt.get("request_id")) is str:
+                        backend_by_request[backend_receipt["request_id"]] = backend_receipt
+                for item in snapshot["receipts"]:
+                    if item["request_id"] in seen:
+                        continue
+                    matched = backend_by_request.get(item["request_id"]) or {}
+                    association = invocation_association(
+                        invocation_label=invocation_label_for_receipt(matched) if matched else "fake",
+                        purpose=item.get("operation"),
+                        request_id=item.get("request_id"),
+                        case_id=case_id,
+                        session_id=router_session,
+                        accepted_graph_revision=accepted_revision,
+                        live_model_identity_verified=bool(matched.get("live_model_identity_verified")) if matched else False,
+                    )
+                    stored = dict(item)
+                    stored.update(association)
+                    prior_receipts.append(stored)
+                    seen.add(item["request_id"])
                 state["intake_router"] = {**snapshot, "session_id": router_session,
                                           "receipts": prior_receipts[-32:]}
                 if snapshot["errors"] and not receipt.get("error"):
@@ -3184,6 +5173,8 @@ class ComplaintWorkspaceService:
                     receipt["error"] = {"code": "provider_unavailable", "resumable": True,
                                         "router_failures": dict(snapshot["errors"]), "legal_sufficiency": False}
                 receipt["intake_router"] = deepcopy(state["intake_router"])
+            if prior_pending and receipt.get("status") != "refused":
+                _preserve_adaptive_gap(state, message, prior_pending)
             return receipt
         except Exception as exc:
             return {
@@ -3200,10 +5191,10 @@ class ComplaintWorkspaceService:
                 },
             }
 
-    def _mediator_for_shared_interview(self, user_id: str, case_id: str):
+    def _mediator_for_shared_interview(self, user_id: str, case_id: str, *, cache: bool = True):
         self._check_access(user_id, ability="read", case_id=case_id, record_case_id=case_id)
         cache_key = (user_id, case_id)
-        cached = self._interview_mediators.get(cache_key)
+        cached = self._interview_mediators.get(cache_key) if cache else None
         if cached is not None:
             return cached
         from mediator.mediator import Mediator
@@ -3239,13 +5230,105 @@ class ComplaintWorkspaceService:
             claim_support_db_path=str(db_dir / "claim-support.db"),
         )
         mediator.state.username = user_id
-        self._interview_mediators[cache_key] = mediator
+        self.activate_private_evidence_hook(mediator, user_id, case_id)
+        self.activate_private_derived_indexes(mediator, user_id, case_id)
+        if cache:
+            self._interview_mediators[cache_key] = mediator
         return mediator
+
+
+    def activate_private_evidence_hook(self, mediator: Any, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Inject the current private artifact context into a newly activated evidence hook.
+
+        The Kit encryption owner stays in private storage. A missing key binds
+        the hook shut instead of leaving a raw byte path open.
+        """
+
+        hook = mediator.evidence_storage
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision="attachment-1")
+        except WorkspacePersistenceError as exc:
+            hook.bind_private_artifact_context(None, unavailable_code=str(exc.code or "key_unavailable"))
+            return {"status": "unavailable", "code": exc.code, "private_route_bound": True, "plaintext_fallback": False}
+        bound = {
+            **context,
+            "backend": self._private_local_backend(),
+            "backend_name": "local_cache",
+            "pin_content": False,
+            "revision": "attachment-1",
+        }
+        hook.bind_private_artifact_context(bound)
+        return {
+            "status": "available",
+            "private_route_bound": True,
+            "tenant_id": bound["tenant_id"],
+            "case_id": bound["case_id"],
+            "principal_id": bound["principal_id"],
+            "plaintext_fallback": False,
+        }
+
+    def activate_private_derived_indexes(self, mediator: Any, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Bind hook derived text to the encrypted owner or leave persistence unavailable.
+
+        An interview-db directory name or mode 0700 is not encryption. Missing
+        keys do not open a plaintext preview path.
+        """
+
+        hooks = (
+            getattr(mediator, "evidence_state", None),
+            getattr(mediator, "claim_support", None),
+            getattr(mediator, "legal_authority_storage", None),
+        )
+        present = [hook for hook in hooks if hook is not None and hasattr(hook, "bind_private_derived_index")]
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision="index-1")
+        except WorkspacePersistenceError as exc:
+            for hook in present:
+                hook.bind_private_derived_index(
+                    None,
+                    unavailable_code=str(exc.code or "key_unavailable"),
+                    directory_mode_private=True,
+                )
+            return {
+                "status": "unavailable",
+                "code": exc.code,
+                "encrypted": False,
+                "encryption_from_path_or_mode_bits": False,
+                "directory_mode_private": True,
+                "plaintext_fallback": False,
+                "index_mode": "unavailable",
+            }
+        bound = {
+            **context,
+            "backend": self._private_local_backend(),
+            "backend_name": "local_cache",
+            "pin_content": False,
+            "index_mode": "durable",
+            "revision": "index-1",
+        }
+        for hook in present:
+            hook.bind_private_derived_index(bound, directory_mode_private=True)
+        return {
+            "status": "available",
+            "encrypted": True,
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": True,
+            "plaintext_fallback": False,
+            "index_mode": "durable",
+            "case_id": bound["case_id"],
+            "tenant_id": bound["tenant_id"],
+            "remote_durable": False,
+        }
 
     def _private_artifact_context(self, user_id: str, case_id: Optional[str] = None, *, revision: str = "session-v1") -> Dict[str, Any]:
         """Resolve current request admission and the live user-owned key session."""
         from integrations.private_storage import PrivateArtifactBinding, PrivateKeyMaterialError
 
+        # A replaced or symlinked session root must fail closed before any key
+        # lookup. Following it would surface unlock_needed instead of the
+        # directory boundary refusal, and could read a foreign key store.
+        descriptor = self._open_session_directory()
+        os.close(descriptor)
         selected_case = str(case_id or _REQUEST_CASE.get() or self._effective_access().case_id or user_id)
         resolved = self._check_access(user_id, ability="read", case_id=selected_case, record_case_id=selected_case)
         self._require_private_case_key_access(resolved, selected_case, principal_id=resolved)
@@ -3256,7 +5339,16 @@ class ComplaintWorkspaceService:
         except PrivateKeyMaterialError:
             raise WorkspacePersistenceError("Private workspace keys require unlock.", code="unlock_needed", public_status="unlock_needed") from None
         access = self._effective_access()
-        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+        authority = self._owner_case_authority()
+        if authority is not None:
+            authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+            if resolved != authority.canonical_owner_principal_id or selected_case != authority.case_id:
+                raise WorkspaceAuthorizationDenied()
+            # This is the case-scoped AAD/storage subject, never the request
+            # actor or its authorization. The live provider retains the real
+            # issued request binding and re-proves it on every resolve.
+            access = WorkspaceAccess.authenticated(resolved, selected_case)
+        elif access.trust == "trusted_local" and not access.principal_id and not access.case_id:
             access = WorkspaceAccess.trusted_local(resolved, selected_case)
         return {"access": access, "tenant_id": resolved, "case_id": selected_case,
                 "principal_id": resolved, "key_provider": provider, "revision": revision}
@@ -3377,8 +5469,60 @@ class ComplaintWorkspaceService:
         context = self._private_artifact_context(user_id, case_id)
         binding = PrivateArtifactBinding(tenant_id=context["tenant_id"], case_id=context["case_id"],
             principal_id=context["principal_id"], artifact_kind="session", revision="session-v1")
+        self._refuse_incoherent_key(str(context["tenant_id"]), str(context["case_id"]))
         key_id, key = context["key_provider"].resolve(binding)
         return context, key_id, key
+
+    def _admit_key_bound_mutation(self, user_id: str, *, actor_id: Optional[str], expected_key_epoch: Optional[int], captured_key_id: Optional[str], case_id: Optional[str] = None) -> None:
+        case_id = str(case_id or _REQUEST_CASE.get() or user_id)
+        if expected_key_epoch is None and captured_key_id is None and not actor_id:
+            self._refuse_incoherent_key(user_id, case_id)
+            return
+        gate = self.synchronize_key_coherence(
+            action="write", tenant_id=user_id, case_id=case_id, actor_id=str(actor_id or user_id),
+            expected_epoch=expected_key_epoch, captured_key_id=captured_key_id,
+        )
+        if gate.get("admitted") is not True:
+            raise WorkspacePersistenceError(
+                "The case key no longer admits this write.",
+                code=str(gate.get("code") or "stale_key_epoch"),
+                public_status="recoverable",
+            )
+
+    def _joined_key_resolver(self, user_id: str, case_id: str):
+        """Resolve a retained envelope key through current owner admission.
+
+        This handle retains no key bytes or admission. Each lookup rechecks the
+        current issued owner, case binding and unlocked durable key session.
+        """
+        def lookup(key_id):
+            context, _active_id, _active_key = self._joined_key(user_id, case_id)
+            return self._private_key_session().lookup_data_key(
+                context["tenant_id"], context["case_id"], key_id)
+        return lookup
+
+    def _joined_publication_scope(self, user_id: str, case_id: str, key_id: str, key: bytes):
+        from contextlib import contextmanager
+        @contextmanager
+        def hold_epoch():
+            context, current_id, current_key = self._joined_key(user_id, case_id)
+            if current_id != key_id or current_key != key:
+                raise WorkspaceAuthorizationDenied()
+            if not isinstance(context["key_provider"], _WorkspaceCaseKeyProvider):
+                # Explicit legacy host providers own their raw-key contract;
+                # they have no UserOwnedKeySession epoch to lock. An issued
+                # GUI owner cannot select this compatibility path.
+                if self._owner_case_authority() is not None:
+                    raise WorkspaceAuthorizationDenied()
+                yield
+                return
+            session = self._private_key_session()
+            with session.case_key_epoch_scope(user_id, case_id):
+                _context, current_id, current_key = self._joined_key(user_id, case_id)
+                if current_id != key_id or current_key != key:
+                    raise WorkspaceAuthorizationDenied()
+                yield
+        return hold_epoch
 
     def _joined_chat_identity(self, state: Mapping[str, Any], question_id: str, answer: str,
                               question_revision: Optional[int] = None) -> str:
@@ -3390,7 +5534,8 @@ class ComplaintWorkspaceService:
         return hmac.new(key, b"joined-intake-effect@1\x00" + body, hashlib.sha256).hexdigest()
 
     def _commit_joined_snapshot(self, state: Dict[str, Any], *, effect_id: Optional[str] = None,
-                                question_id: Optional[str] = None, answer: Optional[str] = None) -> Dict[str, Any]:
+                                question_id: Optional[str] = None, answer: Optional[str] = None,
+                                before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
         from integrations.private_storage import commit_private_revision
         user = str(state["user_id"])
         context, key_id, key = self._joined_key(user, _state_case_id(state, user))
@@ -3423,7 +5568,9 @@ class ComplaintWorkspaceService:
             fact_graph=json.dumps({"relationships": state.get("annotation_knowledge_graph", {}).get("relationships", []),
                                    "revision": revision}, sort_keys=True).encode("utf-8"),
             proof=json.dumps({"entries": state.get("proof_history", []), "revision": revision}, sort_keys=True).encode("utf-8"),
-            transaction_id=transaction, effect_id=effect)
+            transaction_id=transaction, effect_id=effect,
+               key_resolver=self._joined_key_resolver(context["tenant_id"], context["case_id"]), publication_scope=self._joined_publication_scope(context["tenant_id"], context["case_id"], key_id, key), **({"before_publish": before_publish} if before_publish is not None else {}),
+           )
         if not publication.committed:
             raise WorkspacePersistenceError("joined revision did not commit", code="durability_unproven", public_status="recoverable")
         return state
@@ -3535,11 +5682,320 @@ class ComplaintWorkspaceService:
             writer=writer,
             fsync_file=fsync_file,
             fsync_directory=fsync_directory,
-        )
+            key_resolver=self._joined_key_resolver(resolved, binding_case),
+        publication_scope=self._joined_publication_scope(resolved, binding_case, key_id, key))
         receipt = publication.as_dict()
         receipt["network_pinned"] = False
         receipt["question_id"] = str(question_id)
         return receipt
+
+    def commit_factual_graph_revision(
+        self,
+        user_id: str,
+        graph: Any,
+        *,
+        case_id: str,
+        transaction_id: str,
+        effect_id: str,
+        expected_revision: Optional[str] = None,
+        backend: Any = None,
+    ) -> Dict[str, Any]:
+        """Commit factual revision provenance inside the encrypted case transaction.
+
+        The graph bytes are sealed by the automatic private-artifact owner.
+        The transaction records that ciphertext id with the canonical document.
+        A failed seal or commit does not replace the last committed head, and
+        nothing is written as plaintext JSON, a plaintext CID, or a second graph store.
+        """
+        from integrations.ipfs_datasets.graphs import (
+            FACTUAL_GRAPH_ARTIFACT_KIND,
+            encode_factual_graph_artifact,
+            seal_factual_graph_artifact,
+        )
+        from integrations.private_storage import PrivateRevisionError, PrivateStorageError, commit_private_revision
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = str(context["case_id"])
+        state = self._load_state(resolved, case_id=binding_case)
+        if str(state.get("user_id") or "") != resolved:
+            raise WorkspaceAuthorizationDenied()
+        current = str(state.get("private_revision") or "0")
+        expected = current if expected_revision in {None, ""} else str(expected_revision)
+        if current != expected:
+            raise WorkspacePersistenceError(
+                "stale revision",
+                code="revision_conflict",
+                public_status="recoverable",
+            )
+        history = [item for item in list(state.get("intake_history") or []) if isinstance(item, dict)]
+        if any(str(item.get("effect_id") or "") == effect_id for item in history):
+            raise WorkspacePersistenceError(
+                "effect already recorded",
+                code="duplicate_effect",
+                public_status="recoverable",
+            )
+        next_revision = str(int(expected) + 1)
+        artifact_revision = f"fact-graph-{next_revision}"
+        transport = backend if backend is not None else self._private_local_backend()
+        backend_name = "local_cache" if backend is None else "kit"
+        try:
+            sealed = seal_factual_graph_artifact(
+                graph,
+                access=context["access"],
+                tenant_id=str(context["tenant_id"]),
+                case_id=binding_case,
+                principal_id=str(context["principal_id"]),
+                revision=artifact_revision,
+                backend=transport,
+                backend_name=backend_name,
+                key_provider=context["key_provider"],
+                pin_content=backend is not None,
+            )
+        except (PrivateStorageError, ValueError, TypeError) as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph storage is unavailable.",
+                code=str(getattr(exc, "code", "") or "artifact_unavailable"),
+                public_status="unavailable",
+            ) from None
+        document = sealed["document"]
+        if encode_factual_graph_artifact(document) != sealed["payload"]:
+            raise WorkspacePersistenceError(
+                "Factual graph artifact did not round-trip before commit.",
+                code="readback_mismatch",
+                public_status="recoverable",
+            )
+        annotation = state.get("annotation_knowledge_graph")
+        if not isinstance(annotation, dict):
+            annotation = {"entities": [], "relationships": []}
+        relationships = [item for item in list(annotation.get("relationships") or []) if isinstance(item, dict)]
+        annotation["relationships"] = relationships
+        state["annotation_knowledge_graph"] = annotation
+        proofs = [item for item in list(state.get("proof_history") or []) if isinstance(item, dict)]
+        proofs.append({
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "factual-graph-revision",
+            "revision": next_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+        })
+        history.append({
+            "question_id": "factual-graph",
+            "answer": "",
+            "effect_id": effect_id,
+            "transaction_id": transaction_id,
+            "kind": "factual-graph-revision",
+        })
+        state["intake_history"] = history
+        state["proof_history"] = proofs
+        state["private_revision"] = next_revision
+        state["factual_graph_binding"] = {
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "case_id": binding_case,
+            "owner": resolved,
+        }
+        state.update(missing_new_session=False, session_readable=True, at_rest_protection="private_envelope")
+        fact_document = {
+            "relationships": relationships,
+            "effect_id": effect_id,
+            "revision": next_revision,
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "factual_artifact": document,
+        }
+        proof_document = {"entries": proofs, "effect_id": effect_id, "revision": next_revision}
+        _joined_context, key_id, key = self._joined_key(resolved, binding_case)
+        try:
+            publication = commit_private_revision(
+                self.joined_revision_repository(resolved, binding_case),
+                tenant_id=resolved,
+                case_id=binding_case,
+                principal_id=resolved,
+                key=key,
+                key_id=key_id,
+                expected_revision=expected,
+                session=json.dumps(state, sort_keys=True).encode("utf-8"),
+                fact_graph=json.dumps(fact_document, sort_keys=True).encode("utf-8"),
+                proof=json.dumps(proof_document, sort_keys=True).encode("utf-8"),
+                transaction_id=transaction_id,
+                effect_id=effect_id,
+                key_resolver=self._joined_key_resolver(resolved, binding_case),
+            publication_scope=self._joined_publication_scope(resolved, binding_case, key_id, key))
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code=str(exc.code or "transaction_failed"),
+                public_status="recoverable",
+            ) from None
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code=str(exc.code or "artifact_unavailable"),
+                public_status="recoverable",
+            ) from None
+        if not publication.committed:
+            raise WorkspacePersistenceError(
+                "Factual graph revision did not commit.",
+                code="durability_unproven",
+                public_status="recoverable",
+            )
+        receipt = publication.as_dict()
+        receipt.update({
+            "network_pinned": False,
+            "private_artifact": True,
+            "plaintext_fallback": False,
+            "plaintext_catalog": False,
+            "ciphertext_storage_id": sealed["ciphertext_storage_id"],
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "case_id": binding_case,
+            "owner": resolved,
+            "graph_registry_used": False,
+        })
+        return receipt
+
+    def reload_factual_graph_revision(
+        self,
+        user_id: str,
+        *,
+        case_id: str,
+        backend: Any = None,
+    ) -> Dict[str, Any]:
+        """Reload the committed factual graph for the same owner and case.
+
+        The ciphertext artifact is required. A plaintext JSON, cache, or CID
+        document is not accepted in its place. Authentication and corruption
+        failures leave the committed head untouched.
+        """
+        from integrations.ipfs_datasets.graphs import (
+            FACTUAL_GRAPH_ARTIFACT_KIND,
+            encode_factual_graph_artifact,
+            open_factual_graph_artifact,
+        )
+        from integrations.private_storage import (
+            PrivateArtifactIntegrityError,
+            PrivateRevisionError,
+            PrivateStorageError,
+            read_private_revision,
+        )
+
+        resolved = self._check_access(user_id, ability="read", case_id=case_id)
+        context = self._private_artifact_context(resolved, case_id)
+        binding_case = str(context["case_id"])
+        _context, key_id, key = self._joined_key(resolved, binding_case)
+        transport = backend if backend is not None else self._private_local_backend()
+        backend_name = "local_cache" if backend is None else "kit"
+        try:
+            opened = read_private_revision(
+                self.joined_revision_repository(resolved, binding_case),
+                tenant_id=resolved,
+                case_id=binding_case,
+                principal_id=resolved,
+                key=key,
+                key_id=key_id,
+                key_resolver=self._joined_key_resolver(resolved, binding_case),
+            )
+            if not isinstance(opened, dict):
+                raise PrivateRevisionError("factual graph revision is missing", code="authentication_failed")
+            fact = json.loads(opened["fact_graph"])
+            if not isinstance(fact, dict):
+                raise PrivateArtifactIntegrityError("malformed")
+            storage_id = str(fact.get("ciphertext_storage_id") or "")
+            artifact_revision = str(fact.get("artifact_revision") or "")
+            embedded = fact.get("factual_artifact")
+            if fact.get("artifact_kind") != FACTUAL_GRAPH_ARTIFACT_KIND or not isinstance(embedded, dict):
+                raise PrivateArtifactIntegrityError("malformed")
+            loaded = open_factual_graph_artifact(
+                storage_id,
+                access=context["access"],
+                tenant_id=str(context["tenant_id"]),
+                case_id=binding_case,
+                principal_id=str(context["principal_id"]),
+                revision=artifact_revision,
+                backend=transport,
+                backend_name=backend_name,
+                key_provider=context["key_provider"],
+            )
+            if encode_factual_graph_artifact(loaded) != encode_factual_graph_artifact(embedded):
+                raise PrivateStorageError("factual graph ciphertext mismatch", code="readback_mismatch")
+        except (PrivateStorageError, PrivateRevisionError, PrivateArtifactIntegrityError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            raise WorkspacePersistenceError(
+                "Factual graph did not authenticate; the last committed graph was preserved.",
+                code="authentication_failed",
+                public_status="recoverable",
+            ) from None
+        return {
+            "status": "available",
+            "owner": resolved,
+            "case_id": binding_case,
+            "tenant_id": str(context["tenant_id"]),
+            "revision": str(opened["revision"]),
+            "ciphertext_storage_id": storage_id,
+            "artifact_kind": FACTUAL_GRAPH_ARTIFACT_KIND,
+            "artifact_revision": artifact_revision,
+            "artifact": loaded,
+            "assertion_states": loaded.get("assertion_states") or {},
+            "relationships": loaded.get("relationships") or {},
+            "invalidations": list(loaded.get("invalidations") or []),
+            "unresolved_conflicts": list(loaded.get("unresolved_conflicts") or []),
+            "revisions": list(loaded.get("revisions") or []),
+            "plaintext_fallback": False,
+            "private_artifact": True,
+        }
+
+    def current_factual_graph_projection(
+        self,
+        user_id: Optional[str] = None,
+        *,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Project the current encrypted session graph. This read does not write it."""
+        from complaint_phases.knowledge_graph import project_current_factual_graph
+        from mediator.integrations.graph_tools import FactualGraphProjectionError
+
+        resolved = self._resolve_user_id(user_id)
+        session = self.get_session(resolved, case_id=case_id)
+        state = session.get("session") if isinstance(session, dict) else None
+        if not isinstance(state, dict):
+            raise WorkspacePersistenceError(
+                "Factual graph is not available.",
+                code="knowledge_graph_unavailable",
+                public_status="recoverable",
+            )
+        binding_case = str(case_id or state.get("case_id") or "")
+        if case_id and str(state.get("case_id") or "") != str(case_id):
+            raise WorkspacePersistenceError(
+                "Factual graph is bound to another case.",
+                code="cross_case_id",
+                public_status="recoverable",
+            )
+        interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        raw = interview.get("knowledge_graph")
+        if not isinstance(raw, dict) or not raw:
+            raise WorkspacePersistenceError(
+                "Factual graph is not available.",
+                code="knowledge_graph_unavailable",
+                public_status="recoverable",
+            )
+        try:
+            projected = project_current_factual_graph(raw, case_id=binding_case)
+        except FactualGraphProjectionError as exc:
+            code = exc.code if exc.code in {
+                "cross_case_id", "knowledge_graph_unavailable", "data_graph_owner_unavailable", "factual_ledger_invalid",
+            } else "knowledge_graph_unavailable"
+            raise WorkspacePersistenceError(
+                "Factual graph projection was refused.",
+                code=code,
+                public_status="recoverable",
+            ) from None
+        projected["owner"] = resolved
+        projected["session_case_id"] = str(state.get("case_id") or "")
+        projected["private_revision"] = state.get("private_revision")
+        projected["read_only"] = True
+        return projected
 
     def recover_joined_intake_revision(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
         from integrations.private_storage import PrivateArtifactBinding, recover_private_revision
@@ -3561,8 +6017,179 @@ class ComplaintWorkspaceService:
             principal_id=resolved,
             key=key,
             key_id=key_id,
+            key_resolver=self._joined_key_resolver(resolved, context["case_id"]),
         )
         return publication.as_dict()
+
+    def workflow_continuity_repository(self, user_id: str, case_id: Optional[str] = None) -> Path:
+        """Encrypted workflow head. This path is not a browser cache."""
+
+        identity = json.dumps(["workflow-continuity", str(user_id), str(case_id or user_id)], separators=(",", ":"))
+        return self._session_dir / "workflow-continuity" / ("p-" + principal_namespace(identity))
+
+    def seal_encrypted_workflow_continuity(
+        self,
+        user_id: str,
+        workflow: Mapping[str, Any],
+        *,
+        case_id: Optional[str] = None,
+        crash_injector: Any = None,
+        transaction_id: Optional[str] = None,
+        effect_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist workflow continuity from the unlocked case wallet.
+
+        In-memory service objects are dropped. A crash injector can stop the
+        Kit WAL before the head moves; it does not write a browser copy.
+        """
+
+        from integrations.private_storage import WorkflowContinuityError, commit_workflow_continuity
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        selected = str(case_id or resolved)
+        ready = self.ensure_private_case_key(resolved, selected)
+        if ready.get("unlocked") is not True and ready.get("data_key_id") is None:
+            raise WorkspacePersistenceError(
+                "Private workspace keys require unlock.",
+                code="missing_key",
+                public_status="unlock_needed",
+            )
+        context, key_id, key = self._joined_key(resolved, selected)
+        self._workflow_memory = None
+        try:
+            receipt = commit_workflow_continuity(
+                self.workflow_continuity_repository(resolved, context["case_id"]),
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=key,
+                key_id=key_id,
+                workflow=workflow,
+                transaction_id=transaction_id,
+                effect_id=effect_id,
+                crash_injector=crash_injector,
+                key_resolver=self._joined_key_resolver(resolved, str(context["case_id"])),
+            )
+        except WorkflowContinuityError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status="recoverable") from None
+        receipt["wallet_binding"] = self._wallet_binding(resolved)
+        return receipt
+
+    def reconstruct_encrypted_workflow(
+        self,
+        user_id: Optional[str],
+        *,
+        case_id: Optional[str] = None,
+        browser_cache: Any = None,
+        key: Optional[bytes] = None,
+        key_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Cold-open services, the wallet descriptor, and workflow records.
+
+        The process memory and ``browser_cache`` are not sources. A locked
+        wallet, a foreign key id, or a head that fails authentication returns
+        an explicit refusal and does not mint a case.
+        """
+
+        from integrations.private_storage import reconstruct_workflow_continuity
+
+        del browser_cache
+        try:
+            resolved = self._check_access(user_id, ability="read", case_id=case_id)
+        except WorkspaceAuthorizationDenied:
+            return {
+                "schema": "cg-workflow-continuity-v1",
+                "resumed": False,
+                "code": "authorization_denied",
+                "reconstructed_from_browser_cache": False,
+                "browser_cache_ignored": True,
+                "empty_case_created": False,
+                "services": [],
+                "wallet": None,
+                "durability": {
+                    "durability_scope": "unproven",
+                    "local_durable": False,
+                    "remote_durable": False,
+                    "qualified_remote_storage": False,
+                },
+            }
+        selected = str(case_id or resolved)
+        repository = self.workflow_continuity_repository(resolved, selected)
+        session = self._private_key_session()
+        if key is None:
+            if not session.unlocked:
+                view = reconstruct_workflow_continuity(
+                    repository,
+                    tenant_id=resolved,
+                    case_id=selected,
+                    principal_id=resolved,
+                    key=None,
+                    key_id=None,
+                )
+                view["wallet_binding"] = self._wallet_binding(resolved)
+                return view
+            try:
+                _context, key_id, key = self._joined_key(resolved, selected)
+            except WorkspacePersistenceError:
+                view = reconstruct_workflow_continuity(
+                    repository,
+                    tenant_id=resolved,
+                    case_id=selected,
+                    principal_id=resolved,
+                    key=None,
+                    key_id=None,
+                )
+                view["wallet_binding"] = self._wallet_binding(resolved)
+                return view
+        view = reconstruct_workflow_continuity(
+            repository,
+            tenant_id=resolved,
+            case_id=selected,
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+            key_resolver=None if key_id is None else self._joined_key_resolver(resolved, selected),
+        )
+        view["wallet_binding"] = self._wallet_binding(resolved)
+        self._workflow_memory = None
+        return view
+
+    def recover_encrypted_workflow(
+        self,
+        user_id: str,
+        *,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run WAL recovery against the workflow repository, then reconstruct."""
+
+        from integrations.private_storage import recover_workflow_continuity
+
+        resolved = self._check_access(user_id, ability="write", case_id=case_id)
+        selected = str(case_id or resolved)
+        if not self._private_key_session().unlocked:
+            view = recover_workflow_continuity(
+                self.workflow_continuity_repository(resolved, selected),
+                tenant_id=resolved,
+                case_id=selected,
+                principal_id=resolved,
+                key=None,
+                key_id=None,
+            )
+            view["wallet_binding"] = self._wallet_binding(resolved)
+            return view
+        _context, key_id, key = self._joined_key(resolved, selected)
+        view = recover_workflow_continuity(
+            self.workflow_continuity_repository(resolved, selected),
+            tenant_id=resolved,
+            case_id=selected,
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+            key_resolver=self._joined_key_resolver(resolved, selected),
+        )
+        view["wallet_binding"] = self._wallet_binding(resolved)
+        self._workflow_memory = None
+        return view
 
     def _private_local_backend(self):
         from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
@@ -3669,6 +6296,7 @@ class ComplaintWorkspaceService:
         expected_revision: Optional[str] = None,
         migrate_plaintext: bool = False,
         fail_before_head: bool = False,
+        before_head: Any = None,
     ) -> Dict[str, Any]:
         """Persist one complete interview snapshot inside the private session tree."""
         from integrations.ipfs_datasets.storage import InterviewSnapshotError, persist_interview_snapshot
@@ -3691,12 +6319,611 @@ class ComplaintWorkspaceService:
                 expected_revision=expected_revision,
                 migrate_plaintext=migrate_plaintext,
                 fail_before_head=fail_before_head,
+                before_head=before_head,
             )
         except InterviewSnapshotError as exc:
             raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
         receipt = dict(result["receipt"])
         receipt["plaintext_disk"] = protection != "user_chosen_encrypted"
-        return {"snapshot": result["snapshot"], "receipt": receipt}
+        return {
+            "snapshot": result["snapshot"],
+            "receipt": receipt,
+            "cold_read": {"narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0, "bindings_from": "committed_snapshot"},
+            "kit_durability": result.get("kit_durability") or {"status": "unavailable", "durable": False, "counts_as_replica": False, "network_durable": False},
+        }
+
+    def commit_complete_grounded_snapshot(
+        self,
+        user_id: str,
+        *,
+        case_id: Optional[str] = None,
+        expected_revision: Optional[str] = None,
+        fail_before_head: bool = False,
+        before_head: Any = None,
+        owners: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Seal the current grounded owners in one snapshot transaction.
+
+        The commit reads state that is already stored. It does not extract a
+        narrative, replay hook receipts, or call a model.
+        """
+
+        from integrations.ipfs_datasets.storage import assemble_interview_snapshot
+
+        state = self._load_state(user_id, case_id=case_id)
+        collected = _grounded_owners_from_state(state)
+        if isinstance(owners, Mapping):
+            for key, value in owners.items():
+                if value is not None:
+                    collected[key] = value
+        interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = collected.get("pending_inquiry") if isinstance(collected.get("pending_inquiry"), dict) else {"status": "unknown"}
+        stop = collected.get("stop_policy") if isinstance(collected.get("stop_policy"), dict) else {}
+        if isinstance(stop.get("reason"), str) and stop.get("reason"):
+            outcome = str(stop["reason"])
+        elif pending.get("inquiry_id"):
+            outcome = "awaiting_user"
+        else:
+            outcome = "unknown"
+        factual = collected.get("factual_graph") if isinstance(collected.get("factual_graph"), dict) else {}
+        narrative = _narrative_record(state)
+        snapshot = assemble_interview_snapshot(
+            session_id=str(interview.get("session_id") or state.get("user_id") or user_id),
+            revision="0",
+            outcome_reason=outcome,
+            pending_inquiry=pending,
+            knowledge_graph=interview.get("knowledge_graph") if isinstance(interview.get("knowledge_graph"), dict) else {"status": "unknown"},
+            dependency_graph=interview.get("dependency_graph") if isinstance(interview.get("dependency_graph"), dict) else {"status": "unknown"},
+            provenance={"source": "committed-state", "narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0},
+            unknown_items=list(interview.get("unknown_reasons") or []),
+            deferred_items=list(interview.get("capped_reasons") or []),
+            complaint_text=str(narrative.get("text") or ""),
+            transcript=[],
+            exports={"status": "not_filed"},
+            durability_payload={"writer": "grounded-snapshot", "remote_replicas_claimed": False},
+            revisions={
+                "session_revision": interview.get("session_revision", "unknown"),
+                "question_revision": pending.get("revision", "unknown"),
+                "graph_revision": factual.get("revision", "unknown"),
+            },
+            grounding=collected,
+        )
+        saved = self.persist_complete_interview_snapshot(
+            user_id,
+            snapshot,
+            case_id=case_id,
+            expected_revision=expected_revision,
+            fail_before_head=fail_before_head,
+            before_head=before_head,
+        )
+        saved["provider_replayed"] = False
+        saved["hooks_replayed"] = False
+        kit = saved.get("kit_durability") if isinstance(saved.get("kit_durability"), dict) else {}
+        saved["kit_durability_counts_as_replica"] = False
+        saved["network_durable"] = False
+        if kit.get("counts_as_replica") is True or kit.get("network_durable") is True:
+            raise WorkspacePersistenceError(
+                "A local durability receipt cannot claim replica durability.",
+                code="durability_unproven",
+                public_status="recoverable",
+            )
+        return saved
+
+    def case_manifest_repository(self, user_id: str, case_id: Optional[str] = None) -> Path:
+        """Private CAS root for complete encrypted case revisions."""
+
+        return self.joined_revision_repository(user_id, case_id)
+
+    def _case_manifest_identity(self, user_id: str, case_id: Optional[str] = None) -> Dict[str, Any]:
+        context, key_id, key = self._joined_key(user_id, case_id)
+        return {
+            "tenant_id": str(context["tenant_id"]),
+            "case_id": str(context["case_id"]),
+            "principal_id": str(context["principal_id"]),
+            "key": key,
+            "key_id": key_id,
+        }
+
+    def _complete_case_artifacts(self, snapshot: Mapping[str, Any]) -> Dict[str, Any]:
+        from integrations.private_storage import _COMPLETE_CASE_ROLES
+
+        if not isinstance(snapshot, Mapping):
+            raise WorkspacePersistenceError(
+                "A complete case snapshot is required.",
+                code="role_missing",
+                public_status="recoverable",
+            )
+        artifacts: Dict[str, Any] = {}
+        for public_name, _kind in _COMPLETE_CASE_ROLES:
+            value = snapshot.get(public_name)
+            if isinstance(value, (bytes, bytearray)):
+                body = bytes(value)
+                revision = public_name
+            elif isinstance(value, Mapping) and isinstance(value.get("body"), (bytes, bytearray)):
+                body = bytes(value["body"])
+                revision = str(value.get("revision") or public_name)
+            elif isinstance(value, Mapping) and value:
+                body = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                revision = str(value.get("revision") or public_name)
+            else:
+                raise WorkspacePersistenceError(
+                    "A complete case snapshot is missing a required owner.",
+                    code="role_missing",
+                    public_status="recoverable",
+                )
+            if not body or body in {b"{}", b"[]", b"null"}:
+                raise WorkspacePersistenceError(
+                    "A complete case snapshot is missing a required owner.",
+                    code="role_missing",
+                    public_status="recoverable",
+                )
+            artifacts[public_name] = {"body": body, "revision": revision}
+        return artifacts
+
+    def commit_complete_encrypted_case_revision(
+        self,
+        user_id: str,
+        snapshot: Mapping[str, Any],
+        *,
+        case_id: Optional[str] = None,
+        expected_head: Optional[str] = None,
+        expected_hash: Optional[str] = None,
+        fail_before_head: bool = False,
+        private_names: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Publish one complete encrypted case revision through the existing CAS.
+
+        Missing owners, a crashed head update, and a conflicting writer leave
+        the acknowledged head unchanged. This method does not mint an empty case.
+        """
+
+        from integrations.private_storage import (
+            CaseManifestConflict,
+            PrivateRevisionError,
+            publish_case_manifest,
+        )
+
+        artifacts = self._complete_case_artifacts(snapshot)
+        try:
+            self.ensure_private_case_key(user_id, str(case_id or user_id))
+            identity = self._case_manifest_identity(user_id, case_id)
+        except WorkspacePersistenceError:
+            raise
+        except Exception as exc:
+            raise WorkspacePersistenceError(
+                "Private workspace keys require unlock.",
+                code="unlock_needed",
+                public_status="unlock_needed",
+            ) from exc
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            publication = publish_case_manifest(
+                repository,
+                tenant_id=identity["tenant_id"],
+                case_id=identity["case_id"],
+                principal_id=identity["principal_id"],
+                key=identity["key"],
+                key_id=identity["key_id"],
+                expected_head=expected_head,
+                expected_hash=expected_hash,
+                artifacts=artifacts,
+                private_names=dict(private_names or {}),
+                complete=True,
+                fail_before_head=fail_before_head,
+            )
+        except CaseManifestConflict as exc:
+            raise WorkspacePersistenceError(
+                "case manifest head conflict",
+                code="manifest_conflict",
+                public_status="recoverable",
+            ) from exc
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        receipt = publication.as_dict()
+        receipt["empty_replacement"] = False
+        receipt["complete"] = True
+        return receipt
+
+    def read_complete_encrypted_case_revision(
+        self,
+        user_id: str,
+        *,
+        case_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        from integrations.private_storage import PrivateRevisionError, read_case_manifest
+
+        identity = self._case_manifest_identity(user_id, case_id)
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            opened = read_case_manifest(repository, **identity)
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        if opened is None:
+            return None
+        if opened.get("complete") is not True:
+            raise WorkspacePersistenceError(
+                "case manifest blob is missing or stale",
+                code="stale_head",
+                public_status="recoverable",
+            )
+        return opened
+
+    def replay_acknowledged_encrypted_case_revision(
+        self,
+        user_id: str,
+        *,
+        generation: str,
+        manifest_hash: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateRevisionError, replay_acknowledged_case_revision
+
+        identity = self._case_manifest_identity(user_id, case_id)
+        repository = self.case_manifest_repository(identity["tenant_id"], identity["case_id"])
+        try:
+            publication = replay_acknowledged_case_revision(
+                repository,
+                generation=generation,
+                manifest_hash=manifest_hash,
+                **identity,
+            )
+        except PrivateRevisionError as exc:
+            raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.state) from exc
+        receipt = publication.as_dict()
+        receipt["empty_replacement"] = False
+        return receipt
+
+    def _replica_identity(self, user_id: str, case_id: Optional[str]) -> Dict[str, Any]:
+        context = self._interview_snapshot_key(user_id, case_id)
+        return {
+            "tenant_id": str(context["tenant_id"]),
+            "case_id": str(context["case_id"]),
+            "principal_id": str(context["principal_id"]),
+            "key": context["key"],
+            "key_id": context["key_id"],
+        }
+
+    def publish_encrypted_replicas(
+        self,
+        user_id: str,
+        repository: Path,
+        *,
+        case_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Publish sealed workspace replicas with the unlocked case key.
+
+        Callers cannot substitute another key. Fixture providers stay explicit
+        arguments and are not contacted unless the policy asks for them.
+        """
+
+        from integrations.ipfs_datasets.storage import publish_encrypted_replicas
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return publish_encrypted_replicas(repository, **identity, **kwargs)
+
+    def reconcile_encrypted_replicas(self, repository: Path, receipt: Optional[Mapping[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import reconcile_encrypted_replicas
+
+        return reconcile_encrypted_replicas(repository, receipt, **kwargs)
+
+    def restore_encrypted_replicas(self, user_id: str, repository: Path, receipt: Mapping[str, Any], *, case_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import restore_encrypted_replicas
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return restore_encrypted_replicas(repository, receipt, **identity, **kwargs)
+
+    def restore_encrypted_workspace(self, user_id: str, repository: Path, *, case_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import restore_encrypted_workspace
+
+        identity = self._replica_identity(user_id, case_id)
+        kwargs.pop("key", None)
+        kwargs.pop("key_id", None)
+        kwargs.pop("tenant_id", None)
+        kwargs.pop("principal_id", None)
+        return restore_encrypted_workspace(repository, **identity, **kwargs)
+
+    def count_verified_ciphertext_replicas(self, observations: Sequence[Mapping[str, Any]], **kwargs: Any) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import count_verified_ciphertext_replicas, label_ciphertext_replica_observations
+
+        if kwargs:
+            return label_ciphertext_replica_observations(observations, **kwargs)
+        return count_verified_ciphertext_replicas(observations)
+
+    def resume_encrypted_interview(self, user_id: Optional[str], *, browser_cache: Any = None) -> Dict[str, Any]:
+        """Restore one interview from the encrypted revision without replaying it.
+
+        A new process supplies the same unlocked case key. Pending inquiry, case
+        identity, consent, graph revisions, deferred gaps, and corrections come
+        from that revision. Browser caches and caller messages are ignored.
+        Denied, revoked, and missing-key results name the failure and omit case
+        plaintext. This read does not call mediator hooks or append history.
+        """
+
+        def denial(status: str, code: str) -> Dict[str, Any]:
+            return {
+                "schema": "encrypted-interview-resume-v1",
+                "status": status,
+                "code": code,
+                "resumed": False,
+                "hooks_replayed": False,
+                "messages_replayed": False,
+                "reconstructed_from_browser_cache": False,
+                "browser_cache_ignored": True,
+                "pending_inquiry": None,
+                "case": None,
+                "consent": None,
+                "factual_graph_revision": None,
+                "legal_graph_revision": None,
+                "deferred_gaps": [],
+                "corrections": [],
+                "legal_sufficiency": False,
+                "plaintext_case_state": None,
+                "encrypted_resume": {
+                    "status": status,
+                    "code": code,
+                    "resumed": False,
+                    "hooks_replayed": False,
+                    "messages_replayed": False,
+                    "reconstructed_from_browser_cache": False,
+                },
+            }
+
+        del browser_cache
+        try:
+            resolved = self._check_access(user_id, ability="read")
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        try:
+            keys = self._private_key_session()
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        if not keys.unlocked:
+            return denial("missing_key", "missing_key")
+        try:
+            state = self._load_state(resolved)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            code = str(exc.code or "")
+            if code in {"unlock_needed", "key_unavailable"}:
+                return denial("missing_key", "missing_key")
+            if code in {"authentication_failed", "corrupt_session"}:
+                return denial("missing_key", code)
+            return denial("missing_key", code or "missing_key")
+        case_id = _state_case_id(state, resolved)
+        source_identity = self._case_legal_context_identity(state)
+        try:
+            _, source_key_id, source_key = self._joined_key(resolved, case_id)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            return denial("missing_key", str(exc.code or "missing_key"))
+        grant = state.get("case_key_grant") if isinstance(state.get("case_key_grant"), dict) else {}
+        consent = state.get("operation_consent") if isinstance(state.get("operation_consent"), dict) else {}
+        if grant.get("revoked") is True or str(grant.get("status") or "") == "revoked":
+            return denial("revoked", "key_revoked")
+        if consent.get("revoked") is True:
+            return denial("revoked", "consent_revoked")
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else None
+        gaps = [deepcopy(item) for item in (projection.get("preserved_gaps") or []) if isinstance(item, dict)]
+        deferred = [item for item in gaps if str(item.get("disposition") or "") == "deferred"]
+        history = [item for item in (state.get("intake_history") or []) if isinstance(item, dict)]
+        corrections: List[Dict[str, Any]] = []
+        for item in history:
+            if str(item.get("disposition") or "") in {"corrected", "correction"}:
+                corrections.append({"source": "intake_history", "record": deepcopy(item)})
+        graph_payload = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else {}
+        legal_payload = projection.get("dependency_graph") if isinstance(projection.get("dependency_graph"), dict) else {}
+        factual_revision = None
+        if graph_payload:
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+                factual_revision = graph_revision_token(KnowledgeGraph.from_dict(graph_payload))
+            except Exception:
+                factual_revision = None
+            metadata = graph_payload.get("metadata") if isinstance(graph_payload.get("metadata"), dict) else {}
+            ledger = metadata.get("factual_ledger") if isinstance(metadata.get("factual_ledger"), dict) else {}
+            revision_rows = list(graph_payload.get("revisions") or []) + list(ledger.get("revisions") or [])
+            for revision in revision_rows:
+                if isinstance(revision, dict) and str(revision.get("action") or "") in {"correct", "correction", "supersede", "edit"}:
+                    corrections.append({"source": "factual_graph", "record": deepcopy(revision)})
+        legal_revision = hashlib.sha256(
+            json.dumps(legal_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+        view = {
+            "schema": "encrypted-interview-resume-v1",
+            "status": "resumed",
+            "code": "resumed",
+            "resumed": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "reconstructed_from_browser_cache": False,
+            "browser_cache_ignored": True,
+            "case": {
+                "case_id": _state_case_id(state, resolved),
+                "user_id": str(state.get("user_id") or resolved),
+                "session_revision": projection.get("session_revision"),
+                "private_revision": state.get("private_revision"),
+            },
+            "consent": deepcopy(consent) if consent else None,
+            "pending_inquiry": deepcopy(pending) if pending else None,
+            "factual_graph_revision": factual_revision,
+            "legal_graph_revision": legal_revision,
+            "deferred_gaps": deferred,
+            "preserved_gaps": gaps,
+            "corrections": corrections,
+            "legal_sufficiency": False,
+        }
+        payload = self.request_handlers._build_session_payload(state)
+        payload["encrypted_resume"] = view
+        payload["interview"] = {
+            "contract_version": "interview-transition-v1",
+            "action": "encrypted_resume",
+            "status": "resumed",
+            "inquiry": deepcopy(pending) if pending else None,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "legal_sufficiency": False,
+            "error": None,
+        }
+        payload.update({
+            "schema": view["schema"],
+            "status": "resumed",
+            "code": "resumed",
+            "resumed": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "reconstructed_from_browser_cache": False,
+            "browser_cache_ignored": True,
+            "legal_sufficiency": False,
+        })
+        # Projection is not delivery authority. Reopen the real current case
+        # and resolve its live key after all projection work, then reprove the
+        # issued cookie/case capability immediately before returning plaintext.
+        try:
+            current = self._load_state(resolved, case_id=case_id)
+            _, current_key_id, current_key = self._joined_key(resolved, case_id)
+            if (self._case_legal_context_identity(current) != source_identity
+                    or (current_key_id, current_key) != (source_key_id, source_key)):
+                return denial("stale", "revision_conflict")
+            self._check_access(resolved, ability="read", case_id=case_id)
+        except WorkspaceAuthorizationDenied:
+            return denial("denied", "authorization_denied")
+        except WorkspacePersistenceError as exc:
+            return denial("missing_key", str(exc.code or "missing_key"))
+        return payload
+
+    def seal_encrypted_browser_interview(self, user_id: str, *, case_id: Optional[str] = None) -> Dict[str, Any]:
+        """Seal the current interview into the encrypted snapshot. No hook or message is sent."""
+
+        from integrations.ipfs_datasets.storage import assemble_interview_snapshot
+
+        state = self._load_state(user_id, case_id=case_id)
+        record = _browser_resume_record(state)
+        interview = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = record["pending_inquiry"]
+        snapshot = assemble_interview_snapshot(
+            session_id=str(interview.get("session_id") or state.get("user_id") or user_id),
+            revision="0",
+            outcome_reason="awaiting_user" if pending.get("inquiry_id") else "unknown",
+            pending_inquiry=pending,
+            knowledge_graph=record["factual_graph"],
+            dependency_graph=record["legal_graph"],
+            provenance={"source": "encrypted-browser-resume", "narrative_reextracted": False, "hooks_replayed": False, "model_calls": 0},
+            unknown_items=list(interview.get("unknown_reasons") or []),
+            deferred_items=list(record["deferred_gaps"]),
+            complaint_text=str((_narrative_record(state).get("text") or "")),
+            transcript=[],
+            exports={"status": "not_filed"},
+            durability_payload={"writer": "encrypted-browser-resume", "remote_replicas_claimed": False},
+            revisions={
+                "session_revision": record["session_revision"],
+                "question_revision": pending.get("revision", "unknown"),
+                "graph_revision": record["factual_graph_revision"],
+            },
+        )
+        snapshot["browser_resume"] = record
+        saved = self.persist_complete_interview_snapshot(user_id, snapshot, case_id=case_id)
+        saved["hooks_replayed"] = False
+        saved["messages_replayed"] = False
+        saved["browser_cache_used"] = False
+        return saved
+
+    def resume_encrypted_browser_interview(self, user_id: Optional[str], *, browser_cache: Any = None) -> Dict[str, Any]:
+        """Restore one interview from the encrypted snapshot in a new process.
+
+        The browser cache argument is ignored. Hook receipts and prior messages
+        are copied as already-recorded state and are not dispatched again.
+        Denied, revoked, and missing-key results stay explicit and do not invent
+        a case from caller plaintext.
+        """
+
+        # Actual browser owners resume the current authenticated joined case
+        # revision. The optional explicitly sealed legacy snapshot may be an
+        # older version and cannot overwrite current GUI state or consent.
+        from .workspace_case_authority import current_workspace_case_authority
+        if current_workspace_case_authority() is not None:
+            return self.resume_encrypted_interview(user_id, browser_cache=browser_cache)
+        del browser_cache
+        receipt: Dict[str, Any] = {
+            "schema": "gui-encrypted-interview-resume-v1",
+            "restored": False,
+            "explicit": True,
+            "hooks_replayed": False,
+            "messages_replayed": False,
+            "browser_cache_used": False,
+            "source": "encrypted_interview_snapshot",
+            "code": "",
+            "status": "refused",
+        }
+        try:
+            resolved = self._check_access(user_id, ability="read")
+        except WorkspaceAuthorizationDenied:
+            receipt["code"] = "authorization_denied"
+            receipt["status"] = "denied"
+            return _encrypted_resume_refusal(user_id, receipt)
+        try:
+            loaded = self.load_complete_interview_snapshot(resolved)
+        except WorkspacePersistenceError as exc:
+            code = str(exc.code or "unavailable")
+            if code == "unlock_needed":
+                public = self._private_key_session().public_state()
+                if public.get("code") == "key_store_absent":
+                    receipt["code"] = "missing_key"
+                    receipt["status"] = "missing_key"
+                else:
+                    receipt["code"] = "unlock_needed"
+                    receipt["status"] = "denied"
+            elif code == "authentication_failed":
+                receipt["code"] = "key_revoked"
+                receipt["status"] = "revoked"
+            elif code == "snapshot_missing":
+                receipt["code"] = "snapshot_missing"
+                receipt["status"] = "refused"
+            else:
+                receipt["code"] = code
+                receipt["status"] = "refused"
+            return _encrypted_resume_refusal(resolved, receipt)
+        snapshot = loaded.get("snapshot") if isinstance(loaded.get("snapshot"), dict) else {}
+        record = snapshot.get("browser_resume") if isinstance(snapshot.get("browser_resume"), dict) else None
+        if not _browser_resume_record_complete(record):
+            receipt["code"] = "snapshot_incomplete"
+            receipt["status"] = "refused"
+            return _encrypted_resume_refusal(resolved, receipt)
+        assert record is not None
+        state = self._load_state(resolved)
+        _apply_browser_resume_record(state, record)
+        state = self._save_state(state)
+        receipt["restored"] = True
+        receipt["status"] = "resumed"
+        receipt["code"] = "resumed"
+        receipt["case_id"] = record["case_id"]
+        receipt["pending_inquiry_id"] = record["pending_inquiry"].get("inquiry_id")
+        receipt["factual_graph_revision"] = record["factual_graph_revision"]
+        receipt["legal_graph_revision"] = record["legal_graph_revision"]
+        receipt["consent_generation"] = (record.get("consent") or {}).get("generation")
+        receipt["deferred_gap_count"] = len(record.get("deferred_gaps") or [])
+        receipt["correction_count"] = len(record.get("corrections") or [])
+        payload = self._build_intake_chat_payload(state)
+        payload["encrypted_resume"] = receipt
+        payload["status"] = "resumed"
+        payload["stored_as_answer"] = False
+        payload["legal_sufficiency"] = False
+        payload["hooks_replayed"] = False
+        payload["messages_replayed"] = False
+        payload["browser_cache_used"] = False
+        return payload
 
     def load_complete_interview_snapshot(
         self,
@@ -3741,6 +6968,127 @@ class ComplaintWorkspaceService:
             )
         except InterviewSnapshotError as exc:
             raise WorkspacePersistenceError(str(exc), code=exc.code, public_status=exc.public_status) from None
+
+    def preflight_legacy_hook_artifact(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str] = None,
+        retention_policy: str = "retain",
+    ) -> Dict[str, Any]:
+        """Preflight one explicit legacy hook artifact. Does not scan or rewrite."""
+
+        return self._legacy_hook_migration(
+            user_id,
+            source_path=source_path,
+            source_preimage=source_preimage,
+            destination=destination,
+            revision=revision,
+            case_id=case_id,
+            retention_policy=retention_policy,
+            commit=False,
+            interrupt_at=None,
+        )
+
+    def commit_legacy_hook_artifact(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str] = None,
+        retention_policy: str = "retain",
+        interrupt_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Commit one explicit legacy hook artifact. Plaintext retirement follows the receipt."""
+
+        return self._legacy_hook_migration(
+            user_id,
+            source_path=source_path,
+            source_preimage=source_preimage,
+            destination=destination,
+            revision=revision,
+            case_id=case_id,
+            retention_policy=retention_policy,
+            commit=True,
+            interrupt_at=interrupt_at,
+        )
+
+    def _legacy_hook_migration(
+        self,
+        user_id: str,
+        *,
+        source_path: Path,
+        source_preimage: str,
+        destination: Path,
+        revision: str,
+        case_id: Optional[str],
+        retention_policy: str,
+        commit: bool,
+        interrupt_at: Optional[str],
+    ) -> Dict[str, Any]:
+        from integrations.private_storage import (
+            PrivateArtifactBindingError,
+            PrivateArtifactIntegrityError,
+            PrivateKeyMaterialError,
+            commit_legacy_hook_migration,
+            preflight_legacy_hook_migration,
+        )
+
+        if source_path is None or destination is None or not revision:
+            raise WorkspacePersistenceError(
+                "An explicit legacy hook source, destination, and revision are required.",
+                code="selection_required",
+                public_status="unavailable",
+            )
+        try:
+            context = self._private_artifact_context(user_id, case_id, revision=revision)
+        except WorkspacePersistenceError as exc:
+            return {
+                "schema": "legacy-hook-migration-receipt",
+                "status": "unavailable",
+                "code": exc.code,
+                "encrypted": False,
+                "pending": True,
+                "pending_items": [{"pending": "encryption"}],
+                "encrypted_items": [],
+                "encryption_established": False,
+                "verified_commit": False,
+                "automatic_scan": False,
+                "durable": False,
+                "network_durable": False,
+                "mode_bits_establish_encryption": False,
+                "local_copy_establishes_encryption": False,
+                "local_copy_establishes_durability": False,
+                "plaintext_retired": False,
+                "source_bytes_preserved": True,
+                "last_valid_head_preserved": True,
+            }
+        operation = commit_legacy_hook_migration if commit else preflight_legacy_hook_migration
+        kwargs = dict(
+            source_preimage=source_preimage,
+            destination=destination,
+            access=context["access"],
+            tenant_id=str(context["tenant_id"]),
+            case_id=str(context["case_id"]),
+            principal_id=str(context["principal_id"]),
+            revision=revision,
+            retention_policy=retention_policy,
+            key_provider=context["key_provider"],
+        )
+        if commit:
+            kwargs["interrupt_at"] = interrupt_at
+        try:
+            return operation(source_path, **kwargs)
+        except (PrivateArtifactBindingError, PrivateArtifactIntegrityError, PrivateKeyMaterialError) as exc:
+            code = getattr(exc, "reason", None) or getattr(exc, "code", "legacy_hook_rejected")
+            raise WorkspacePersistenceError(str(exc), code=str(code), public_status="recoverable") from None
 
     def export_readable_filing(
         self,
@@ -3875,9 +7223,32 @@ class ComplaintWorkspaceService:
             return current
         return self._default_access
 
+    def _owner_case_authority(self):
+        from .workspace_case_authority import (WorkspaceCaseAuthorityError,
+            current_workspace_case_authority)
+        try:
+            authority = current_workspace_case_authority()
+            if authority is None:
+                return None
+            access = self._effective_access()
+            if access.trust != "authenticated" or access.case_id != authority.case_id:
+                raise WorkspaceCaseAuthorityError("workspace_case_access_mismatch")
+            authority.revalidate(actor_principal_id=access.principal_id,
+                workspace=self, require_owner=True)
+            return authority
+        except WorkspaceCaseAuthorityError:
+            raise WorkspaceAuthorizationDenied() from None
+
     def _resolve_user_id(self, user_id: Optional[str]) -> str:
         access = self._effective_access()
         supplied = str(user_id).strip() if user_id is not None and str(user_id).strip() else ""
+        authority = self._owner_case_authority()
+        if authority is not None:
+            # The browser principal remains the actor. Only this issued,
+            # re-proved owner capability selects the encrypted storage owner.
+            if supplied and supplied not in {authority.actor_principal_id, authority.canonical_owner_principal_id}:
+                raise WorkspaceAuthorizationDenied()
+            return authority.canonical_owner_principal_id
         if access.trust == "authenticated":
             if not supplied:
                 return str(access.principal_id or "")
@@ -3897,6 +7268,16 @@ class ComplaintWorkspaceService:
         record_case_id: Optional[str] = None,
     ) -> str:
         access = self._effective_access()
+        authority = self._owner_case_authority()
+        if authority is not None:
+            if ability not in {"read", "write", "private_key"}:
+                raise WorkspaceAuthorizationDenied()
+            if ability == "write" and authority.action not in {"case.update", "case.message.send", "case.processing.choose"}:
+                raise WorkspaceAuthorizationDenied()
+            for selected in (case_id, record_case_id, _REQUEST_CASE.get(), access.case_id):
+                if selected is not None and str(selected) != authority.case_id:
+                    raise WorkspaceAuthorizationDenied()
+            return self._resolve_user_id(user_id)
         resolved_user = self._resolve_user_id(user_id)
         explicit_case = _REQUEST_CASE.get()
         selected_case = case_id if case_id is not None else explicit_case
@@ -4291,7 +7672,7 @@ class ComplaintWorkspaceService:
         try:
             readiness = private_revision_readiness(repository, tenant_id=resolved_user,
                 case_id=context["case_id"], principal_id=context["principal_id"],
-                key=readiness_key, key_id=readiness_key_id)
+                key=readiness_key, key_id=readiness_key_id, key_resolver=self._joined_key_resolver(resolved_user, context["case_id"]))
         except PrivateStorageError as exc:
             raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
                 code=exc.code, public_status="recoverable") from None
@@ -4300,7 +7681,7 @@ class ComplaintWorkspaceService:
             _, key_id, key = self._joined_key(resolved_user, context["case_id"])
             try:
                 opened = read_private_revision(repository, tenant_id=resolved_user, case_id=context["case_id"],
-                    principal_id=context["principal_id"], key=key, key_id=key_id)
+                    principal_id=context["principal_id"], key=key, key_id=key_id, key_resolver=self._joined_key_resolver(resolved_user, context["case_id"]))
                 loaded = json.loads(opened["session"])
                 graph = json.loads(opened["fact_graph"])
                 proof = json.loads(opened["proof"])
@@ -4397,7 +7778,61 @@ class ComplaintWorkspaceService:
             payload["mike_integration"].setdefault("audit_trail", [])
         return payload
 
-    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _terminal_graph_edit_publication_guard(self, state: Mapping[str, Any], *, actor_principal_id: str,
+                                             case_id: str) -> Optional[Callable[[], Any]]:
+        """Capture current issued owner, private source and key before editing.
+
+        This trusted callback is constructed inside the service, never from a
+        request field. The joined writer invokes it at the final head replace.
+        It grants no authority to callers without the current issued scope.
+        """
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from integrations.private_storage import PrivateStorageError
+        authority = self._owner_case_authority()
+        if authority is None:
+            return None
+        actor, user = str(actor_principal_id), str(state.get("user_id") or "")
+
+        def owner():
+            try:
+                decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            except WorkspaceCaseAuthorityError:
+                raise WorkspaceAuthorizationDenied() from None
+            if (authority.action != "case.update" or authority.actor_principal_id != actor
+                    or authority.case_id != case_id or user != decision.canonical_owner_principal_id
+                    or state.get("case_id") != case_id):
+                raise WorkspaceAuthorizationDenied()
+            return decision
+
+        def key():
+            try:
+                _context, key_id, material = self._joined_key(user, case_id)
+            except PrivateStorageError:
+                raise WorkspacePersistenceError("Private correction key is unavailable.",
+                    code="unlock_needed", public_status="unavailable") from None
+            return key_id, material
+
+        owner()
+        before = self._case_legal_context_identity(state)
+        admitted_key = key()
+
+        def revalidate_publication():
+            owner()
+            if key() != admitted_key:
+                raise WorkspacePersistenceError("Correction key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            current = self._load_state(user, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise WorkspacePersistenceError("Correction source changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            owner()
+            if key() != admitted_key:
+                raise WorkspacePersistenceError("Correction key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+
+        return revalidate_publication
+
+    def _save_state(self, state: Dict[str, Any], *, before_publish: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
         if state.get("session_readable") is False or state.get("existing_unreadable"):
             raise WorkspacePersistenceError(
                 "refusing to replace an unreadable session",
@@ -4416,12 +7851,16 @@ class ComplaintWorkspaceService:
         try:
             readiness = private_revision_readiness(repository, tenant_id=user_id,
                 case_id=record_case, principal_id=context["principal_id"],
-                key=readiness_key, key_id=readiness_key_id)
+                key=readiness_key, key_id=readiness_key_id, key_resolver=self._joined_key_resolver(user_id, record_case))
         except PrivateStorageError as exc:
             raise WorkspacePersistenceError("Joined state requires authenticated recovery; original bytes were preserved.",
                 code=exc.code, public_status="recoverable") from None
         if readiness == "committed":
-            return self._commit_joined_snapshot(state)
+            return self._commit_joined_snapshot(state,
+                **({"before_publish": before_publish} if before_publish is not None else {}))
+        if before_publish is not None:
+            raise WorkspacePersistenceError("Guarded publication requires a committed joined revision.",
+                code="joined_revision_required", public_status="recoverable")
         filename = self._private_session_filename(user_id)
         try:
             existing_raw = self._read_bytes_nofollow(filename)
@@ -4625,33 +8064,134 @@ class ComplaintWorkspaceService:
             payload["conversation_state"]["active_engine"] = "shared_interview"
             payload["legal_sufficiency"] = False
         payload["stopping_policy"] = _workspace_stopping_policy(state, active_question=active_question, answers=answers)
+        if state.get("open_dependencies") or state.get("dependency_action_context") or (
+            isinstance(state.get("interview_stop"), dict) and state["interview_stop"].get("dependency_lane")
+        ):
+            payload["authorized_next_action"] = publish_workspace_dependency_action(state)
         payload["legal_sufficiency"] = False
         payload["core_facts_complete"] = False
         payload["filing_ready"] = False
+        payload["adaptive_inquiry"] = _adaptive_inquiry_view(state)
+        payload["gap_preserved"] = bool(payload["adaptive_inquiry"]["preserved_gaps"])
+        payload["finite_interview_outcome"] = finite_interview_outcome(state, active_question=active_question)
+        payload["worker_stalled"] = False if payload["finite_interview_outcome"].get("user_waiting") else bool(payload["finite_interview_outcome"].get("worker_stalled"))
+        payload["user_waiting_is_worker_stall"] = False
+        payload["changes_law"] = False
+        payload["encrypted_head"] = _encrypted_head(state)
+        payload["affected_support_projection"] = [
+            dict(item) for item in (state.get("affected_support_projection") or []) if isinstance(item, dict)
+        ]
         return payload
+
+    def record_finite_interview_stop(self, state: Dict[str, Any], control: str) -> Dict[str, Any]:
+        """Persist one denoiser stop for pause, cancel, cap, unavailable capability, or saturation.
+
+        The user is not a stalled development worker. The saved stop keeps its
+        unresolved reasons and never records legal sufficiency.
+        """
+
+        authority = self._owner_case_authority()
+        user = str(state.get("user_id") or "")
+        case_id = _state_case_id(state, user)
+        publication_guard = None
+        admitted_key = None
+        if authority is not None:
+            publication_guard = self._terminal_graph_edit_publication_guard(state,
+                actor_principal_id=authority.actor_principal_id, case_id=case_id)
+            _context, key_id, key = self._joined_key(user, case_id)
+            admitted_key = (key_id, key)
+        normalized = str(control or "").strip().lower()
+        if normalized == "pause":
+            state["intentional_user_wait"] = {
+                "paused": True,
+                "intentional": True,
+                "reason": "user_pause",
+            }
+        else:
+            state["intentional_user_wait"] = {
+                "paused": False,
+                "intentional": False,
+                "reason": normalized,
+            }
+        state["worker_stalled"] = False
+        answers = state.get("intake_answers") or {}
+        active = None if normalized in {"saturate", "cap", "cancel", "unavailable"} else self._next_question(answers)
+        stop = _evaluate_finite_stop(state, control=normalized, active_question=active)
+        stop["legal_sufficiency"] = False
+        stop["worker_stalled"] = False
+        state["interview_stop"] = stop
+        if publication_guard is not None:
+            publication_guard()
+            state = self._save_state(state, before_publish=publication_guard)
+        else:
+            state = self._save_state(state)
+
+        def projection(current):
+            payload = self._build_intake_chat_payload(current, accepted_answer=None, requested_question_id=None)
+            payload["stored_as_answer"] = False
+            payload["legal_sufficiency"] = False
+            payload["worker_stalled"] = False
+            payload["user_waiting_is_worker_stall"] = False
+            payload["finite_interview_outcome"] = finite_interview_outcome(current, active_question=active, stop=stop)
+            payload["message"] = (
+                f"Interview stop: {payload['finite_interview_outcome']['stop']}. "
+                "Unresolved reasons stay visible. This is not legal sufficiency."
+            )
+            return payload
+
+        if authority is None:
+            return projection(state)
+        # Its own successful commit advances the head. Delivery authenticates
+        # the current committed revision instead of replaying the old guard.
+        from integrations.private_storage import private_revision_source_scope
+        with private_revision_source_scope(self.joined_revision_repository(user, case_id)):
+            current = self._load_state(user, case_id=case_id)
+            if current.get("private_revision") != state.get("private_revision"):
+                raise WorkspacePersistenceError("Finite-stop source changed before delivery.",
+                    code="revision_conflict", public_status="conflict")
+            payload = projection(current)
+            _context, key_id, key = self._joined_key(user, case_id)
+            if (key_id, key) != admitted_key:
+                raise WorkspacePersistenceError("Finite-stop key changed before delivery.",
+                    code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+            return payload
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
         testimony = state.get("evidence", {}).get("testimony") or []
         documents = state.get("evidence", {}).get("documents") or []
+        interview_complete = False
+        shared = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        if shared.get("schema_version") and not (shared.get("pending_inquiry") or {}):
+            interview_complete = shared.get("pending_inquiry") is None and bool(shared.get("answered_inquiries") or shared.get("session_revision"))
         matrix: List[Dict[str, Any]] = []
         for element in _CLAIM_ELEMENTS:
-            intake_supported = bool(answers.get(element["id"])) or (
-                element["id"] == "employer_knowledge" and bool(answers.get("protected_activity"))
-            ) or (element["id"] == "causation" and bool(answers.get("timeline")))
+            intake_asserted = bool(str(answers.get(element["id"]) or "").strip()) or (
+                element["id"] == "employer_knowledge" and bool(str(answers.get("protected_activity") or "").strip())
+            ) or (element["id"] == "causation" and bool(str(answers.get("timeline") or "").strip()))
             matching_testimony = [item for item in testimony if item.get("claim_element_id") == element["id"]]
             matching_documents = [item for item in documents if item.get("claim_element_id") == element["id"]]
-            support_count = len(matching_testimony) + len(matching_documents) + (1 if intake_supported else 0)
+            source_bound = [
+                item for item in [*matching_testimony, *matching_documents]
+                if _source_bound_evidence(item)
+            ]
             matrix.append(
                 {
                     "id": element["id"],
                     "label": element["label"],
-                    "supported": support_count > 0,
-                    "intake_supported": intake_supported,
+                    "supported": bool(source_bound),
+                    "intake_supported": False,
+                    "intake_asserted": intake_asserted,
+                    "interview_complete": bool(interview_complete),
+                    "interview_completion_means_legal_sufficiency": False,
+                    "legal_sufficiency": False,
+                    "support_requires_source_bound_evidence": True,
                     "testimony_count": len(matching_testimony),
                     "document_count": len(matching_documents),
-                    "support_count": support_count,
-                    "status": "supported" if support_count > 0 else "needs_support",
+                    "source_bound_count": len(source_bound),
+                    "support_count": len(source_bound),
+                    "status": "supported" if source_bound else "needs_source_bound_evidence",
                 }
             )
         return matrix
@@ -4665,19 +8205,22 @@ class ComplaintWorkspaceService:
         return {
             "claim_type": state.get("claim_type", "retaliation"),
             "case_synopsis": case_synopsis,
+            "legal_sufficiency": False,
+            "interview_completion_means_legal_sufficiency": False,
             "support_matrix": matrix,
             "overview": {
                 "supported_elements": len(supported),
                 "missing_elements": len(missing),
                 "testimony_items": len(evidence.get("testimony") or []),
                 "document_items": len(evidence.get("documents") or []),
+                "legal_sufficiency": False,
             },
             "recommended_actions": [
                 {
-                    "title": "Collect more corroboration",
-                    "detail": "Add testimony or documents to any unsupported claim element."
+                    "title": "Collect source-bound evidence",
+                    "detail": "Add testimony or documents that name a factual or legal source. Intake answers and a finished interview are not support."
                     if missing
-                    else "All core elements have at least one support source.",
+                    else "Source-bound evidence is recorded. That record is still not a finding of legal sufficiency.",
                 },
                 {
                     "title": "Check the timeline",
@@ -5615,9 +9158,18 @@ class ComplaintWorkspaceService:
             return self.request_handlers.get_session(resolved)
 
         if case_id is None:
-            return _run()
-        with _workspace_reference_scope(case_id=case_id):
-            return _run()
+            payload = _run()
+        else:
+            with _workspace_reference_scope(case_id=case_id):
+                payload = _run()
+        if isinstance(payload, dict):
+            session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+            bound_case = str(case_id or session.get("case_id") or resolved)
+            self._refuse_incoherent_key(resolved, bound_case)
+            published = dict(payload)
+            published["key_coherence"] = self.public_key_coherence(resolved, bound_case, actor_id=resolved)
+            return published
+        return payload
 
     def build_mediator_prompt(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -7454,6 +11006,8 @@ class ComplaintWorkspaceService:
         question_id: Optional[str] = None,
         expected_question_revision: Optional[int] = None,
         interview_action: Optional[str] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
     ) -> Dict[str, Any]:
         return self.request_handlers.run_intake_chat_turn(
             user_id,
@@ -7461,7 +11015,1254 @@ class ComplaintWorkspaceService:
             question_id=question_id,
             expected_question_revision=expected_question_revision,
             interview_action=interview_action,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
         )
+
+    def apply_terminal_graph_edit(
+        self,
+        user_id: Optional[str],
+        replacement: str,
+        *,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
+        target_stable_id: Optional[str] = None,
+        actor_principal_id: Optional[str] = None,
+        require_expected_revision: bool = False,
+    ) -> Dict[str, Any]:
+        return self.request_handlers.apply_terminal_graph_edit(
+            user_id,
+            replacement,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
+            target_stable_id=target_stable_id,
+            actor_principal_id=actor_principal_id,
+            require_expected_revision=require_expected_revision,
+        )
+
+    def review_case_factual_graph(self, user_id: Optional[str], *, case_id: str,
+                                  updates: Mapping[str, Any]) -> Dict[str, Any]:
+        """Publish one factual review only under current owner/key/source CAS.
+
+        The graph route cannot save a decrypted DTO itself. The existing
+        private revision writer rechecks this issued capability immediately
+        before replacing the durable head, including after encryption/fsync.
+        """
+        from complaint_phases.knowledge_graph import KnowledgeGraph, FactualReviewError
+        from mediator.integrations.graph_tools import FactualGraphProjectionError
+        from integrations.private_storage import PrivateStorageError
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.case_id != case_id or authority.action != "case.update":
+            raise FactualReviewError("actor_authority_required")
+        actor = authority.actor_principal_id
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        resolved = self._resolve_user_id(user_id)
+        self._check_access(resolved, ability="write", case_id=case_id)
+        state = self._load_state(resolved, case_id=case_id)
+        if state.get("user_id") != decision.canonical_owner_principal_id or state.get("case_id") != case_id:
+            raise FactualGraphProjectionError("cross_case_id")
+        shared = state.get("shared_interview")
+        payload = shared.get("knowledge_graph") if isinstance(shared, dict) else None
+        if not isinstance(payload, dict) or not payload:
+            raise FactualGraphProjectionError("knowledge_graph_unavailable")
+        graph = KnowledgeGraph.from_dict(deepcopy(payload))
+        # This existing identity binds the entire private shared interview,
+        # including its KG, pending question and private revision.
+        before = self._case_legal_context_identity(state)
+        _context, admitted_key_id, admitted_key = self._joined_key(resolved, case_id)
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+            current = self._load_state(resolved, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise FactualGraphProjectionError("graph_revision_changed")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise FactualGraphProjectionError("graph_revision_changed")
+
+        result = graph.apply_factual_review(
+            actor_role="user", actor_principal_id=actor, authority_granted=True,
+            expected_revision=str(updates.get("expected_graph_revision") or ""),
+            action=str(updates.get("review_action") or ""),
+            text=updates.get("text") if isinstance(updates.get("text"), str) else "",
+            source_text=updates.get("source_text") if isinstance(updates.get("source_text"), str) else "",
+            message_id=str(updates.get("message_id") or ""),
+            target_stable_id=str(updates.get("target_stable_id") or ""),
+            proposal_id=str(updates.get("proposal_id") or ""),
+            origin=str(updates.get("origin") or "actor"),
+            event_id=str(updates.get("event_id") or ""), case_id=case_id,
+            record_class=str(updates.get("record_class") or ""),
+        )
+        revalidate_publication()
+        if result.get("graph_mutated") is True:
+            draft = deepcopy(state)
+            draft["shared_interview"]["knowledge_graph"] = graph.to_dict()
+            draft["updated_at"] = _utc_now()
+            try:
+                self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+            except PrivateStorageError as exc:
+                raise WorkspacePersistenceError("Factual review did not commit.",
+                    code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+            self._interview_mediators.pop((resolved, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**result, "case_id": case_id, "task_id": "CIMP-GUI-22"}
+
+    def _case_legal_context_state(self, user_id, case_id, *, action):
+        """Resolve the live issued owner and its current encrypted workflow DTO."""
+        authority = self._owner_case_authority()
+        if authority is None or authority.case_id != case_id or authority.action != action:
+            raise WorkspaceAuthorizationDenied()
+        actor = authority.actor_principal_id
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        resolved = self._resolve_user_id(user_id)
+        self._check_access(resolved, ability="write" if action == "case.update" else "read", case_id=case_id)
+        state = self._load_state(resolved, case_id=case_id)
+        shared = state.get("shared_interview")
+        if (not isinstance(shared, dict) or not isinstance(shared.get("intake_case_file"), dict)
+                or not isinstance(shared.get("dependency_graph"), dict)):
+            raise WorkspacePersistenceError("A saved shared interview is required.",
+                code="legal_context_unavailable", public_status="unavailable")
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return authority, resolved, state
+
+    @staticmethod
+    def _case_legal_context_identity(state):
+        return hashlib.sha256(json.dumps({
+            "user_id": state.get("user_id"), "case_id": state.get("case_id"),
+            "private_revision": state.get("private_revision"),
+            "shared_interview": state.get("shared_interview"),
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+    def read_case_legal_context(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Read current encrypted context; neither a mediator cache nor GET writes."""
+        from applications.legal_context_api import project_legal_context
+
+        authority, resolved, state = self._case_legal_context_state(user_id, case_id, action="case.read")
+        before = self._case_legal_context_identity(state)
+        payload = project_legal_context(state["shared_interview"]["intake_case_file"])
+        current = self._load_state(resolved, case_id=case_id)
+        if before != self._case_legal_context_identity(current):
+            raise WorkspacePersistenceError("Legal context changed during the read.",
+                code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "private_revision": state.get("private_revision"),
+            "session_revision": state["shared_interview"].get("session_revision"), "read_only": True}
+
+    def update_case_legal_context(self, user_id: Optional[str], *, case_id: str,
+                                 updates: Mapping[str, Any]) -> Dict[str, Any]:
+        """Commit one explicit context/DG change using the existing encrypted CAS.
+
+        All access/key/source bindings are derived here, not accepted in the
+        request document. A refused or stale selection never mutates the live
+        mediator cache. Successful publication evicts only this case's cache;
+        the ordinary workflow resume then reads the new committed projection.
+        """
+        from applications.legal_context_selection import apply_legal_context_selection
+        from complaint_phases.dependency_graph import DependencyGraph
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority, resolved, state = self._case_legal_context_state(user_id, case_id, action="case.update")
+        actor = authority.actor_principal_id
+        before = self._case_legal_context_identity(state)
+        shared = state["shared_interview"]
+        graph = DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))
+        selected = apply_legal_context_selection(shared["intake_case_file"], updates, dependency_graph=graph)
+        _context, admitted_key_id, admitted_key = self._joined_key(resolved, case_id)
+
+        def revalidate_publication():
+            # The revision writer already holds its CAS lock. _load_state is
+            # read-only and takes no second revision writer lock; get_session
+            # would be wrong here because a case.update scope may save it.
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise WorkspacePersistenceError("Private key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            current = self._load_state(resolved, case_id=case_id)
+            if before != self._case_legal_context_identity(current):
+                raise WorkspacePersistenceError("Legal context changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(resolved, case_id)
+            if key_id != admitted_key_id or key != admitted_key:
+                raise WorkspacePersistenceError("Private key changed before publication.",
+                    code="revision_conflict", public_status="conflict")
+
+        if not selected["changed"]:
+            revalidate_publication()
+            return {**selected["projection"], "case_id": case_id, "changed": False,
+                "private_revision": state.get("private_revision"), "session_revision": shared.get("session_revision")}
+        projection = WorkflowActionService.project_legal_context_selection(shared,
+            case_file=selected["case_file"], dependency_graph=selected["dependency_graph"])
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        revalidate_publication()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Legal context did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        # No cache mutation occurs until the actual durable head succeeds.
+        self._interview_mediators.pop((resolved, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**selected["projection"], "case_id": case_id, "changed": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"],
+            "dependency_refresh": selected["dependency_refresh"]}
+
+    def accept_case_review_fact_proposal(self, actor, *, case_id, review_service, proposal_id,
+            expected_review_revision, expected_private_revision, expected_session_revision, request_id):
+        """Accept server-owned proposed fact text through the real correction owner.
+
+        The canonical receipt and KG correction share one encrypted case CAS.
+        The review repository remains an immutable proposal/evidence source.
+        """
+        from applications.case_review_store import CaseReviewService, CaseReviewStoreError
+        from integrations.private_storage import PrivateStorageError, private_revision_source_scope
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        def text(value):
+            return isinstance(value, str) and 0 < len(value) <= 80 and value == value.strip()
+        if (not text(actor) or not text(case_id) or not text(proposal_id) or not text(request_id)
+                or type(expected_review_revision) is not int or expected_review_revision < 0
+                or type(expected_session_revision) is not int or expected_session_revision < 0
+                or not isinstance(expected_private_revision, str)
+                or not re.fullmatch(r"(?:0|[1-9][0-9]{0,31})", expected_private_revision)):
+            raise CaseReviewStoreError("review_field")
+        if type(review_service) is not CaseReviewService:
+            raise CaseReviewStoreError("review_unavailable")
+        try:
+            authority = self._owner_case_authority()
+            if authority is None or authority.action != "case.update":
+                raise CaseReviewStoreError("lawyer_review_ungranted")
+            authority, canonical, state = self._case_legal_context_state(actor, case_id, action="case.update")
+            decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            if decision.membership != "owner" or authority.actor_principal_id != actor:
+                raise WorkspaceAuthorizationDenied()
+            shared = state["shared_interview"]
+            fingerprint = _canonical_review_sha({"actor": actor, "canonical": canonical, "case_id": case_id,
+                "request_id": request_id, "proposal_id": proposal_id,
+                "expected_review_revision": expected_review_revision,
+                "expected_private_revision": expected_private_revision,
+                "expected_session_revision": expected_session_revision})
+            ledger = state.get("canonical_review_acceptances") or {}
+            if not isinstance(ledger, dict):
+                raise CaseReviewStoreError("review_integrity")
+            def deliver(receipt, *, replayed):
+                # A valid earlier commit is never rolled back by a delivery
+                # refusal. Re-open current material and reprove both key
+                # owners, review CAS and browser authority after projection.
+                with private_revision_source_scope(self.joined_revision_repository(canonical, case_id)):
+                    _context, key_id, key = self._joined_key(canonical, case_id)
+                    current = self._load_state(canonical, case_id=case_id)
+                    saved = (current.get("canonical_review_acceptances") or {}).get(request_id)
+                    if not isinstance(saved, dict) or _canonical_review_sha(saved) != _canonical_review_sha(receipt):
+                        raise CaseReviewStoreError("stale_revision")
+                    graph = KnowledgeGraph.from_dict(current["shared_interview"]["knowledge_graph"])
+                    current_result = (graph_revision_token(graph) == receipt["result_graph_revision"]
+                        and current["shared_interview"]["session_revision"] == receipt["result_session_revision"]
+                        and current["private_revision"] == receipt["result_private_revision"])
+                    response = {**deepcopy(receipt), "applied": False if replayed else True,
+                        "replayed": replayed, "historically_applied": True, "current_result": current_result,
+                        "current_private_revision": current["private_revision"]}
+                    review_service.reprove_proposal_for_owner(actor, case_id=case_id, proposal_id=proposal_id,
+                        authority=authority, expected_review_revision=expected_review_revision,
+                        expected_record_sha256=receipt["proposal_record_sha256"])
+                    _context, current_key_id, current_key = self._joined_key(canonical, case_id)
+                    if (key_id, key) != (current_key_id, current_key):
+                        raise CaseReviewStoreError("revision_conflict")
+                    authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+                    return response
+            existing = ledger.get(request_id)
+            if existing is not None:
+                if (not isinstance(existing, dict) or existing.get("request_sha256") != fingerprint
+                        or existing.get("proposal_id") != proposal_id
+                        or existing.get("accepting_owner_actor") != actor):
+                    raise CaseReviewStoreError("replay_mismatch")
+                signed = {k: v for k, v in existing.items() if k != "receipt_sha256"}
+                if existing.get("receipt_sha256") != _canonical_review_sha(signed):
+                    raise CaseReviewStoreError("review_integrity")
+                # Lost-response replay can outlive its own source revision,
+                # but cannot outlive changed authority or a changed proposal.
+                return deliver(existing, replayed=True)
+            if any(isinstance(row, dict) and row.get("proposal_id") == proposal_id for row in ledger.values()):
+                raise CaseReviewStoreError("proposal_already_accepted")
+            if (state.get("private_revision") != expected_private_revision
+                    or shared.get("session_revision") != expected_session_revision):
+                raise CaseReviewStoreError("stale_revision")
+            proposal = review_service.read_proposal_for_owner(actor,
+                case_id=case_id, proposal_id=proposal_id, authority=authority)
+            record, base = proposal.get("record"), proposal.get("source_base")
+            if (proposal.get("schema") != "case-review-owner-proposal@1"
+                    or proposal.get("case_id") != case_id or proposal.get("actor_principal_id") != actor
+                    or proposal.get("canonical_owner_principal_id") != canonical
+                    or proposal.get("review_revision") != expected_review_revision
+                    or not isinstance(record, dict) or not isinstance(base, dict)
+                    or record.get("item_type") != "review_proposal" or record.get("item_id") != proposal_id
+                    or _canonical_review_sha(record) != proposal.get("record_sha256")
+                    or base.get("private_revision") != expected_private_revision
+                    or base.get("session_revision") != expected_session_revision):
+                raise CaseReviewStoreError("stale_approval")
+            if record.get("target_kind") not in {"fact", "answer"}:
+                raise CaseReviewStoreError("review_target_capability_unavailable")
+            target, replacement = record.get("target_id"), record.get("proposed_text")
+            if not text(target) or not isinstance(replacement, str) or not 0 < len(replacement) <= 2000 or replacement != replacement.strip():
+                raise CaseReviewStoreError("review_field")
+            graph = KnowledgeGraph.from_dict(shared["knowledge_graph"])
+            graph_revision = graph_revision_token(graph)
+            context = _ReviewFactAcceptance(self, review_service, authority, actor, canonical, case_id,
+                deepcopy(proposal), request_id, fingerprint, self._case_legal_context_identity(state),
+                graph_revision, expected_private_revision, expected_session_revision)
+            result = self.request_handlers.apply_terminal_graph_edit(actor, replacement,
+                expected_graph_revision=graph_revision, expected_session_revision=expected_session_revision,
+                target_stable_id=target, actor_principal_id=actor, require_expected_revision=True,
+                _review_acceptance=context)
+            if result.get("status") != "applied" or not isinstance(result.get("review_acceptance"), dict):
+                raise CaseReviewStoreError(str((result.get("error") or {}).get("code") or "review_transition_refused"))
+            return deliver(result["review_acceptance"], replayed=False)
+        except WorkspaceAuthorizationDenied:
+            raise CaseReviewStoreError("lawyer_review_ungranted") from None
+        except (WorkspacePersistenceError, PrivateStorageError) as exc:
+            raise CaseReviewStoreError(str(getattr(exc, "code", "") or "durability_unproven")) from None
+
+    def read_case_legal_research_snapshot(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Read an authorized encrypted DTO, without GET/session-save or cache effects.
+
+        This in-process owner API is not mounted as a raw-state HTTP endpoint.
+        Its snapshot is a CAS preimage, not authorization supplied by a client.
+        """
+        authority = self._owner_case_authority()
+        if authority is None or authority.action not in {"case.read", "case.update", "case.review"}:
+            raise WorkspaceAuthorizationDenied()
+        authority, resolved, state = self._case_legal_context_state(user_id, case_id, action=authority.action)
+        identity = self._case_legal_context_identity(state)
+        _context, key_id, key = self._joined_key(resolved, case_id)
+        current = self._load_state(resolved, case_id=case_id)
+        _live, current_key_id, current_key = self._joined_key(resolved, case_id)
+        if identity != self._case_legal_context_identity(current) or (key_id, key) != (current_key_id, current_key):
+            raise WorkspacePersistenceError("Research source changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=authority.actor_principal_id, workspace=self, require_owner=True)
+        shared = state["shared_interview"]
+        case_file = shared["intake_case_file"]
+        source_scope = case_legal_source_scope(state, case_id=case_id)
+        return {"state": deepcopy(state), "canonical_owner_principal_id": resolved,
+            "actor_principal_id": authority.actor_principal_id, "case_id": case_id,
+            "private_revision": state.get("private_revision"), "session_revision": shared.get("session_revision"),
+            "source_identity": identity, "source_scope_sha256": source_scope, "key_id": key_id, "read_only": True}
+
+    def read_case_legal_materials_snapshot(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Current copied legal materials for in-process legal/DG consumers."""
+        from complaint_phases.dependency_graph import DependencyGraph
+        snapshot = self.read_case_legal_research_snapshot(user_id, case_id=case_id)
+        shared = snapshot["state"]["shared_interview"]
+        return {**snapshot, "case_file": deepcopy(shared["intake_case_file"]),
+            "dependency_graph": DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))}
+
+    def read_case_legal_research(self, user_id: Optional[str], *, case_id: str, admissions: bool = False) -> Dict[str, Any]:
+        from applications.legal_research_api import project_authority_admissions, project_legal_research
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_research_snapshot(user_id, case_id=case_id)
+        case_file = snapshot["state"]["shared_interview"]["intake_case_file"]
+        project = project_authority_admissions if admissions else project_legal_research
+        return {**project(case_file), "case_id": case_id, "read_only": True,
+            "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+
+    def acquire_case_legal_research(self, user_id: Optional[str], *, case_id: str, request: Mapping[str, Any]) -> Dict[str, Any]:
+        return self._run_case_legal_research(user_id, case_id=case_id, request=request, review=False)
+
+    def review_case_legal_authority(self, user_id: Optional[str], *, case_id: str, request: Mapping[str, Any]) -> Dict[str, Any]:
+        return self._run_case_legal_research(user_id, case_id=case_id, request=request, review=True)
+
+    def _run_case_legal_research(self, user_id, *, case_id, request, review):
+        from applications.legal_research_api import (LegalResearchError, _bounds, _purpose_decision,
+            _require_purpose_consent, acquire_bounded_legal_sources, review_versioned_authority)
+        from complaint_phases.phase_manager import ComplaintPhase
+        from complaint_phases.dependency_graph import DependencyGraph
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        expected_action = "case.review" if review else "case.update"
+        if authority is None or authority.action != expected_action or not isinstance(request, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_research_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        state = snapshot["state"]
+        shared = state["shared_interview"]
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                ("expected_session_revision", snapshot["session_revision"]),
+                ("expected_source_scope_sha256", snapshot["source_scope_sha256"])):
+            if field in request and request[field] != actual:
+                raise WorkspacePersistenceError("Research precondition changed.", code="revision_conflict", public_status="conflict")
+        if self._legal_research_stale(state, expected_graph_revision=request.get("expected_graph_revision"),
+                expected_session_revision=request.get("expected_session_revision")) is not None:
+            raise WorkspacePersistenceError("Research graph changed.", code="revision_conflict", public_status="conflict")
+        _context, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Research key changed.", code="revision_conflict", public_status="conflict")
+        if review:
+            index = shared["intake_case_file"].get("legal_source_passage_index") or {}
+            source = index.get(request.get("content_hash")) if isinstance(index, dict) else None
+            acquisition_context = source.get("acquisition_context") if isinstance(source, dict) else None
+            if not isinstance(acquisition_context, dict) or acquisition_context.get("source_scope_sha256") != snapshot["source_scope_sha256"]:
+                raise LegalResearchError("legal_research_revision_conflict")
+            purpose = acquisition_context.get("purpose")
+            view = authority.processing_consent(purpose=purpose, actor_principal_id=actor, workspace=self)
+            generation = _purpose_decision(view, purpose).get("generation")
+        else:
+            bounds = _bounds(request)
+            purpose, generation = bounds["purpose"], bounds["expected_consent_generation"]
+            # Grok consent and its transport are not corpus authorization.
+            if bounds["retrieval_mode"] == "live":
+                raise LegalResearchError("legal_corpus_unavailable")
+        _require_purpose_consent(authority, self, purpose, generation, "cache")
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Research key changed before publication.", code="revision_conflict", public_status="conflict")
+            _require_purpose_consent(authority, self, purpose, generation, "cache")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Research source changed before publication.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Research key changed before publication.", code="revision_conflict", public_status="conflict")
+
+        revalidate_publication()
+        mediator = self._mediator_for_shared_interview(canonical, case_id, cache=False)
+        mediator.workflow_actions.restore_session_projection(deepcopy(shared))
+        if review:
+            decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            receipt = review_versioned_authority(mediator, self, authority, request,
+                membership=decision.membership, canonical_owner_principal_id=canonical,
+                actor_is_encrypted_owner=actor == canonical, source_scope_sha256=snapshot["source_scope_sha256"])
+        else:
+            receipt = acquire_bounded_legal_sources(mediator, self, authority, request,
+                source_scope_sha256=snapshot["source_scope_sha256"])
+        # Research stores source custody and review. The mediator's legacy
+        # admission-time graph may include unrelated source-owner DB rows;
+        # only the separate current-manifest refresh may promote dependencies.
+        receipt = {**receipt, "graph_mutated": False, "dependency_refresh_status": "not_requested"}
+        produced = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+        if not isinstance(produced, dict):
+            raise WorkspacePersistenceError("Research source unavailable.", code="legal_research_unavailable", public_status="unavailable")
+        case_file = deepcopy(shared["intake_case_file"])
+        for field in ("legal_source_candidate_receipt", "legal_source_passage_index", "legal_authority_admissions",
+                      "legal_source_operations", "legal_authority_review_operations"):
+            if field in produced:
+                case_file[field] = deepcopy(produced[field])
+        revalidate_publication()
+        if case_file == shared["intake_case_file"]:
+            return {**receipt, "case_id": case_id, "private_revision": snapshot["private_revision"],
+                "session_revision": snapshot["session_revision"]}
+        graph = DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))
+        projection = WorkflowActionService.project_legal_context_selection(shared, case_file=case_file, dependency_graph=graph)
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Research did not commit.", code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**receipt, "case_id": case_id, "private_revision": committed.get("private_revision"),
+            "session_revision": projection["session_revision"]}
+
+    def read_case_legal_analysis(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Project current encrypted IR only after live owner/key/source reproof."""
+        from applications.legal_analysis_api import (project_canonical_legal_ir,
+            current_case_legal_ir_source, LegalAnalysisError)
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        payload = project_canonical_legal_ir(snapshot["case_file"])
+        binding = payload.get("source_binding")
+        if payload.get("status") != "empty":
+            source_current = (isinstance(binding, dict)
+                and binding.get("source_scope_sha256") == snapshot["source_scope_sha256"])
+            if source_current:
+                try:
+                    current_source = current_case_legal_ir_source(snapshot["case_file"],
+                        binding.get("content_hash"), case_id=case_id)
+                    source_current = (binding.get("source_record_sha256")
+                        == hashlib.sha256(json.dumps(current_source["record"], sort_keys=True,
+                            separators=(",", ":"), allow_nan=False).encode()).hexdigest())
+                except LegalAnalysisError:
+                    source_current = False
+            payload["source_current"] = source_current
+            if not source_current:
+                payload.update(status="stale", reason="legal_case_sources_changed",
+                    source_spans=[], typed_obligations=[])
+            # A saved execution receipt is historical data. The adapter's
+            # process-local registry alone can establish current execution
+            # provenance; a cold read must never reconstruct that authority.
+            from integrations.ipfs_datasets.logic import verify_canonical_formalization_receipt
+            payload["recorded_receipt_verification"] = deepcopy(payload.get("receipt_verification"))
+            audit = verify_canonical_formalization_receipt(str(payload.get("receipt_id") or ""),
+                **({"source_text": current_source["text"]} if source_current else {}))
+            payload["receipt_verification"] = {"status": audit.get("status"),
+                "tampered": audit.get("tampered") is True,
+                "execution_origin_verified": source_current and audit.get("execution_origin_verified") is True,
+                "reason": str(audit.get("reason") or "")}
+            payload["current_execution_verified"] = (source_current and audit.get("status") == "verified"
+                and audit.get("execution_origin_verified") is True and audit.get("tampered") is not True)
+            payload["recorded_compilation_is_proof"] = False
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Legal analysis changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "private_revision": snapshot["private_revision"],
+            "session_revision": snapshot["session_revision"], "read_only": True}
+
+
+    def read_case_proof_traces(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Read current encrypted source/IR and project only verified provenance.
+
+        No compilation, proof engine, model, cache save or private CAS is
+        performed. The existing IR owner verifies current source/receipt
+        structure; compiler execution remains separate from checked proof.
+        """
+        from applications.legal_analysis_api import (current_case_legal_ir_source,
+            project_current_case_proof_traces, LegalAnalysisError)
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        analysis = self.read_case_legal_analysis(user_id, case_id=case_id)
+        if (analysis.get("private_revision"), analysis.get("session_revision")) != (
+                snapshot["private_revision"], snapshot["session_revision"]):
+            raise WorkspacePersistenceError("Proof source changed during read.", code="revision_conflict", public_status="conflict")
+        text = None
+        if analysis.get("source_current") is True:
+            binding = analysis.get("source_binding") or {}
+            if binding.get("source_scope_sha256") != snapshot["source_scope_sha256"]:
+                raise WorkspacePersistenceError("Proof source scope changed.", code="revision_conflict", public_status="conflict")
+            text = current_case_legal_ir_source(snapshot["case_file"], binding.get("content_hash"), case_id=case_id)["text"]
+        result = project_current_case_proof_traces(analysis, source_text=text)
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Proof source changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**result, "case_id": case_id, "read_only": True,
+            "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+
+    def attach_case_legal_analysis(self, user_id: Optional[str], *, case_id: str,
+                                   request: Mapping[str, Any]) -> Dict[str, Any]:
+        """Compile a current stored source and commit through the encrypted CAS.
+
+        Request source/context/fact assertions are never the case's authority.
+        Local compilation needs no model consent and performs no model egress.
+        """
+        from applications.legal_analysis_api import compile_current_case_legal_ir, LegalAnalysisError
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(request, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                              ("expected_session_revision", snapshot["session_revision"])):
+            value = request.get(field)
+            valid_type = (type(value) is str and 1 <= len(value) <= 19
+                and value.isascii() and value.isdecimal() and (value == "0" or not value.startswith("0"))
+                ) if field == "expected_private_revision" else type(value) is int
+            if not valid_type or value != actual:
+                raise WorkspacePersistenceError("Legal analysis precondition changed.", code="revision_conflict", public_status="conflict")
+        _context, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+
+        def before_publish():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Legal analysis source changed.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Legal analysis key changed.", code="revision_conflict", public_status="conflict")
+
+        state = snapshot["state"]
+        shared = state["shared_interview"]
+        payload = compile_current_case_legal_ir(snapshot["case_file"], shared["knowledge_graph"], request,
+            case_id=case_id, source_scope_sha256=snapshot["source_scope_sha256"])
+        before_publish()
+        if payload.get("status") != "attached":
+            return {**payload, "attachment_persisted": False,
+                "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+        case_file = deepcopy(snapshot["case_file"])
+        case_file["canonical_legal_ir_attachment"] = deepcopy(payload)
+        projection = WorkflowActionService.project_legal_context_selection(shared,
+            case_file=case_file, dependency_graph=snapshot["dependency_graph"])
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=before_publish)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Legal analysis did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**payload, "attachment_persisted": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
+    def read_case_dependency_requirements(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Project the current encrypted derivation without writing the case."""
+        from applications.legal_analysis_api import project_dependency_requirements
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        payload = project_dependency_requirements(snapshot["case_file"])
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Dependency requirements changed during read.",
+                code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "read_only": True,
+            "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+
+    def derive_case_dependency_requirements(self, user_id: Optional[str], *, case_id: str,
+                                            request: Mapping[str, Any]) -> Dict[str, Any]:
+        """Derive requirements from admitted passages and commit them on the case.
+
+        The request may name a corpus cache, a review decision, and facts.
+        It cannot supply the legal text that becomes the requirement.
+        """
+        from complaint_phases.dependency_graph import DependencyGraph, DependencyGraphBuilder
+        from integrations.private_storage import PrivateStorageError
+        from mediator.legal_authority_hooks import LegalAuthorityAnalysisHook
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(request, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                              ("expected_session_revision", snapshot["session_revision"])):
+            value = request.get(field)
+            valid_type = (type(value) is str and 1 <= len(value) <= 19
+                and value.isascii() and value.isdecimal() and (value == "0" or not value.startswith("0"))
+                ) if field == "expected_private_revision" else type(value) is int
+            if not valid_type or value != actual:
+                raise WorkspacePersistenceError("Dependency requirement precondition changed.",
+                    code="revision_conflict", public_status="conflict")
+        _context, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Dependency requirement key changed.",
+                code="revision_conflict", public_status="conflict")
+
+        def before_publish():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Dependency requirement key changed.",
+                    code="revision_conflict", public_status="conflict")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Dependency requirement source changed.",
+                    code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+
+        state = snapshot["state"]
+        shared = state["shared_interview"]
+        mediator = self._mediator_for_shared_interview(canonical, case_id, cache=False)
+        payload = LegalAuthorityAnalysisHook(mediator).derive_dependency_requirements(dict(snapshot["case_file"]), dict(request))
+        payload["request_id"] = request.get("request_id")
+        payload["supplied_rule_text_ignored"] = "rule_text" in request or "elements" in request
+        before_publish()
+        case_file = deepcopy(snapshot["case_file"])
+        case_file["derived_dependency_requirements"] = deepcopy(payload)
+        graph = DependencyGraph.from_dict(deepcopy(shared["dependency_graph"]))
+        DependencyGraphBuilder().apply_derived_dependency_requirements(graph, payload)
+        projection = WorkflowActionService.project_legal_context_selection(shared, case_file=case_file, dependency_graph=graph)
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=before_publish)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Dependency requirements did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "derivation_persisted": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
+
+    def read_case_definition_correspondence(self, user_id: Optional[str], *, case_id: str) -> Dict[str, Any]:
+        """Project current encrypted IR only after live owner/key/source reproof."""
+        from applications.legal_analysis_api import (project_definition_correspondence,
+            current_case_legal_ir_source, LegalAnalysisError)
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.read":
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        payload = deepcopy(project_definition_correspondence(snapshot["case_file"]))
+        binding = payload.get("source_binding")
+        if payload.get("status") != "empty":
+            source_current = (isinstance(binding, dict)
+                and binding.get("source_scope_sha256") == snapshot["source_scope_sha256"])
+            if source_current:
+                try:
+                    current_source = current_case_legal_ir_source(snapshot["case_file"],
+                        binding.get("content_hash"), case_id=case_id)
+                    source_current = (binding.get("source_record_sha256")
+                        == hashlib.sha256(json.dumps(current_source["record"], sort_keys=True,
+                            separators=(",", ":"), allow_nan=False).encode()).hexdigest())
+                except LegalAnalysisError:
+                    source_current = False
+            payload["source_current"] = source_current
+            if not source_current:
+                payload.update(status="stale", reason="legal_case_sources_changed",
+                    owners={})
+            payload["current_owner_replayed"] = False
+            for family in payload.get("owners", {}).values():
+                if isinstance(family, dict):
+                    family["recorded_genuine_owner_receipt"] = family.get("genuine_current_owner_receipt") is True
+                    family["genuine_current_owner_receipt"] = False
+            payload["recorded_replay_is_proof"] = False
+        current = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        if (snapshot["source_identity"], snapshot["key_id"]) != (current["source_identity"], current["key_id"]):
+            raise WorkspacePersistenceError("Legal analysis changed during read.", code="revision_conflict", public_status="conflict")
+        authority.revalidate(actor_principal_id=snapshot["actor_principal_id"], workspace=self, require_owner=True)
+        return {**payload, "case_id": case_id, "private_revision": snapshot["private_revision"],
+            "session_revision": snapshot["session_revision"], "read_only": True}
+
+
+    def bind_case_definition_correspondence(self, user_id: Optional[str], *, case_id: str,
+                                   request: Mapping[str, Any]) -> Dict[str, Any]:
+        """Replay current definition owners against a stored source and commit through the encrypted CAS.
+
+        Request source/context/fact assertions are never the case's authority.
+        Local compilation needs no model consent and performs no model egress.
+        """
+        from applications.legal_analysis_api import bind_current_case_definition_correspondence, LegalAnalysisError
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(request, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                              ("expected_session_revision", snapshot["session_revision"])):
+            value = request.get(field)
+            valid_type = (type(value) is str and 1 <= len(value) <= 19
+                and value.isascii() and value.isdecimal() and (value == "0" or not value.startswith("0"))
+                ) if field == "expected_private_revision" else type(value) is int
+            if not valid_type or value != actual:
+                raise WorkspacePersistenceError("Definition replay precondition changed.", code="revision_conflict", public_status="conflict")
+        _context, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Definition replay key changed.", code="revision_conflict", public_status="conflict")
+
+        def before_publish():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Definition replay key changed.", code="revision_conflict", public_status="conflict")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Definition replay source changed.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _current, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Definition replay key changed.", code="revision_conflict", public_status="conflict")
+
+        state = snapshot["state"]
+        shared = state["shared_interview"]
+        payload = bind_current_case_definition_correspondence(snapshot["case_file"], request,
+            case_id=case_id, source_scope_sha256=snapshot["source_scope_sha256"])
+        before_publish()
+        if payload.get("status") != "bound":
+            return {**payload, "binding_persisted": False,
+                "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+        case_file = deepcopy(snapshot["case_file"])
+        case_file["definition_correspondence_binding"] = deepcopy(payload)
+        projection = WorkflowActionService.project_legal_context_selection(shared,
+            case_file=case_file, dependency_graph=snapshot["dependency_graph"])
+        draft = deepcopy(state)
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=before_publish)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Definition replay did not commit.",
+                code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**payload, "binding_persisted": True,
+            "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
+
+    def refresh_case_legal_dependency_graph(self, user_id, *, case_id, updates):
+        return self._run_case_legal_dependency_refresh(user_id, case_id=case_id, updates=updates, late=False)
+
+    def revalidate_case_legal_dependency_refresh(self, user_id, *, case_id, updates):
+        return self._run_case_legal_dependency_refresh(user_id, case_id=case_id, updates=updates, late=True)
+
+    def _run_case_legal_dependency_refresh(self, user_id, *, case_id, updates, late):
+        """Run the canonical source/DG owner on a copied, current private DTO."""
+        from applications.legal_research_api import (LegalResearchError, _purpose_decision,
+            _require_purpose_consent, verified_reviewed_source_records)
+        from complaint_phases.phase_manager import ComplaintPhase
+        from complaint_phases.dependency_graph import DependencyGraph
+        from integrations.private_storage import PrivateStorageError
+        from mediator.workflow_service import WorkflowActionService
+
+        authority = self._owner_case_authority()
+        if authority is None or authority.action != "case.update" or not isinstance(updates, Mapping):
+            raise WorkspaceAuthorizationDenied()
+        # The server owns the source manifest and all graph-producing inputs.
+        if any(name in updates for name in ("canonical_source_records", "source_records", "links", "questions",
+                "proof_obligations", "successors", "model_output", "result")):
+            raise LegalResearchError("caller_graph_rows_not_accepted")
+        snapshot = self.read_case_legal_materials_snapshot(user_id, case_id=case_id)
+        actor, canonical = snapshot["actor_principal_id"], snapshot["canonical_owner_principal_id"]
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        for field, actual in (("expected_private_revision", snapshot["private_revision"]),
+                ("expected_session_revision", snapshot["session_revision"]),
+                ("expected_source_scope_sha256", snapshot["source_scope_sha256"])):
+            if field in updates and updates[field] != actual:
+                raise WorkspacePersistenceError("Dependency source changed.", code="revision_conflict", public_status="conflict")
+        records = verified_reviewed_source_records(snapshot["case_file"], source_scope_sha256=snapshot["source_scope_sha256"])
+        hashes = sorted({record["metadata"]["source_hash"] for group in records.values() for record in group})
+        if "legal_source_hashes" in updates and updates["legal_source_hashes"] != hashes:
+            raise LegalResearchError("legal_research_revision_conflict")
+        purpose = "citation_acquisition"
+        view = authority.processing_consent(purpose=purpose, actor_principal_id=actor, workspace=self)
+        generation = _purpose_decision(view, purpose).get("generation")
+        _require_purpose_consent(authority, self, purpose, generation, "cache")
+        _ctx, admitted_key_id, admitted_key = self._joined_key(canonical, case_id)
+        if admitted_key_id != snapshot["key_id"]:
+            raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+
+        def revalidate_publication():
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+            _require_purpose_consent(authority, self, purpose, generation, "cache")
+            current = self._load_state(canonical, case_id=case_id)
+            if self._case_legal_context_identity(current) != snapshot["source_identity"]:
+                raise WorkspacePersistenceError("Dependency source changed.", code="revision_conflict", public_status="conflict")
+            authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+            _live, key_id, key = self._joined_key(canonical, case_id)
+            if (key_id, key) != (admitted_key_id, admitted_key):
+                raise WorkspacePersistenceError("Dependency key changed.", code="revision_conflict", public_status="conflict")
+
+        revalidate_publication()
+        shared = snapshot["state"]["shared_interview"]
+        mediator = self._mediator_for_shared_interview(canonical, case_id, cache=False)
+        mediator.workflow_actions.restore_session_projection(deepcopy(shared))
+        workflow = mediator.workflow_actions
+        common = {"case_id": case_id, "actor_principal_id": actor, "case_revision": decision.revision,
+            "consent_generation": generation, "consent_revoked": False,
+            "grant_revision": decision.membership_revision, "granted_actions": ["case.update"],
+            "legal_source_hashes": hashes, "operation_id": updates.get("operation_id")}
+        if late:
+            receipt = workflow.accept_legal_refresh_late_result(**common,
+                dependency_generation=(snapshot["case_file"].get("legal_graph_refresh") or {}).get("dependency_generation", 0),
+                claimed=deepcopy(dict(updates)))
+            revalidate_publication()
+            return {**receipt, "read_only": True, "private_revision": snapshot["private_revision"],
+                "session_revision": snapshot["session_revision"]}
+        receipt = workflow.refresh_legal_dependency_graph(**common,
+            correction_kind=updates.get("correction_kind"),
+            expected_case_revision=updates.get("expected_case_revision"),
+            expected_consent_generation=updates.get("expected_consent_generation"),
+            expected_grant_revision=updates.get("expected_grant_revision"),
+            expected_dependency_generation=updates.get("expected_dependency_generation"),
+            canonical_source_records=records)
+        revalidate_publication()
+        if receipt.get("status") != "applied" or receipt.get("replayed") is True:
+            return {**receipt, "private_revision": snapshot["private_revision"], "session_revision": snapshot["session_revision"]}
+        case_file = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+        graph = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "dependency_graph")
+        if not isinstance(case_file, dict) or not isinstance(graph, DependencyGraph):
+            raise WorkspacePersistenceError("Dependency refresh unavailable.", code="legal_research_unavailable", public_status="unavailable")
+        projection = WorkflowActionService.project_legal_context_selection(shared, case_file=case_file, dependency_graph=graph)
+        draft = deepcopy(snapshot["state"])
+        draft["shared_interview"] = projection
+        draft["updated_at"] = _utc_now()
+        try:
+            committed = self._commit_joined_snapshot(draft, before_publish=revalidate_publication)
+        except PrivateStorageError as exc:
+            raise WorkspacePersistenceError("Dependency refresh did not commit.", code=str(getattr(exc, "code", "") or "durability_unproven"), public_status="recoverable") from None
+        self._interview_mediators.pop((canonical, case_id), None)
+        authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        return {**receipt, "private_revision": committed.get("private_revision"), "session_revision": projection["session_revision"]}
+
+    def run_legal_research(
+        self,
+        user_id: Optional[str],
+        *,
+        local_rows: Optional[Dict[str, Any]] = None,
+        cancelled: bool = False,
+        retrieval_mode: str = "cache",
+        storage_available: Optional[bool] = None,
+        context_updates: Optional[Dict[str, Any]] = None,
+        dependency_change: Optional[Dict[str, Any]] = None,
+        effect_receipt: Optional[Dict[str, Any]] = None,
+        expected_graph_revision: Optional[str] = None,
+        expected_session_revision: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Run one deliberate legal-research action for the saved case.
+
+        Status and resume do not call this. Replaying the same action returns
+        the stored receipt and does not acquire or admit again. The receipt is
+        not an intake answer.
+        """
+
+        gui_authority = self._owner_case_authority()
+        if gui_authority is not None:
+            from applications.legal_research_api import LegalResearchError, _purpose_decision
+            try:
+                if context_updates or dependency_change or effect_receipt or storage_available is not None:
+                    raise LegalResearchError("explicit_legal_research_request_required")
+                actor, selected_case = gui_authority.actor_principal_id, gui_authority.case_id
+                snapshot = self.read_case_legal_research_snapshot(actor, case_id=selected_case)
+                case_file = snapshot["state"]["shared_interview"]["intake_case_file"]
+                claims = case_file.get("candidate_claims") or []
+                claim = next((str(row.get("claim_type") or "").strip() for row in claims
+                    if isinstance(row, dict) and str(row.get("claim_type") or "").strip() not in {"", "unknown"}), "")
+                if not claim:
+                    raise LegalResearchError("legal_context_not_ready")
+                view = gui_authority.processing_consent(purpose="citation_acquisition", actor_principal_id=actor, workspace=self)
+                generation = _purpose_decision(view, "citation_acquisition").get("generation")
+                request = {"purpose": "citation_acquisition", "query": claim.replace("_", " ") + " statute",
+                    "retrieval_mode": retrieval_mode, "local_rows": local_rows,
+                    "cancelled": bool(cancelled), "max_results": 5, "max_bytes": 4096, "deadline_seconds": 5.0,
+                    "expected_consent_generation": generation}
+                if local_rows is None:
+                    prior_receipt = case_file.get("legal_source_candidate_receipt") or {}
+                    operations = case_file.get("legal_source_operations") or {}
+                    prior = operations.get(prior_receipt.get("operation_id")) if isinstance(operations, dict) else None
+                    prior_request = prior.get("request") if isinstance(prior, dict) else None
+                    if (isinstance(prior_request, dict) and prior.get("source_scope_sha256") == snapshot["source_scope_sha256"]
+                            and all(prior_request.get(name) == request.get(name) for name in
+                                ("purpose", "query", "retrieval_mode", "cancelled", "expected_consent_generation"))):
+                        # An issued /research shortcut may replay an actual
+                        # owned cache request. It never reconstructs source
+                        # provenance or pretends an unavailable asset exists.
+                        request = deepcopy(prior_request)
+                if not request.get("operation_id"):
+                    request["operation_id"] = hashlib.sha256(json.dumps({"source": snapshot["source_scope_sha256"],
+                        "request": request}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+                if expected_graph_revision is not None:
+                    request["expected_graph_revision"] = expected_graph_revision
+                if expected_session_revision is not None:
+                    request["expected_session_revision"] = expected_session_revision
+                receipt = self.acquire_case_legal_research(actor, case_id=selected_case, request=request)
+                counts = {"retrieved": int(receipt.get("candidate_count") or 0), "admitted": 0,
+                    "rejected": int(receipt.get("research_gap_count") or 0),
+                    "unavailable": int(receipt.get("status") in {"unavailable", "timeout", "error", "refused", "blocked"})}
+                result = {**receipt, "action": "legal_research", "acquisition_status": receipt.get("status"),
+                    "admission_status": "not_admitted", "counts": counts, "proves_complaint": False,
+                    "stored_as_answer": False, "legal_sufficiency": False, "proof": False,
+                    "fingerprint": request["operation_id"], "next_action": "continue_pending_inquiry"}
+                result["display"] = format_legal_research_result(result)
+                return result
+            except LegalResearchError as exc:
+                return self._legal_research_failure(exc.code, public_status="refused")
+            except WorkspacePersistenceError as exc:
+                return self._legal_research_failure("stale_research" if exc.code == "revision_conflict" else exc.code,
+                    public_status="refused" if exc.code == "revision_conflict" else exc.public_status)
+
+        resolved = self._check_access(str(user_id or DEFAULT_USER_ID), ability="write")
+        try:
+            state = self._load_state(resolved)
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "unavailable", public_status=exc.public_status)
+        case_id = _state_case_id(state, resolved)
+        narrative = _narrative_record(state)
+        narrative_text = str(narrative.get("text") or "")
+        claim_type = str(state.get("claim_type") or "termination")
+        claims = [{"type": claim_type, "name": claim_type, "claim_type": claim_type}]
+        case_file = {
+            "source_complaint_text": narrative_text,
+            "candidate_claims": list(claims),
+        }
+        storage_available = self._legal_research_storage_available() if storage_available is None else bool(storage_available)
+        fingerprint = self._legal_research_fingerprint(
+            case_id=case_id,
+            narrative_text=narrative_text,
+            claim_type=claim_type,
+            local_rows=local_rows,
+            storage_available=storage_available,
+            cancelled=cancelled,
+            retrieval_mode=retrieval_mode,
+            context_updates=context_updates,
+            dependency_change=dependency_change,
+            effect_receipt=effect_receipt,
+        )
+        stored = state.get("legal_research") if isinstance(state.get("legal_research"), dict) else {}
+        receipts = stored.get("receipts") if isinstance(stored.get("receipts"), dict) else {}
+        stale = self._legal_research_stale(
+            state,
+            expected_graph_revision=expected_graph_revision,
+            expected_session_revision=expected_session_revision,
+        )
+        if stale is not None:
+            stale["fingerprint"] = fingerprint
+            stale["display"] = "Stale concurrent research rejected. The pending inquiry was kept."
+            return stale
+        pending_operation = stored.get("pending_operation") if isinstance(stored.get("pending_operation"), dict) else None
+        if (
+            isinstance(pending_operation, dict)
+            and pending_operation.get("fingerprint") == fingerprint
+            and pending_operation.get("dispatched") is True
+            and not isinstance(receipts.get(fingerprint), dict)
+        ):
+            receipt = self._legal_research_failure("interrupted_operation", public_status="unavailable")
+            receipt["replayed"] = True
+            receipt["dispatched"] = False
+            receipt["fingerprint"] = fingerprint
+            receipt["next_action"] = "continue_pending_inquiry"
+            receipt["display"] = format_legal_research_result(receipt)
+            self._store_legal_research_receipt(state, fingerprint, receipt)
+            try:
+                self._save_state(state)
+            except WorkspacePersistenceError as exc:
+                return self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+            return receipt
+        previous = receipts.get(fingerprint)
+        if isinstance(previous, dict):
+            replay = dict(previous)
+            replay["replayed"] = True
+            replay["dispatched"] = False
+            replay["stored_as_answer"] = False
+            replay["proves_complaint"] = False
+            replay["legal_sufficiency"] = False
+            replay["proof"] = False
+            replay["display"] = format_legal_research_result(replay)
+            return replay
+        answers_before = deepcopy(state.get("intake_answers") or {})
+        history_before = deepcopy(state.get("intake_history") or [])
+        legal_research = state.setdefault("legal_research", {})
+        if not isinstance(legal_research, dict):
+            legal_research = {}
+            state["legal_research"] = legal_research
+        legal_research["pending_operation"] = {
+            "kind": "legal_research",
+            "fingerprint": fingerprint,
+            "status": "claimed",
+            "dispatched": True,
+        }
+        legal_research["dispatch_count"] = int(legal_research.get("dispatch_count") or 0) + 1
+        try:
+            self._save_state(state)
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+        mediator = None
+        try:
+            from complaint_phases.intake_case_file import apply_explicit_legal_context
+            from complaint_phases.phase_manager import ComplaintPhase
+
+            mediator = self._mediator_for_shared_interview(resolved, case_id)
+            if isinstance(context_updates, dict) and context_updates:
+                phase_case = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "intake_case_file")
+                if isinstance(phase_case, dict) and phase_case:
+                    mediator.apply_explicit_legal_context(phase_case, **context_updates)
+                case_file = apply_explicit_legal_context(case_file, **context_updates)
+            if isinstance(effect_receipt, dict):
+                mediator._pending_legal_effect_receipt = dict(effect_receipt)
+            if isinstance(dependency_change, dict):
+                mediator._pending_legal_dependency_change = dict(dependency_change)
+            receipt = mediator.workflow_actions.research_legal_source_gap(
+                user_id=resolved,
+                case_id=case_id,
+                intake_case_file=case_file,
+                claims=claims,
+                query_terms=[f"{claim_type} statute"],
+                local_rows=local_rows,
+                retrieval_mode=retrieval_mode,
+                storage_available=storage_available,
+                cancelled=cancelled,
+                operation_id=fingerprint,
+            )
+        except WorkspacePersistenceError as exc:
+            return self._legal_research_failure(exc.code or "unavailable", public_status=exc.public_status)
+        except Exception:
+            receipt = self._legal_research_failure("acquisition_unavailable", public_status="unavailable")
+        self._legal_research_dispatch_count = int(getattr(self, "_legal_research_dispatch_count", 0) or 0) + 1
+        receipt = dict(receipt)
+        receipt["stored_as_answer"] = False
+        receipt["proves_complaint"] = False
+        receipt["legal_sufficiency"] = False
+        receipt["proof"] = False
+        receipt["fingerprint"] = fingerprint
+        receipt["display"] = format_legal_research_result(receipt)
+        refresh = None
+        if mediator is not None:
+            from complaint_phases.phase_manager import ComplaintPhase
+
+            refresh = mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, "verified_dependency_refresh")
+            pending_change = getattr(mediator, "_pending_legal_dependency_change", None)
+            if isinstance(pending_change, dict) and pending_change:
+                mediator._pending_legal_dependency_change = None
+                if pending_change.get("source_outage") or pending_change.get("version_changed") or pending_change.get("treatment_changed") or pending_change.get("jurisdiction_changed") or pending_change.get("date_changed"):
+                    refresh = mediator.refresh_verified_legal_dependencies(pending_change)
+        if isinstance(refresh, dict):
+            receipt["dependency_refresh"] = {
+                "affected_node_ids": list(refresh.get("affected_node_ids") or []),
+                "preserved_node_ids": list(refresh.get("preserved_node_ids") or []),
+                "case_revision": refresh.get("case_revision"),
+                "atomic_case_revision": refresh.get("atomic_case_revision"),
+                "source_outage": bool(refresh.get("source_outage")),
+                "graph_replaced": False,
+                "empty_success": False,
+                "effect_request_id": refresh.get("effect_request_id") or "",
+                "source_admission_reread": bool(refresh.get("source_admission_reread")),
+            }
+        state["intake_answers"] = answers_before
+        state["intake_history"] = history_before
+        self._store_legal_research_receipt(state, fingerprint, receipt)
+        try:
+            self._save_state(state)
+        except WorkspacePersistenceError as exc:
+            failed = self._legal_research_failure(exc.code or "durability_unproven", public_status=exc.public_status)
+            failed["counts"] = dict(receipt.get("counts") or failed["counts"])
+            failed["dispatched"] = True
+            return failed
+        return receipt
+
+    def _store_legal_research_receipt(self, state: Dict[str, Any], fingerprint: str, receipt: Mapping[str, Any]) -> None:
+        legal_research = state.setdefault("legal_research", {})
+        if not isinstance(legal_research, dict):
+            legal_research = {}
+            state["legal_research"] = legal_research
+        legal_receipts = legal_research.setdefault("receipts", {})
+        if not isinstance(legal_receipts, dict):
+            legal_receipts = {}
+            legal_research["receipts"] = legal_receipts
+        legal_receipts[fingerprint] = {key: value for key, value in dict(receipt).items() if key != "display"}
+        legal_research["latest_fingerprint"] = fingerprint
+        legal_research["pending_operation"] = None
+
+    def _legal_research_stale(
+        self,
+        state: Mapping[str, Any],
+        *,
+        expected_graph_revision: Optional[str],
+        expected_session_revision: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        if expected_graph_revision is None and expected_session_revision is None:
+            return None
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), Mapping) else {}
+        current_session = int(projection.get("session_revision") or 0) if isinstance(projection, Mapping) else 0
+        current_token = ""
+        graph = projection.get("knowledge_graph") if isinstance(projection, Mapping) else None
+        if isinstance(graph, Mapping):
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+
+                current_token = graph_revision_token(KnowledgeGraph.from_dict(dict(graph)))
+            except Exception:
+                current_token = ""
+        token_mismatch = expected_graph_revision is not None and str(expected_graph_revision) != current_token
+        session_mismatch = expected_session_revision is not None and int(expected_session_revision) != current_session
+        if not token_mismatch and not session_mismatch:
+            return None
+        receipt = self._legal_research_failure("stale_research", public_status="refused")
+        receipt["status"] = "refused"
+        receipt["error_code"] = "stale_research"
+        receipt["dispatched"] = False
+        receipt["replayed"] = False
+        receipt["next_action"] = "continue_pending_inquiry"
+        receipt["counts"] = {"retrieved": 0, "admitted": 0, "rejected": 0, "unavailable": 0}
+        return receipt
+
+    def _legal_research_storage_available(self) -> bool:
+        cache = self._session_dir / "legal-source-cache"
+        try:
+            if cache.exists() and not cache.is_dir():
+                return False
+            if not cache.exists():
+                cache.mkdir(mode=0o700)
+            return cache.is_dir()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _legal_research_fingerprint(
+        *,
+        case_id: str,
+        narrative_text: str,
+        claim_type: str,
+        local_rows: Optional[Dict[str, Any]],
+        storage_available: bool,
+        cancelled: bool,
+        retrieval_mode: str,
+        context_updates: Optional[Dict[str, Any]] = None,
+        dependency_change: Optional[Dict[str, Any]] = None,
+        effect_receipt: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        corpus = json.dumps(local_rows, sort_keys=True, default=str) if local_rows is not None else ""
+        body = json.dumps(
+            {
+                "cancelled": bool(cancelled),
+                "case_id": case_id,
+                "claim_type": claim_type,
+                "context_updates": context_updates or {},
+                "corpus": corpus,
+                "dependency_change": dependency_change or {},
+                "effect_request_id": str((effect_receipt or {}).get("request_id") or ""),
+                "narrative": narrative_text,
+                "retrieval_mode": retrieval_mode,
+                "storage_available": bool(storage_available),
+            },
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _legal_research_failure(code: str, *, public_status: str) -> Dict[str, Any]:
+        next_action = "unlock_private_case" if public_status == "unlock_needed" else "retry_unavailable"
+        receipt = {
+            "action": "legal_research",
+            "operation": "acquire_bounded_canonical_sources+admit_acquired_authorities",
+            "stored_as_answer": False,
+            "proves_complaint": False,
+            "legal_sufficiency": False,
+            "replayed": False,
+            "dispatched": False,
+            "status": "unavailable" if public_status != "unlock_needed" else "unlock_needed",
+            "error_code": str(code or "unavailable"),
+            "counts": {"retrieved": 0, "admitted": 0, "rejected": 0, "unavailable": 1},
+            "next_action": next_action,
+            "resumable": True,
+            "worker_stalled": False,
+            "proof": False,
+        }
+        receipt["display"] = format_legal_research_result(receipt)
+        return receipt
 
     def save_evidence(
         self,
@@ -7473,7 +12274,13 @@ class ComplaintWorkspaceService:
         content: str,
         source: Optional[str] = None,
         attachment_names: Optional[List[str]] = None,
+        expected_key_epoch: Optional[int] = None,
+        captured_key_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
+        case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        self._admit_key_bound_mutation(resolved, actor_id=actor_id, expected_key_epoch=expected_key_epoch, captured_key_id=captured_key_id, case_id=case_id)
         return self.request_handlers.save_evidence(
             user_id,
             kind=kind,
@@ -8066,7 +12873,13 @@ class ComplaintWorkspaceService:
         title: Optional[str] = None,
         body: Optional[str] = None,
         requested_relief: Optional[List[str]] = None,
+        expected_key_epoch: Optional[int] = None,
+        captured_key_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
+        case_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        resolved = self._resolve_user_id(user_id)
+        self._admit_key_bound_mutation(resolved, actor_id=actor_id, expected_key_epoch=expected_key_epoch, captured_key_id=captured_key_id, case_id=case_id)
         return self.request_handlers.update_draft(
             user_id,
             title=title,
@@ -11903,7 +16716,13 @@ class ComplaintWorkspaceService:
             payload["updated"] = False
             return payload
         helpers = _privacy_helpers()
+        normalized_mode = str(mode or "").strip().lower()
         state["privacy_policy"] = helpers["privacy_policy_for_mode"](resolved_user_id, bound_case, mode)
+        if normalized_mode == "local":
+            state["public_processing_mode"] = "local"
+        elif normalized_mode in {"grok", "grok_cloud"}:
+            state["public_processing_mode"] = "grok"
+        _sync_operation_consent_state(state, resolved_user_id, bound_case)
         self._save_state(state)
         payload = self.get_privacy_policy(resolved_user_id)
         payload["updated"] = True
@@ -11961,6 +16780,1332 @@ class ComplaintWorkspaceService:
         result["user_id"] = resolved_user_id
         result["case_id"] = case_id
         return result
+
+    def read_persisted_owner_case_policy(
+        self,
+        user_id: Optional[str] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Load the saved owner/case policy. This does not open a provider."""
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        bound_case = _state_case_id(state, resolved_user_id)
+        requested_case = str(case_id or bound_case)
+        matched = requested_case == bound_case
+        return {
+            "found": True,
+            "policy_read": True,
+            "user_id": resolved_user_id,
+            "case_id": bound_case if matched else requested_case,
+            "requested_case_id": requested_case,
+            "case_match": matched,
+            "privacy_policy": state.get("privacy_policy") if matched else None,
+            "operation_consent": state.get("operation_consent") if matched else None,
+        }
+
+    def dispatch_consented_hook_query(
+        self,
+        user_id: Optional[str],
+        *,
+        purpose: str,
+        provider_kind: str,
+        data_class: str,
+        provider_loader: Optional[Any] = None,
+        query_submitter: Optional[Any] = None,
+        case_id: Optional[str] = None,
+        tools: bool = False,
+        citation: Any = None,
+        complaint_text: Any = None,
+        private_fields: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Read the persisted case policy before a provider loader or hook query."""
+
+        from mediator.hook_runtime import prepare_remote_hook_query
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+
+        def reader() -> Dict[str, Any]:
+            return self.read_persisted_owner_case_policy(resolved_user_id, case_id=case_id)
+
+        return prepare_remote_hook_query(
+            policy_reader=reader,
+            provider_loader=provider_loader,
+            query_submitter=query_submitter,
+            owner_id=resolved_user_id,
+            case_id=str(case_id or reader()["case_id"]) if case_id is None else str(case_id),
+            purpose=purpose,
+            provider_kind=provider_kind,
+            data_class=data_class,
+            tools=tools,
+            citation=citation,
+            complaint_text=complaint_text,
+            private_fields=private_fields,
+        )
+
+    def accept_late_consented_hook_result(
+        self,
+        user_id: Optional[str],
+        *,
+        invocation_id: str,
+        case_id: str,
+        result_acceptor: Optional[Any] = None,
+        bound_graph_revision: Optional[str] = None,
+        current_graph_revision: Optional[str] = None,
+        bound_session_revision: Optional[int] = None,
+        current_session_revision: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Load the current persisted policy again before accepting a late result.
+
+        A supplied bound revision is compared with the saved graph and session.
+        A mismatch is stale and does not call the result acceptor.
+        """
+
+        from mediator.hook_runtime import accept_late_hook_result
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+
+        def reader() -> Dict[str, Any]:
+            return self.read_persisted_owner_case_policy(resolved_user_id, case_id=case_id)
+
+        if bound_graph_revision is not None or bound_session_revision is not None:
+            anchor = self._adverse_public_anchor(resolved_user_id)
+            if current_graph_revision is None:
+                current_graph_revision = str(anchor.get("graph_revision") or "")
+            if current_session_revision is None:
+                current_session_revision = int(anchor.get("session_revision") or 0)
+        return accept_late_hook_result(
+            policy_reader=reader,
+            invocation_id=invocation_id,
+            owner_id=resolved_user_id,
+            case_id=case_id,
+            result_acceptor=result_acceptor,
+            bound_graph_revision=bound_graph_revision,
+            current_graph_revision=current_graph_revision,
+            bound_session_revision=bound_session_revision,
+            current_session_revision=current_session_revision,
+        )
+
+    def _mediator_host_slot(self, user_id: str) -> Dict[str, Any]:
+        slots = getattr(self, "_mediator_operation_hosts", None)
+        if not isinstance(slots, dict):
+            slots = {}
+            self._mediator_operation_hosts = slots
+        slot = slots.get(user_id)
+        if not isinstance(slot, dict):
+            slot = {"owners": {}, "late": None, "public_sources": {}}
+            slots[user_id] = slot
+        return slot
+
+    def save_mediator_operation_consent(self, user_id: Optional[str], operations: Sequence[str]) -> Dict[str, Any]:
+        """Persist an explicit local grant for mediator operations.
+
+        A caller boolean is not an argument. The saved record is what dispatch re-reads.
+        """
+
+        from mediator.hook_runtime import LEGAL_EVIDENCE_OPERATIONS
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if type(operations) is not list or not operations or any(item not in LEGAL_EVIDENCE_OPERATIONS for item in operations):
+            raise WorkspacePersistenceError("Mediator consent must name a registered operation.", code="consent_missing", public_status="recoverable")
+        state = self._load_state(resolved)
+        case_id = _state_case_id(state, resolved)
+        prior = state.get("mediator_operation_consent") if isinstance(state.get("mediator_operation_consent"), dict) else {}
+        raw_generation = prior.get("generation")
+        generation = raw_generation + 1 if type(raw_generation) is int and not isinstance(raw_generation, bool) and raw_generation >= 0 else 1
+        state["mediator_operation_consent"] = {
+            "contract": "mediator_operation_consent_v1",
+            "user_id": resolved,
+            "case_id": case_id,
+            "generation": generation,
+            "revoked": False,
+            "operations": list(operations),
+        }
+        self._save_state(state)
+        return {"saved": True, "generation": generation, "case_id": case_id, "operations": list(operations), "revoked": False}
+
+    def load_saved_case_record(self, owner_id: str) -> Dict[str, Any]:
+        state = self._load_state(str(owner_id))
+        case_id = _state_case_id(state, str(owner_id))
+        return {
+            "user_id": str(state.get("user_id") or owner_id),
+            "case_id": case_id,
+            "mediator_operation_consent": state.get("mediator_operation_consent") if isinstance(state.get("mediator_operation_consent"), dict) else None,
+        }
+
+    def publish_case_host_entity(self, user_id: Optional[str], entity_id: str) -> Dict[str, Any]:
+        """Add one entity on the case graph. Dispatch targets come only from this graph."""
+
+        from complaint_phases.knowledge_graph import Entity, KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if type(entity_id) is not str or not entity_id.strip():
+            raise WorkspacePersistenceError("Host target is missing.", code="target_not_host_owned", public_status="recoverable")
+        slot = self._mediator_host_slot(resolved)
+        graph = slot.get("graph")
+        if not isinstance(graph, KnowledgeGraph):
+            graph = KnowledgeGraph()
+        graph.add_entity(Entity(id=entity_id.strip(), type="fact", name=entity_id.strip(), attributes={"description": entity_id.strip()}))
+        graph.append_revision({"event_id": "host-" + entity_id.strip(), "kind": "host_target"})
+        slot["graph"] = graph
+        token = graph_revision_token(graph)
+        state = self._load_state(resolved)
+        state["mediator_host_entities"] = sorted(str(key) for key in graph.entities.keys())
+        state["mediator_graph_revision"] = token
+        self._save_state(state)
+        return {"graph_revision": token, "entities": list(state["mediator_host_entities"])}
+
+    def case_knowledge_graph(self, owner_id: str, case_id: str) -> Any:
+        state = self._load_state(str(owner_id))
+        if _state_case_id(state, str(owner_id)) != case_id:
+            return None
+        graph = self._mediator_host_slot(str(owner_id)).get("graph")
+        return graph
+
+    def store_case_private_source(self, user_id: Optional[str], payload: bytes, *, key: bytes, key_id: str) -> Dict[str, Any]:
+        """Seal one synthetic private source. The key stays in this process."""
+
+        from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
+        from integrations.private_storage import store_private_artifact
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if not isinstance(payload, (bytes, bytearray)) or not payload:
+            raise WorkspacePersistenceError("Private source is empty.", code="private_store_unavailable", public_status="recoverable")
+        state = self._load_state(resolved)
+        case_id = _state_case_id(state, resolved)
+        access = WorkspaceAccess.authenticated(resolved, case_id=case_id)
+        cache_dir = self._session_dir / "mediator-artifacts" / resolved
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        backend = LocalCacheIPFSBackend(cache_dir=str(cache_dir))
+        receipt = store_private_artifact(
+            bytes(payload),
+            access=access,
+            tenant_id=resolved,
+            case_id=case_id,
+            artifact_kind="intake-note",
+            revision="rev-mediator-source",
+            principal_id=resolved,
+            key=key,
+            key_id=key_id,
+            backend=backend,
+            pin_content=True,
+        )
+        state = self._load_state(resolved)
+        state["mediator_private_artifact"] = {
+            "cid": receipt["cid"],
+            "artifact_kind": "intake-note",
+            "revision": "rev-mediator-source",
+            "case_id": case_id,
+            "tenant_id": resolved,
+            "principal_id": resolved,
+            "key_id": key_id,
+            "cache_dir": str(cache_dir),
+        }
+        self._save_state(state)
+        slot = self._mediator_host_slot(resolved)
+        slot["key"] = bytes(key)
+        slot["key_id"] = key_id
+        slot["backend"] = backend
+        slot["access"] = access
+        return {"stored": True, "cid": receipt["cid"], "verified": receipt.get("verified") is True, "case_id": case_id}
+
+    def case_private_artifact_binding(self, owner_id: str, case_id: str) -> Dict[str, Any]:
+        from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
+
+        state = self._load_state(str(owner_id))
+        saved = state.get("mediator_private_artifact") if isinstance(state.get("mediator_private_artifact"), dict) else {}
+        if str(saved.get("case_id") or "") != case_id or not saved.get("cid"):
+            return {"code": "private_store_unavailable"}
+        slot = self._mediator_host_slot(str(owner_id))
+        key = slot.get("key")
+        if not isinstance(key, (bytes, bytearray)):
+            return {"code": "key_unavailable", "cid": saved.get("cid")}
+        backend = slot.get("backend")
+        if backend is None and saved.get("cache_dir"):
+            backend = LocalCacheIPFSBackend(cache_dir=str(saved["cache_dir"]))
+            slot["backend"] = backend
+        access = slot.get("access")
+        if access is None:
+            access = WorkspaceAccess.authenticated(str(saved.get("tenant_id") or owner_id), case_id=case_id)
+            slot["access"] = access
+        return {
+            "code": "bound",
+            "cid": saved.get("cid"),
+            "artifact_kind": saved.get("artifact_kind"),
+            "revision": saved.get("revision"),
+            "tenant_id": saved.get("tenant_id"),
+            "principal_id": saved.get("principal_id") or saved.get("tenant_id"),
+            "key_id": slot.get("key_id") or saved.get("key_id"),
+            "key": key,
+            "backend": backend,
+            "access": access,
+        }
+
+    def bind_case_mediator_owners(self, user_id: Optional[str], *, key: bytes, key_id: str) -> Dict[str, Any]:
+        """Bind the canonical search, evidence, mediator, and derived-index owners."""
+
+        from integrations.private_storage import InjectedCaseKeyProvider
+        from mediator.evidence_hooks import EvidenceStorageHook
+        from mediator.legal_authority_hooks import LegalAuthoritySearchHook, LegalAuthorityStorageHook
+        from mediator.mediator import Mediator
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved)
+        case_id = _state_case_id(state, resolved)
+        root = self._session_dir / "mediator-owners" / resolved
+        root.mkdir(parents=True, exist_ok=True)
+        mediator = Mediator(
+            [],
+            evidence_db_path=str(root / "evidence.duckdb"),
+            legal_authority_db_path=str(root / "authority.duckdb"),
+            claim_support_db_path=str(root / "support.duckdb"),
+        )
+        evidence = EvidenceStorageHook(mediator)
+        search = LegalAuthoritySearchHook(mediator)
+        index = LegalAuthorityStorageHook(mediator, db_path=str(root / "derived-index.duckdb"))
+        access = WorkspaceAccess.authenticated(resolved, case_id=case_id)
+        provider = InjectedCaseKeyProvider({(resolved, case_id): (key_id, bytes(key))})
+        cache_dir = self._session_dir / "mediator-artifacts" / resolved
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from integrations.ipfs_datasets.storage import LocalCacheIPFSBackend
+        backend = LocalCacheIPFSBackend(cache_dir=str(cache_dir))
+        context = {
+            "access": access,
+            "tenant_id": resolved,
+            "case_id": case_id,
+            "principal_id": resolved,
+            "key_provider": provider,
+            "backend": backend,
+            "backend_name": "local_cache",
+            "pin_content": False,
+            "index_mode": "ephemeral",
+        }
+        evidence.bind_private_artifact_context(context)
+        index.bind_private_derived_index(context)
+        slot = self._mediator_host_slot(resolved)
+        slot["owners"] = {
+            "acquire_legal_sources": search,
+            "ingest_private_evidence": evidence,
+            "refresh_grounding": mediator,
+        }
+        slot["index"] = index
+        slot["key"] = bytes(key)
+        slot["key_id"] = key_id
+        slot["backend"] = backend
+        slot["access"] = access
+        status = index.private_derived_index_status()
+        return {"bound": True, "index_status": status.get("status"), "index_mode": status.get("index_mode"), "case_id": case_id}
+
+    def case_operation_owner(self, operation: str, owner_id: str, case_id: str) -> Any:
+        state = self._load_state(str(owner_id))
+        if _state_case_id(state, str(owner_id)) != case_id:
+            return None
+        return self._mediator_host_slot(str(owner_id)).get("owners", {}).get(operation)
+
+    def case_derived_index_owner(self, operation: str, owner_id: str, case_id: str) -> Any:
+        del operation
+        state = self._load_state(str(owner_id))
+        if _state_case_id(state, str(owner_id)) != case_id:
+            return None
+        return self._mediator_host_slot(str(owner_id)).get("index")
+
+    def detach_mediator_operation_owner(self, user_id: Optional[str], operation: str) -> Dict[str, Any]:
+        resolved = str(user_id or DEFAULT_USER_ID)
+        owners = self._mediator_host_slot(resolved).setdefault("owners", {})
+        owners[operation] = None
+        return {"detached": operation, "present": False}
+
+    def save_local_public_legal_text(self, user_id: Optional[str], citation: str, text: str) -> Dict[str, Any]:
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if type(citation) is not str or not citation.strip() or type(text) is not str or not text.strip():
+            raise WorkspacePersistenceError("Public legal text is missing.", code="empty_source_search", public_status="recoverable")
+        state = self._load_state(resolved)
+        sources = dict(state.get("mediator_public_sources") or {})
+        sources[citation] = text
+        state["mediator_public_sources"] = sources
+        self._save_state(state)
+        self._mediator_host_slot(resolved)["public_sources"] = sources
+        return {"saved": True, "citation": citation, "bytes": len(text.encode("utf-8"))}
+
+    def local_public_legal_text(self, owner_id: str, case_id: str, citation: str) -> str:
+        state = self._load_state(str(owner_id))
+        if _state_case_id(state, str(owner_id)) != case_id:
+            return ""
+        sources = state.get("mediator_public_sources") if isinstance(state.get("mediator_public_sources"), dict) else {}
+        text = sources.get(citation)
+        return text if type(text) is str else ""
+
+    def schedule_late_mediator_mutation(self, user_id: Optional[str], kind: str) -> Dict[str, Any]:
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if kind not in {"revoke_consent", "advance_graph", "drop_artifact", "drop_index"}:
+            raise WorkspacePersistenceError("Unknown late mutation.", code="malformed", public_status="recoverable")
+        self._mediator_host_slot(resolved)["late"] = kind
+        return {"scheduled": kind}
+
+    def consume_pending_late_mutation(self, owner_id: str, case_id: str) -> Optional[str]:
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        from mediator.hook_runtime import graph_revision_token
+
+        slot = self._mediator_host_slot(str(owner_id))
+        kind = slot.get("late")
+        slot["late"] = None
+        if kind is None:
+            return None
+        state = self._load_state(str(owner_id))
+        if _state_case_id(state, str(owner_id)) != case_id:
+            return kind
+        if kind == "revoke_consent":
+            consent = dict(state.get("mediator_operation_consent") or {})
+            raw = consent.get("generation")
+            consent["generation"] = raw + 1 if type(raw) is int and not isinstance(raw, bool) else 1
+            consent["revoked"] = True
+            state["mediator_operation_consent"] = consent
+            self._save_state(state)
+        elif kind == "advance_graph":
+            graph = slot.get("graph")
+            if isinstance(graph, KnowledgeGraph):
+                graph.append_revision({"event_id": "late-graph", "kind": "late_revision"})
+                state["mediator_graph_revision"] = graph_revision_token(graph)
+                self._save_state(state)
+        elif kind == "drop_artifact":
+            state["mediator_private_artifact"] = {}
+            slot["key"] = None
+            self._save_state(state)
+        elif kind == "drop_index":
+            slot["index"] = None
+        return kind
+
+    def append_mediator_operation_journal(self, entry: Mapping[str, Any]) -> Dict[str, Any]:
+        owner_id = str(entry.get("owner_id") or "")
+        state = self._load_state(owner_id)
+        journal = list(state.get("mediator_operation_journal") or [])
+        stored = {
+            "schema": "mediator_operation_journal_v1",
+            "ordinal": len(journal) + 1,
+            "operation": entry.get("operation") if type(entry.get("operation")) is str else "",
+            "status": entry.get("status") if type(entry.get("status")) is str else "",
+            "code": entry.get("code") if type(entry.get("code")) is str else "",
+            "owner_id": owner_id,
+            "case_id": entry.get("case_id") if type(entry.get("case_id")) is str else "",
+            "late": entry.get("late") is True,
+            "writes": entry.get("writes") if type(entry.get("writes")) is int else 0,
+            "effect_dispatched": entry.get("effect_dispatched") is True,
+            "handler_invoked": entry.get("handler_invoked") is True,
+            "storage_invoked": entry.get("storage_invoked") is True,
+            "provider_invoked": False,
+            "proof": False,
+        }
+        journal.append(stored)
+        state["mediator_operation_journal"] = journal
+        self._save_state(state)
+        return {"ordinal": stored["ordinal"]}
+
+    def mediator_operation_journal(self, user_id: Optional[str] = None) -> list:
+        resolved = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved)
+        journal = state.get("mediator_operation_journal")
+        return [dict(item) for item in journal] if isinstance(journal, list) else []
+
+    def bind_lifecycle_case(self, user_id: Optional[str], *, source: bytes, source_id: str, session_id: str, session_revision: int) -> Dict[str, Any]:
+        """Persist the source, consent generation, and graph revision a lifecycle call must match."""
+
+        import hashlib
+
+        from mediator.hook_runtime import LIFECYCLE_HOOKS, hook_runtime_identity
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        if not isinstance(source, (bytes, bytearray)) or not source:
+            raise WorkspacePersistenceError("Lifecycle source is empty.", code="source_binding_mismatch", public_status="recoverable")
+        if type(source_id) is not str or not source_id.strip():
+            raise WorkspacePersistenceError("Lifecycle source id is missing.", code="malformed_binding", public_status="recoverable")
+        if type(session_id) is not str or not session_id.strip():
+            raise WorkspacePersistenceError("Lifecycle session is missing.", code="malformed_binding", public_status="recoverable")
+        if type(session_revision) is not int or isinstance(session_revision, bool) or session_revision < 0:
+            raise WorkspacePersistenceError("Lifecycle session revision is missing.", code="malformed_binding", public_status="recoverable")
+        state = self._load_state(resolved)
+        revision = state.get("mediator_graph_revision")
+        if type(revision) is not str or not revision:
+            raise WorkspacePersistenceError("Lifecycle graph revision is missing.", code="stale_revision", public_status="recoverable")
+        prior = state.get("lifecycle_hook_consent") if isinstance(state.get("lifecycle_hook_consent"), dict) else {}
+        raw_generation = prior.get("generation")
+        generation = raw_generation + 1 if type(raw_generation) is int and not isinstance(raw_generation, bool) and raw_generation >= 0 else 1
+        digest = hashlib.sha256(bytes(source)).hexdigest()
+        state["lifecycle_source"] = {"source_id": source_id.strip(), "content_hash": digest, "byte_length": len(source)}
+        state["lifecycle_hook_consent"] = {
+            "contract": "lifecycle_hook_consent_v1",
+            "user_id": resolved,
+            "case_id": _state_case_id(state, resolved),
+            "generation": generation,
+            "revoked": False,
+            "hooks": [row["hook"] for row in LIFECYCLE_HOOKS],
+        }
+        state["lifecycle_session"] = {"session_id": session_id.strip(), "session_revision": session_revision}
+        self._save_state(state)
+        slot = self._mediator_host_slot(resolved)
+        slot["lifecycle_source"] = bytes(source)
+        return {
+            "source_id": source_id.strip(),
+            "content_hash": digest,
+            "runtime_id": hook_runtime_identity(),
+            "owner_id": resolved,
+            "case_id": _state_case_id(state, resolved),
+            "consent_generation": generation,
+            "revision": revision,
+            "session_id": session_id.strip(),
+            "session_revision": session_revision,
+        }
+
+    def revoke_lifecycle_hook_consent(self, user_id: Optional[str]) -> Dict[str, Any]:
+        resolved = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved)
+        consent = dict(state.get("lifecycle_hook_consent") or {})
+        consent["revoked"] = True
+        state["lifecycle_hook_consent"] = consent
+        self._save_state(state)
+        return {"revoked": True, "generation": consent.get("generation")}
+
+    def _lifecycle_gate(self, user_id: str, hook: str, bindings: Mapping[str, Any], payload: Any) -> Optional[str]:
+        from mediator.hook_runtime import LEGAL_EVIDENCE_OPERATIONS, UNSUPPORTED_OPTIONAL_HOOKS, _lifecycle_binding_code
+
+        code = _lifecycle_binding_code(bindings)
+        if code:
+            return code
+        if bindings["owner_id"] != user_id:
+            return "wrong_owner"
+        state = self._load_state(user_id)
+        case_id = _state_case_id(state, user_id)
+        if bindings["case_id"] != case_id:
+            return "wrong_case"
+        if bindings["revision"] != state.get("mediator_graph_revision"):
+            return "stale_revision"
+        session = state.get("lifecycle_session") if isinstance(state.get("lifecycle_session"), dict) else {}
+        if bindings["session_id"] != session.get("session_id") or bindings["session_revision"] != session.get("session_revision"):
+            return "stale_revision"
+        stored = state.get("lifecycle_source") if isinstance(state.get("lifecycle_source"), dict) else {}
+        slot = self._mediator_host_slot(user_id)
+        source = slot.get("lifecycle_source")
+        if not isinstance(source, (bytes, bytearray)) or stored.get("content_hash") != bindings["content_hash"] or stored.get("source_id") != bindings["source_id"]:
+            return "source_binding_mismatch"
+        if hashlib.sha256(bytes(source)).hexdigest() != bindings["content_hash"]:
+            return "source_binding_mismatch"
+        if any(row["hook"] == hook for row in UNSUPPORTED_OPTIONAL_HOOKS):
+            return None
+        consent = state.get("lifecycle_hook_consent") if isinstance(state.get("lifecycle_hook_consent"), dict) else {}
+        if hook in LEGAL_EVIDENCE_OPERATIONS:
+            operation_consent = state.get("mediator_operation_consent") if isinstance(state.get("mediator_operation_consent"), dict) else None
+            if operation_consent is None:
+                return None
+            if operation_consent.get("revoked") is True:
+                return None
+            if bindings["consent_generation"] != consent.get("generation"):
+                return "consent_missing"
+        else:
+            if not consent or consent.get("revoked") is True:
+                return "consent_revoked" if consent.get("revoked") is True else "consent_missing"
+            if bindings["consent_generation"] != consent.get("generation"):
+                return "consent_missing"
+            if hook not in set(consent.get("hooks") or []):
+                return "consent_missing"
+        if isinstance(payload, Mapping):
+            if payload.get("actor_id") not in (None, user_id) or payload.get("user_id") not in (None, user_id):
+                return "wrong_owner"
+            if payload.get("case_id") not in (None, case_id) or payload.get("complaint_id") not in (None, case_id):
+                return "wrong_case"
+            narrative = payload.get("narrative")
+            if type(narrative) is str and narrative.encode("utf-8") != bytes(source):
+                return "source_binding_mismatch"
+            raw_source = payload.get("source")
+            if isinstance(raw_source, (bytes, bytearray)) and bytes(raw_source) != bytes(source):
+                return "source_binding_mismatch"
+            if type(payload.get("source_sha256")) is str and payload.get("source_sha256") != bindings["content_hash"]:
+                return "source_binding_mismatch"
+            passages = payload.get("admitted_passages")
+            if isinstance(passages, list) and passages:
+                texts = [item.get("text") for item in passages if isinstance(item, Mapping)]
+                if bytes(source).decode("utf-8") not in texts:
+                    return "source_binding_mismatch"
+            asset_root = payload.get("asset_root")
+            asset_name = payload.get("offline_asset")
+            if type(asset_root) is str and type(asset_name) is str and asset_name:
+                asset_path = Path(asset_root) / asset_name
+                if asset_path.is_file() and asset_path.read_bytes() != bytes(source):
+                    return "source_binding_mismatch"
+            source_refs = payload.get("source_refs")
+            if isinstance(source_refs, list) and source_refs:
+                hashes = [item.get("content_hash") for item in source_refs if isinstance(item, Mapping)]
+                if bindings["content_hash"] not in hashes:
+                    return "source_binding_mismatch"
+        return None
+
+    def exercise_lifecycle_hook(
+        self,
+        user_id: Optional[str],
+        hook: str,
+        *,
+        bindings: Mapping[str, Any],
+        payload: Any,
+        now: Any = None,
+        legal_context: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Exercise one real hook or registered operation under saved lifecycle bindings.
+
+        Caller booleans, receipts, and handler flags are not arguments. A missing
+        required capability stays an unavailable dependency failure.
+        """
+
+        from mediator.hook_runtime import (
+            LEGAL_EVIDENCE_OPERATIONS,
+            _lifecycle_base,
+            prove_lifecycle_hook_outcome,
+        )
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        gate = self._lifecycle_gate(resolved, hook if type(hook) is str else "", bindings, payload)
+        if gate:
+            refused = _lifecycle_base(hook if type(hook) is str else "", bindings if isinstance(bindings, Mapping) else None, status="refused", code=gate)
+            refused["dependency_failure"] = False
+            refused["workflow_invoked"] = False
+            return refused
+        if hook in LEGAL_EVIDENCE_OPERATIONS:
+            if not isinstance(payload, Mapping) or not isinstance(legal_context, Mapping) or now is None:
+                refused = _lifecycle_base(hook, bindings, status="refused", code="malformed_binding", workflow="dispatch_public_mediator_operation")
+                refused["dependency_failure"] = False
+                return refused
+            result = self.dispatch_public_mediator_operation(
+                resolved,
+                payload,
+                session_id=str(bindings["session_id"]),
+                session_revision=int(bindings["session_revision"]),
+                now=now,
+                source_bindings=[{"source_id": bindings["source_id"], "content_hash": bindings["content_hash"]}],
+                legal_context=legal_context,
+                purpose=hook,
+            )
+            outcome = _lifecycle_base(hook, bindings, status=str(result.get("status") or "refused"), code=str(result.get("code") or "refused"), workflow="dispatch_public_mediator_operation")
+            outcome["workflow_invoked"] = True
+            outcome["writes"] = result.get("writes") if type(result.get("writes")) is int else 0
+            outcome["effect_dispatched"] = result.get("effect_dispatched") is True
+            outcome["storage_invoked"] = result.get("storage_invoked") is True
+            outcome["provider_invoked"] = result.get("provider_invoked") is True
+            outcome["late"] = result.get("late") is True
+            outcome["proof"] = False
+            outcome["effect"] = outcome["status"] == "successful" and outcome["writes"] >= 1 and outcome["effect_dispatched"] is True and outcome["provider_invoked"] is False
+            outcome["activated"] = outcome["effect"] is True
+            outcome["dependency_failure"] = outcome["status"] == "unavailable"
+            return outcome
+        return prove_lifecycle_hook_outcome(hook, payload, bindings)
+
+    def dispatch_public_mediator_operation(
+        self,
+        user_id: Optional[str],
+        request: Mapping[str, Any],
+        *,
+        session_id: str,
+        session_revision: int,
+        now: Any,
+        source_bindings: Sequence[Mapping[str, Any]],
+        legal_context: Mapping[str, Any],
+        purpose: Optional[str] = None,
+        persisted_consent_verified: Any = None,
+        key_available: Any = None,
+        private_store_available: Any = None,
+        derived_index_ready: Any = None,
+        handler_enabled: Any = None,
+        receipt: Any = None,
+        host_targets: Any = None,
+        effect: Any = None,
+        handler: Any = None,
+    ) -> Dict[str, Any]:
+        """Dispatch one mediator operation from saved case facts.
+
+        Caller booleans, registry rows, host target lists, and receipts are ignored.
+        """
+
+        from mediator.hook_runtime import (
+            HookContextError,
+            bind_hook_execution_context,
+            dispatch_registered_hook_operation,
+            graph_revision_token,
+        )
+
+        del persisted_consent_verified, key_available, private_store_available, derived_index_ready
+        del handler_enabled, receipt, host_targets, effect, handler
+        resolved = str(user_id or DEFAULT_USER_ID)
+        policy = self.get_privacy_policy(resolved)
+        case_id = str(policy.get("case_id") or resolved)
+        helpers = _privacy_helpers()
+        privacy = helpers["build_complaint_privacy_context"](
+            policy.get("policy"), user_id=resolved, case_id=case_id, data_class="fact_kg",
+        )
+        graph = self.case_knowledge_graph(resolved, case_id)
+        token = graph_revision_token(graph) if graph is not None else "gr-missing"
+        operation = request.get("operation") if isinstance(request, Mapping) else ""
+        try:
+            context = bind_hook_execution_context(
+                operation=operation if type(operation) is str else "",
+                owner_id=resolved,
+                case_id=case_id,
+                session_id=session_id,
+                session_revision=session_revision,
+                graph_revision=token,
+                legal_context=legal_context,
+                purpose=purpose or (operation if type(operation) is str else ""),
+                deadline=now,
+                source_bindings=source_bindings,
+                privacy_context=privacy,
+                host=self,
+            )
+        except HookContextError as exc:
+            refused = {
+                "operation": operation if type(operation) is str else "",
+                "status": "refused",
+                "code": str(exc.code),
+                "effect_dispatched": False,
+                "handler_invoked": False,
+                "writes": 0,
+                "provider_invoked": False,
+                "proof_status": "not_proof",
+                "late": False,
+            }
+            self.append_mediator_operation_journal({**refused, "owner_id": resolved, "case_id": case_id, "storage_invoked": False})
+            return refused
+        return dispatch_registered_hook_operation(
+            request,
+            context=context,
+            host_targets=(),
+            owner_id=resolved,
+            case_id=case_id,
+            session_id=session_id,
+            session_revision=session_revision,
+            graph_revision=token,
+            legal_context=legal_context,
+            purpose=context.purpose,
+            source_bindings=source_bindings,
+            privacy_context=privacy,
+            now=now,
+            host=self,
+            persisted_consent_verified=False,
+            key_available=False,
+            private_store_available=False,
+            derived_index_ready=False,
+        )
+
+    def record_gui_inference_authority(self, user_id: Optional[str], **untrusted: Any) -> Dict[str, Any]:
+        """Caller JSON is not a browser grant or a source/revision owner."""
+        return {"recorded": False, "code": "server_case_authority_required",
+                "live_model_identity_verified": False}
+
+    def _gui_inference_snapshot(self, user_id: Optional[str], purpose: str) -> Dict[str, Any]:
+        from mediator.hook_runtime import HookContextError, graph_revision_token, source_binding_hash
+        from complaint_phases.knowledge_graph import KnowledgeGraph
+        authority = self._owner_case_authority()
+        if authority is None:
+            raise HookContextError("server_case_authority_required")
+        actor = authority.actor_principal_id
+        decision = authority.revalidate(actor_principal_id=actor, workspace=self, require_owner=True)
+        if user_id not in (None, "", actor, decision.canonical_owner_principal_id):
+            raise HookContextError("wrong_case")
+        view = authority.processing_consent(purpose=purpose, actor_principal_id=actor, workspace=self)
+        choices = [item for item in view["decisions"] if item["purpose"] == purpose]
+        if len(choices) != 1:
+            raise HookContextError("consent_missing")
+        choice = choices[0]
+        # The legacy raw-intake/global-Grok fallback is never GUI authority.
+        authorized = (choice.get("egress_authorized") is True and choice.get("explicit") is True
+                      and choice.get("revoked") is False and choice.get("provider") == "grok_cli"
+                      and choice.get("model") == "grok-4.7")
+        if not authorized:
+            raise HookContextError("consent_revoked" if choice.get("revoked") else "case_purpose_consent_required")
+        canonical = decision.canonical_owner_principal_id
+        state = self._load_state(canonical, case_id=decision.case_id)
+        projection = state.get("shared_interview")
+        if not isinstance(projection, dict) or not isinstance(projection.get("knowledge_graph"), dict):
+            raise HookContextError("source_binding_missing")
+        narrative = str(_narrative_record(state).get("text") or "")
+        graph = projection["knowledge_graph"]
+        if not narrative or not graph.get("entities"):
+            raise HookContextError("source_binding_missing")
+        revision = projection.get("session_revision")
+        session = projection.get("session_id")
+        if type(revision) is not int or revision < 0 or not isinstance(session, str) or not session:
+            raise HookContextError("stale_request")
+        graph_token = graph_revision_token(KnowledgeGraph.from_dict(graph))
+        graph_raw = json.dumps(graph, sort_keys=True, separators=(",", ":")).encode()
+        sources = [{"source_id": "original_complaint", "content_hash": hashlib.sha256(narrative.encode()).hexdigest()},
+                   {"source_id": "factual_graph", "content_hash": hashlib.sha256(graph_raw).hexdigest()}]
+        pending = projection.get("pending_inquiry") or {}
+        dependencies = projection.get("dependency_graph") or {}
+        targets = set(graph.get("entities", {})) | set(dependencies.get("nodes", {}))
+        targets.update(str(pending[k]) for k in ("target_id", "objective_id") if pending.get(k))
+        gap_codes = {str(item.get("code") or item.get("type") or "") if isinstance(item, dict) else str(item)
+                     for item in projection.get("unknown_reasons", [])}
+        gap_codes.update(str(pending[k]) for k in ("type", "grounding_status") if pending.get(k))
+        key_id = self._interview_snapshot_key(canonical, decision.case_id)["key_id"]
+        grant_fields = {"actor": actor, "tenant": decision.tenant_id, "case": decision.case_id,
+                        "resource": decision.resource_id, "revision": decision.revision,
+                        "membership_revision": decision.membership_revision, "key_id": key_id,
+                        "browser_session": authority.inference_session_binding(actor_principal_id=actor, workspace=self)}
+        grant_id = hashlib.sha256(json.dumps(grant_fields, sort_keys=True).encode()).hexdigest()
+        source_revision = source_binding_hash(sources)
+        consent = dict(view["operation_consent"])
+        consent["grants"] = [g for g in consent["grants"] if g.get("purpose") == purpose]
+        consent["revoked"] = False
+        policy = {"found": True, "case_match": True, "user_id": actor, "case_id": decision.case_id,
+                  "privacy_policy": _privacy_helpers()["privacy_policy_for_mode"](actor, decision.case_id, "grok"),
+                  "operation_consent": consent}
+        case_file = projection.get("intake_case_file") or {}
+        legal = case_file.get("legal_context") if isinstance(case_file.get("legal_context"), dict) else {}
+        return {"authority": authority, "actor": actor, "case_id": decision.case_id,
+                "policy": policy, "grant": {"grant_id": grant_id, "case_id": decision.case_id,
+                    "generation": max(1, decision.membership_revision), "revoked": False,
+                    "source_revision": source_revision}, "source_bindings": sources,
+                "graph_revision": graph_token, "session_revision": revision, "session_id": session,
+                "legal_context": legal, "narrative": narrative, "targets": targets, "gap_codes": gap_codes}
+
+    @staticmethod
+    def _gui_inference_refusal(code: str) -> Dict[str, Any]:
+        return {"status": "refused", "code": code, "accepted": False, "output": None,
+                "model_dispatched": False, "live_model_identity_verified": False,
+                "requirements_satisfied": False, "completion_authority": False}
+
+    def dispatch_bounded_gui_inference(self, user_id: Optional[str], *, purpose: str,
+            inputs: Mapping[str, Any], timeout_seconds: float = 30.0, **caller_context: Any) -> Dict[str, Any]:
+        """Dispatch through fresh issued owner authority and exact persisted purpose.
+
+        Source, graph/session, actor, grant, narrative and clock come from their
+        server owners. Request bodies cannot supply replacement authority.
+        """
+        from datetime import timedelta
+        import time
+        from mediator.hook_runtime import (HookContextError, dispatch_gui_bounded_inference,
+            discard_gui_inference_hold, MODEL_PURPOSE_IDS, native_gui_inference_transport)
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from .case_consent_api import CaseConsentError
+        if caller_context:
+            return self._gui_inference_refusal("caller_authority_not_accepted")
+        if type(purpose) is not str or purpose not in MODEL_PURPOSE_IDS:
+            return self._gui_inference_refusal("undeclared_purpose")
+        if type(timeout_seconds) not in (int, float) or not 0 < timeout_seconds <= 60:
+            return self._gui_inference_refusal("invalid_deadline")
+        started_monotonic = time.monotonic()
+        now = datetime.now(timezone.utc)
+        try:
+            snapshot = self._gui_inference_snapshot(user_id, purpose)
+            if not isinstance(inputs, Mapping):
+                raise HookContextError("input_bounds")
+            target = inputs.get("target_ref", inputs.get("candidate_ref"))
+            if type(target) is not str or target not in snapshot["targets"]:
+                raise HookContextError("source_binding_mismatch")
+            if purpose == "extract_facts":
+                fragment = inputs.get("source_text")
+                if type(fragment) is not str or not fragment or fragment not in snapshot["narrative"]:
+                    raise HookContextError("source_binding_mismatch")
+                if fragment == snapshot["narrative"]:
+                    raise HookContextError("query_not_minimized")
+            elif type(inputs.get("gap_code")) is not str or inputs["gap_code"] not in snapshot["gap_codes"]:
+                raise HookContextError("source_binding_mismatch")
+            authority = snapshot["authority"]
+            transport = authority.inference_transport(actor_principal_id=snapshot["actor"], workspace=self)
+            if transport is None:
+                return self._gui_inference_refusal("model_transport_unavailable")
+            holds = getattr(self, "_gui_server_holds", {})
+            for invocation, held in list(holds.items()):
+                if now.timestamp() > held["deadline"]:
+                    holds.pop(invocation, None)
+                    discard_gui_inference_hold(invocation)
+            self._gui_server_holds = holds
+            if len(holds) >= 64:
+                return self._gui_inference_refusal("inference_capacity_reached")
+            boundary_code = None
+            def current_revision():
+                fresh = self._gui_inference_snapshot(user_id, purpose)
+                for name in ("policy", "grant", "source_bindings", "graph_revision", "session_revision", "session_id"):
+                    if fresh[name] != snapshot[name]:
+                        raise HookContextError("stale_request")
+                return {"record": fresh["policy"], "grant": fresh["grant"],
+                        "graph_revision": fresh["graph_revision"], "session_revision": fresh["session_revision"]}
+            def observed_transport(call):
+                nonlocal boundary_code
+                try:
+                    current_revision()
+                    remaining = timeout_seconds - (time.monotonic() - started_monotonic)
+                    if remaining <= 0:
+                        boundary_code = "deadline_expired"
+                        return {"status": "unavailable"}
+                    bounded_call = {**call, "timeout_seconds": remaining,
+                        "deadline": (now + timedelta(seconds=timeout_seconds)).isoformat()}
+                    return transport(bounded_call)
+                except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied) as exc:
+                    boundary_code = getattr(exc, "code", "authorization_denied")
+                    return {"status": "unavailable"}
+            remaining = timeout_seconds - (time.monotonic() - started_monotonic)
+            if remaining <= 0:
+                return {**self._gui_inference_refusal("deadline_expired"), "status": "timeout"}
+            result = dispatch_gui_bounded_inference(policy_record=snapshot["policy"], grant=snapshot["grant"],
+                purpose_id=purpose, inputs=inputs, source_bindings=snapshot["source_bindings"],
+                legal_context=snapshot["legal_context"], owner_id=snapshot["actor"], case_id=snapshot["case_id"],
+                session_id=snapshot["session_id"], session_revision=snapshot["session_revision"],
+                graph_revision=snapshot["graph_revision"], deadline=now + timedelta(seconds=timeout_seconds), now=now,
+                privacy_context=_privacy_helpers()["build_complaint_privacy_context"](snapshot["policy"]["privacy_policy"],
+                    user_id=snapshot["actor"], case_id=snapshot["case_id"], data_class="raw_intake"),
+                model_transport=(native_gui_inference_transport if transport is native_gui_inference_transport else observed_transport),
+                complaint_text=snapshot["narrative"], revision_reader=current_revision,
+                timeout=remaining)
+            if boundary_code:
+                return {**self._gui_inference_refusal(boundary_code),
+                        "status": "timeout" if boundary_code == "deadline_expired" else "refused"}
+            if time.monotonic() - started_monotonic > timeout_seconds:
+                discard_gui_inference_hold(str(result.get("invocation_id") or ""))
+                return {**self._gui_inference_refusal("deadline_expired"), "status": "timeout",
+                        "model_dispatched": result.get("model_dispatched") is True}
+            if result.get("status") == "held":
+                holds = getattr(self, "_gui_server_holds", {})
+                holds[result["invocation_id"]] = {"actor": snapshot["actor"], "case_id": snapshot["case_id"],
+                    "purpose": purpose, "deadline": now.timestamp() + timeout_seconds}
+                self._gui_server_holds = holds
+            from integrations.ipfs_accelerate.routers import development_campaign_authorizes_user_complaint_egress
+
+            result["actor_principal_id"] = snapshot["actor"]
+            # A development-agent model grant is checked and then discarded.
+            # It is never written into the case consent record.
+            agent_permission = {
+                "provider": "grok_cli",
+                "model": "grok-4.7",
+                "allow_local_fallback": False,
+                "allow_cross_provider_fallback": False,
+                "development_agent": True,
+            }
+            result["development_agent_grok_permission_is_complaint_consent"] = (
+                development_campaign_authorizes_user_complaint_egress(agent_permission)
+            )
+            result["development_grok_authorization_ignored"] = (
+                result["development_agent_grok_permission_is_complaint_consent"] is False
+            )
+            return result
+        except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied,
+                WorkspacePersistenceError) as exc:
+            return self._gui_inference_refusal(getattr(exc, "code", "authorization_denied"))
+
+    def admit_bounded_gui_inference(self, user_id: Optional[str], *, invocation_id: str) -> Dict[str, Any]:
+        """Release only after fresh browser, case, purpose, key and source reproof."""
+        from mediator.hook_runtime import HookContextError, admit_gui_bounded_inference, discard_gui_inference_hold
+        from .workspace_case_authority import WorkspaceCaseAuthorityError
+        from .case_consent_api import CaseConsentError
+        holds = getattr(self, "_gui_server_holds", {})
+        if type(invocation_id) is not str:
+            return self._gui_inference_refusal("invocation_missing")
+        held = holds.get(invocation_id)
+        if held is None:
+            return self._gui_inference_refusal("invocation_missing")
+        try:
+            snapshot = self._gui_inference_snapshot(user_id, held["purpose"])
+            if (snapshot["actor"] != held["actor"] or snapshot["case_id"] != held["case_id"]):
+                raise HookContextError("wrong_case")
+            if datetime.now(timezone.utc).timestamp() > held["deadline"]:
+                raise HookContextError("deadline_expired")
+            result = admit_gui_bounded_inference(invocation_id=invocation_id, policy_record=snapshot["policy"],
+                grant=snapshot["grant"], source_bindings=snapshot["source_bindings"], owner_id=snapshot["actor"],
+                case_id=snapshot["case_id"], graph_revision=snapshot["graph_revision"],
+                session_revision=snapshot["session_revision"])
+            return result
+        except (HookContextError, WorkspaceCaseAuthorityError, CaseConsentError, WorkspaceAuthorizationDenied,
+                WorkspacePersistenceError) as exc:
+            return self._gui_inference_refusal(getattr(exc, "code", "authorization_denied"))
+        finally:
+            holds.pop(invocation_id, None)
+            discard_gui_inference_hold(invocation_id)
+
+    def _adverse_public_anchor(self, user_id: str) -> Dict[str, Any]:
+        """Graph token, pending inquiry, and snapshot head. Reads do not dispatch."""
+
+        state = self._load_state(user_id)
+        projection = state.get("shared_interview") if isinstance(state.get("shared_interview"), dict) else {}
+        pending = projection.get("pending_inquiry") if isinstance(projection.get("pending_inquiry"), dict) else {}
+        graph = projection.get("knowledge_graph") if isinstance(projection.get("knowledge_graph"), dict) else {}
+        token = ""
+        if graph:
+            try:
+                from complaint_phases.knowledge_graph import KnowledgeGraph
+                from mediator.hook_runtime import graph_revision_token
+
+                token = graph_revision_token(KnowledgeGraph.from_dict(graph))
+            except Exception:
+                token = ""
+        head_revision = None
+        head_code = "no_committed_head"
+        try:
+            loaded = self.load_complete_interview_snapshot(user_id)
+            snapshot = loaded.get("snapshot") if isinstance(loaded.get("snapshot"), dict) else {}
+            head_revision = snapshot.get("revision")
+            head_code = "available" if head_revision else "no_committed_head"
+        except WorkspacePersistenceError as exc:
+            head_code = str(exc.code or "unavailable")
+        return {
+            "graph_revision": token,
+            "session_revision": int(projection.get("session_revision") or 0),
+            "pending_inquiry": {
+                "inquiry_id": pending.get("inquiry_id"),
+                "revision": pending.get("revision"),
+                "question": pending.get("question"),
+                "objective_id": pending.get("objective_id"),
+                "target_id": pending.get("target_id"),
+            },
+            "head_revision": head_revision,
+            "head_code": head_code,
+        }
+
+    def authenticate_interview_snapshot_key(
+        self,
+        user_id: str,
+        *,
+        key: bytes,
+        key_id: str,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Try one caller key against the committed snapshot. A miss does not replace the head."""
+
+        from integrations.ipfs_datasets.storage import InterviewSnapshotError, load_interview_snapshot
+
+        context = self._interview_snapshot_key(user_id, case_id)
+        directory = self.interview_snapshot_directory(str(context["tenant_id"]), str(context["case_id"]))
+        try:
+            load_interview_snapshot(
+                directory,
+                protection="user_chosen_encrypted",
+                tenant_id=str(context["tenant_id"]),
+                case_id=str(context["case_id"]),
+                principal_id=str(context["principal_id"]),
+                key=key,
+                key_id=key_id,
+            )
+        except InterviewSnapshotError as exc:
+            return {
+                "authenticated": False,
+                "code": str(exc.code or "authentication_failed"),
+                "public_status": str(exc.public_status or "recoverable"),
+                "head_replaced": False,
+                "legal_completion": False,
+            }
+        return {"authenticated": True, "code": "authenticated", "head_replaced": False, "legal_completion": False}
+
+    def run_public_adverse_outcome(
+        self,
+        user_id: Optional[str],
+        kind: str,
+        *,
+        deadline_seconds: float = 30.0,
+        repository: Optional[Path] = None,
+        case_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Exercise one adverse hook or storage outcome through public operations.
+
+        The last committed graph token, pending inquiry, and snapshot head stay
+        in place. Legal completion is never synthesized. Owned children are
+        reaped; provider processes and the network are not started.
+        """
+
+        from mediator.hook_runtime import (
+            PUBLIC_ADVERSE_OUTCOMES,
+            OwnedProcessGuard,
+            reject_public_model_proposal,
+        )
+
+        resolved = str(user_id or DEFAULT_USER_ID)
+        guard = OwnedProcessGuard(deadline_seconds)
+        before = self._adverse_public_anchor(resolved)
+        outcome: Dict[str, Any] = {
+            "kind": kind,
+            "code": "unsupported_adverse_case",
+            "status": "unavailable",
+            "legal_completion": False,
+            "proof": False,
+            "legal_sufficiency": False,
+            "requirements_satisfied": False,
+            "backend_completed": False,
+            "provider_invoked": False,
+            "provider_process_started": False,
+            "network_touched": False,
+            "resume_possible": False,
+            "nonrecoverable_boundary": "unsupported_adverse_case",
+            "next_action": "report_unsupported_outcome",
+        }
+        try:
+            guard.spawn_owned_idle_child()
+            if guard.expired():
+                outcome.update(code="deadline_elapsed", status="timeout", resume_possible=True,
+                               nonrecoverable_boundary=None, next_action="retry_within_deadline")
+            elif kind not in PUBLIC_ADVERSE_OUTCOMES:
+                outcome["capability"] = "unavailable"
+            elif kind == "malformed_model_proposal":
+                rejected = reject_public_model_proposal({"requirements_satisfied": True, "tools": ["shell"]})
+                outcome.update(rejected)
+                outcome["status"] = "refused"
+            elif kind in {"late_model_proposal", "consent_revocation"}:
+                outcome.update(self._adverse_model_timing(resolved, kind, case_id=case_id))
+            elif kind == "wrong_key":
+                probed = self.authenticate_interview_snapshot_key(
+                    resolved, key=os.urandom(32), key_id="wrong-key", case_id=case_id,
+                )
+                boundary = None if probed.get("code") == "authentication_failed" and before.get("head_revision") else "no_committed_head"
+                outcome.update({
+                    "code": probed.get("code") or "authentication_failed",
+                    "status": "refused",
+                    "resume_possible": before.get("head_revision") is not None,
+                    "nonrecoverable_boundary": "wrong_key_cannot_open_head" if probed.get("code") == "authentication_failed" else boundary,
+                    "next_action": "retry_with_case_key" if before.get("head_revision") else "commit_snapshot",
+                    "head_replaced": False,
+                })
+            elif kind == "legal_source_outage":
+                receipt = self.run_legal_research(
+                    resolved,
+                    storage_available=False,
+                    retrieval_mode="cache",
+                    dependency_change={"source_outage": True},
+                )
+                outcome.update({
+                    "code": str(receipt.get("error_code") or "storage_unavailable"),
+                    "status": str(receipt.get("status") or "unavailable"),
+                    "proof": False,
+                    "legal_sufficiency": False,
+                    "requirements_satisfied": False,
+                    "backend_completed": False,
+                    "legal_completion": False,
+                    "provider_invoked": False,
+                    "resume_possible": True,
+                    "nonrecoverable_boundary": None,
+                    "next_action": str(receipt.get("next_action") or "retry_unavailable"),
+                    "stored_as_answer": False,
+                })
+            elif kind == "interrupted_snapshot":
+                try:
+                    self.commit_complete_grounded_snapshot(
+                    resolved,
+                    case_id=case_id,
+                    fail_before_head=True,
+                    expected_revision=None if before.get("head_revision") is None else str(before.get("head_revision")),
+                )
+                    outcome.update(code="durability_unproven", status="unavailable")
+                except WorkspacePersistenceError as exc:
+                    outcome.update(code=str(exc.code or "durability_unproven"), status=str(exc.public_status or "recoverable"))
+                outcome.update({
+                    "resume_possible": True,
+                    "nonrecoverable_boundary": None,
+                    "next_action": "retry_snapshot_commit",
+                    "head_replaced": False,
+                    "legal_completion": False,
+                })
+            elif kind == "corrupt_replica":
+                outcome.update(self._adverse_corrupt_replica(resolved, repository, case_id=case_id))
+        except WorkspacePersistenceError as exc:
+            outcome.update({
+                "code": str(exc.code or "unavailable"),
+                "status": str(exc.public_status or "unavailable"),
+                "resume_possible": exc.public_status != "nonrecoverable",
+                "nonrecoverable_boundary": None if exc.public_status != "nonrecoverable" else str(exc.code),
+                "next_action": "retry_unavailable",
+            })
+        finally:
+            children = guard.cleanup()
+        after = self._adverse_public_anchor(resolved)
+        preserved = {
+            "graph_revision": before.get("graph_revision") == after.get("graph_revision"),
+            "pending_inquiry": before.get("pending_inquiry") == after.get("pending_inquiry"),
+            "head_revision": before.get("head_revision") == after.get("head_revision"),
+            "session_revision": before.get("session_revision") == after.get("session_revision"),
+        }
+        outcome["before"] = before
+        outcome["after"] = after
+        outcome["preserved"] = preserved
+        outcome["owned_children"] = children
+        outcome["legal_completion"] = False
+        outcome["proof"] = False
+        outcome["legal_sufficiency"] = False
+        outcome["requirements_satisfied"] = False
+        outcome["backend_completed"] = False
+        outcome["provider_process_started"] = False
+        outcome["network_touched"] = False
+        if children.get("status") == "unavailable" and not children.get("pids"):
+            outcome["owned_child_capability"] = "unavailable"
+        else:
+            outcome["owned_child_capability"] = "reaped"
+        return outcome
+
+    def _adverse_model_timing(self, user_id: str, kind: str, *, case_id: Optional[str]) -> Dict[str, Any]:
+        """Authorize a synthetic in-process loader, then refuse the late or revoked result."""
+
+        policy = self.get_privacy_policy(user_id)
+        bound_case = str(case_id or policy.get("case_id") or user_id)
+        self.set_privacy_policy(user_id, "grok", case_id=bound_case)
+        submitted: list[Any] = []
+
+        def loader() -> Dict[str, Any]:
+            return {"status": "available", "synthetic": True, "live_model_identity_verified": False}
+
+        def submit(query: Mapping[str, Any]) -> None:
+            submitted.append(dict(query))
+
+        prepared = self.dispatch_consented_hook_query(
+            user_id,
+            purpose="extract_facts",
+            provider_kind="grok_inference",
+            data_class="raw_intake",
+            provider_loader=loader,
+            query_submitter=submit,
+            case_id=bound_case,
+            private_fields={"source_text": "synthetic gap", "target_ref": "target.adverse"},
+        )
+        invocation_id = str(prepared.get("invocation_id") or "")
+        accepted: list[str] = []
+        if kind == "consent_revocation":
+            self.set_privacy_policy(user_id, "local", case_id=bound_case)
+            late = self.accept_late_consented_hook_result(
+                user_id,
+                invocation_id=invocation_id,
+                case_id=bound_case,
+                result_acceptor=lambda: accepted.append("accepted"),
+            )
+            code = str(late.get("code") or "consent_revoked")
+        else:
+            late = self.accept_late_consented_hook_result(
+                user_id,
+                invocation_id=invocation_id,
+                case_id=bound_case,
+                result_acceptor=lambda: accepted.append("accepted"),
+                bound_graph_revision="bound-revision-not-current",
+                bound_session_revision=0,
+            )
+            code = str(late.get("code") or "stale_revision")
+        return {
+            "code": code,
+            "status": "refused",
+            "accepted": False,
+            "acceptor_called": bool(accepted),
+            "policy_read": bool(late.get("policy_read")),
+            "live_model_identity_verified": False,
+            "synthetic_transport": True,
+            "query_count": len(submitted),
+            "resume_possible": True,
+            "nonrecoverable_boundary": None,
+            "next_action": "continue_pending_inquiry",
+            "legal_completion": False,
+            "proof": False,
+            "provider_invoked": False,
+            "provider_process_started": False,
+        }
+
+    def _adverse_corrupt_replica(self, user_id: str, repository: Optional[Path], *, case_id: Optional[str]) -> Dict[str, Any]:
+        """Publish one fixture replica that returns corrupt bytes and refuse to restore it."""
+
+        from integrations.ipfs_datasets.storage import replica_policy
+        from integrations.private_storage import PrivateStorageError
+
+        if repository is None:
+            return {
+                "code": "replica_repository_required",
+                "status": "unavailable",
+                "capability": "unavailable",
+                "resume_possible": True,
+                "nonrecoverable_boundary": None,
+                "next_action": "supply_private_repository",
+                "legal_completion": False,
+            }
+
+        class _CorruptFixture:
+            provider_class = "fixture"
+            fixture_provider = True
+
+            def __init__(self) -> None:
+                self.frame = b""
+                self.version = ""
+
+            def place(self, *, digest: str, version: str, frame: bytes, timeout_seconds: float | None = None) -> Dict[str, Any]:
+                del digest, timeout_seconds
+                self.frame = b"\xff" + bytes(frame)
+                self.version = version
+                return {"status": "stored", "cid": "bafyfixturecorrupt"}
+
+            def readback(self, *, digest: str, version: str, timeout_seconds: float | None = None) -> Dict[str, Any]:
+                del digest, version, timeout_seconds
+                return {"status": "available", "frame": self.frame, "version": self.version, "cid": "bafyfixturecorrupt"}
+
+        corrupt = _CorruptFixture()
+        policy = replica_policy(desired_replicas=1, minimum_replicas=1, mode="private_remote")
+        state = self._load_state(user_id)
+        narrative = _narrative_record(state)
+        text = str(narrative.get("text") or "synthetic").encode("utf-8")
+        try:
+            published = self.publish_encrypted_replicas(
+                user_id,
+                repository,
+                case_id=case_id,
+                policy=policy,
+                revision="adverse-r1",
+                complaint=text,
+                fact_graph=b"graph:last-valid",
+                proof=b"proof:not-legal-completion",
+                providers={"fixture-corrupt": corrupt},
+                timeout_seconds=1,
+            )
+        except (PrivateStorageError, ValueError, WorkspacePersistenceError) as exc:
+            code = getattr(exc, "code", None) or "replica_unavailable"
+            return {
+                "code": str(code),
+                "status": "unavailable",
+                "resume_possible": True,
+                "nonrecoverable_boundary": None,
+                "next_action": "retry_unavailable",
+                "legal_completion": False,
+                "published": False,
+            }
+        ledger = Path(repository) / "replica-ledger" / "primary.frame"
+        primary_existed = ledger.is_file()
+        primary_bytes = ledger.read_bytes() if primary_existed else b""
+        if primary_existed:
+            ledger.unlink()
+        restored = None
+        error_code = "replica_unavailable"
+        try:
+            restored = self.restore_encrypted_workspace(
+                user_id,
+                repository,
+                case_id=case_id,
+                providers={"fixture-corrupt": corrupt},
+                timeout_seconds=1,
+            )
+            error_code = "replica_restored"
+        except PrivateStorageError as exc:
+            error_code = str(exc.code or "replica_unavailable")
+        primary_after = ledger.read_bytes() if ledger.is_file() else b""
+        corrupt_used = restored is not None and restored.get("source") == "replica"
+        if corrupt_used or (primary_after and primary_after != primary_bytes):
+            return {
+                "code": "corrupt_replica_applied",
+                "status": "unavailable",
+                "published": bool(published),
+                "corrupt_replica_used": True,
+                "resume_possible": False,
+                "nonrecoverable_boundary": "corrupt_replica_applied",
+                "next_action": "do_not_treat_replica_as_legal_completion",
+                "legal_completion": False,
+                "proof": False,
+                "network_durable": False,
+            }
+        if primary_existed and not ledger.is_file():
+            ledger.write_bytes(primary_bytes)
+        return {
+            "code": error_code,
+            "status": "unavailable",
+            "published": bool(published),
+            "corrupt_replica_used": False,
+            "primary_preserved": (not primary_existed) or ledger.read_bytes() == primary_bytes,
+            "resume_possible": True,
+            "nonrecoverable_boundary": "corrupt_replica_not_a_restore_source",
+            "next_action": "resume_from_local_snapshot_head",
+            "legal_completion": False,
+            "proof": False,
+            "network_durable": False,
+        }
 
     def inventory_private_data_classes(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Describe private case classes without reading other sessions, evidence, exports, or secrets."""
@@ -12153,6 +18298,14 @@ class ComplaintWorkspaceService:
                 or (principal_id is not None and principal_id != tenant_id)):
             raise WorkspaceAuthorizationDenied()
         access = self._effective_access()
+        authority = self._owner_case_authority()
+        if authority is not None:
+            if tenant_id != authority.canonical_owner_principal_id or case_id != authority.case_id:
+                raise WorkspaceAuthorizationDenied()
+            if _REQUEST_CASE.get() is not None and _REQUEST_CASE.get() != case_id:
+                raise WorkspaceAuthorizationDenied()
+            self._check_access(tenant_id, ability="private_key", case_id=case_id)
+            return
         operator = access.trust == "trusted_local" and not access.principal_id and not access.case_id
         if not operator:
             if (access.trust not in {"authenticated", "trusted_local"}
@@ -12233,7 +18386,215 @@ class ComplaintWorkspaceService:
         self._require_local_filesystem_access()
         from integrations.private_storage import task_key_receipt
 
-        return task_key_receipt(self._private_key_session().lock())
+        receipt = task_key_receipt(self._private_key_session().lock())
+        for record in self._key_coherence_ledger().values():
+            record["epoch"] = int(record.get("epoch") or 0) + 1
+            record["status"] = "locked"
+            record["key_id"] = None
+        return receipt
+
+    def _key_coherence_ledger(self) -> Dict[tuple, Dict[str, Any]]:
+        ledger = getattr(self, "_key_coherence_state", None)
+        if ledger is None:
+            ledger = {}
+            self._key_coherence_state = ledger
+        return ledger
+
+    def _key_coherence_record(self, tenant_id: str, case_id: str) -> Dict[str, Any]:
+        ledger = self._key_coherence_ledger()
+        key = (str(tenant_id), str(case_id))
+        record = ledger.get(key)
+        if record is None:
+            record = {"epoch": 1, "status": "absent", "key_id": None, "revoked": False, "actor_id": ""}
+            ledger[key] = record
+        return record
+
+    def _existing_case_key_id(self, tenant_id: str, case_id: str) -> Optional[str]:
+        """Opaque id already stored for this case. This never mints a key."""
+
+        session = self._private_key_session()
+        document = getattr(session, "_document", None)
+        if not isinstance(document, dict):
+            return None
+        cases = document.get("cases") or {}
+        record = cases.get(f"{tenant_id}\n{case_id}") if isinstance(cases, dict) else None
+        if not isinstance(record, dict) or not record.get("data_key_id"):
+            return None
+        return str(record["data_key_id"])
+
+    def _wallet_binding(self, actor_id: str) -> str:
+        directory = str(self._private_key_directory().resolve())
+        return hashlib.sha256(f"{actor_id}\n{directory}".encode("utf-8")).hexdigest()
+
+    def _refuse_incoherent_key(self, tenant_id: str, case_id: Optional[str]) -> None:
+        if not tenant_id or not case_id:
+            return
+        record = self._key_coherence_ledger().get((str(tenant_id), str(case_id)))
+        if record and record.get("revoked") is True:
+            raise WorkspacePersistenceError(
+                "This case key was revoked. The case was not recreated.",
+                code="key_unavailable",
+                public_status="unlock_needed",
+            )
+
+    def public_key_coherence(self, tenant_id: str, case_id: str, *, actor_id: str) -> Dict[str, Any]:
+        """Public key lifecycle for one case. No passphrase, key bytes, or case text."""
+
+        record = self._key_coherence_record(tenant_id, case_id)
+        session = self._private_key_session()
+        unlocked = bool(session.unlocked) and record.get("revoked") is not True
+        if record.get("revoked") is True:
+            status = "revoked"
+        elif not session.unlocked:
+            status = "locked"
+        elif self._existing_case_key_id(tenant_id, case_id) is None and record.get("status") == "absent":
+            status = "absent"
+        else:
+            status = "unlocked" if record.get("status") != "rotated" else "rotated"
+            if status == "rotated" and unlocked:
+                status = "unlocked"
+        guidance = {
+            "locked": "Private keys are locked. An authorized local key owner must unlock this case wallet outside the page, then reload. Chat, evidence, graphs, the draft, and messages were cleared. No replacement case was opened.",
+            "revoked": "This case key was revoked. Reloading does not recreate the case or reveal cached text. Recover only from a deliberate export of this same wallet.",
+            "absent": "No case key is available. An empty case was not created. Unlock the existing wallet or import its recovery export.",
+            "rotated": "The case key was rotated. Reload authorized content. Writes that still name the previous key epoch were refused.",
+            "unlocked": "Private key access is available. Authorized chat, evidence, graphs, draft, and messages were reloaded for this wallet.",
+        }
+        receipt = {
+            "status": status,
+            "epoch": int(record.get("epoch") or 1),
+            "wallet_binding": self._wallet_binding(str(actor_id)),
+            "actor_id": str(actor_id),
+            "recovery_guidance": guidance.get(status, guidance["locked"]),
+            "clear_plaintext": status != "unlocked",
+            "reload": False,
+            "empty_case_created": False,
+            "admit_writes": status == "unlocked",
+            "surfaces": ["chat", "evidence", "graphs", "draft", "messages"],
+        }
+        if status == "unlocked":
+            receipt["data_key_id"] = self._existing_case_key_id(tenant_id, case_id)
+        return receipt
+
+    def synchronize_key_coherence(
+        self,
+        *,
+        action: str,
+        tenant_id: str,
+        case_id: str,
+        actor_id: str,
+        passphrase: Optional[str] = None,
+        expected_epoch: Optional[int] = None,
+        captured_key_id: Optional[str] = None,
+        wallet_directory: Optional[str] = None,
+        resource_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Apply one key transition without minting a case or borrowing a wallet."""
+
+        own_directory = self._private_key_directory().resolve()
+        if wallet_directory is not None and Path(wallet_directory).resolve() != own_directory:
+            return {
+                "status": "foreign_wallet",
+                "code": "foreign_wallet",
+                "admitted": False,
+                "empty_case_created": False,
+                "wallet_replaced": False,
+                "recovery_guidance": "This actor cannot use another wallet. The case was not opened and no plaintext was returned.",
+                "surfaces": ["chat", "evidence", "graphs", "draft", "messages"],
+            }
+        record = self._key_coherence_record(tenant_id, case_id)
+        session = self._private_key_session()
+        before_cases = int(session.public_state().get("case_count") or 0)
+        before_key = self._existing_case_key_id(tenant_id, case_id)
+
+        def finish(status: str, *, code: str, admitted: bool, key_id: Optional[str] = None) -> Dict[str, Any]:
+            after_cases = int(self._private_key_session().public_state().get("case_count") or 0)
+            receipt = self.public_key_coherence(tenant_id, case_id, actor_id=actor_id)
+            receipt.update(status=status, code=code, admitted=admitted, empty_case_created=after_cases != before_cases,
+                case_count=after_cases, data_key_unchanged=self._existing_case_key_id(tenant_id, case_id) == before_key)
+            if key_id is not None and status == "unlocked":
+                receipt["data_key_id"] = key_id
+            elif status != "unlocked":
+                receipt.pop("data_key_id", None)
+            return receipt
+
+        if action == "unlock":
+            unlocked = self.unlock_private_keys(passphrase=passphrase)
+            if unlocked.get("unlocked") is not True:
+                record["status"] = "locked"
+                record["key_id"] = None
+                code = str(unlocked.get("code") or "unlock_needed")
+                return finish("authentication_failed" if code == "authentication_failed" else "locked",
+                    code=code, admitted=False)
+            record["epoch"] = int(record.get("epoch") or 0) + 1
+            record["status"] = "unlocked"
+            record["actor_id"] = str(actor_id)
+            record["key_id"] = self._existing_case_key_id(tenant_id, case_id)
+            return finish("unlocked", code="unlocked", admitted=True, key_id=record["key_id"])
+
+        if action == "lock":
+            self.lock_private_keys()
+            record["status"] = "locked"
+            record["key_id"] = None
+            return finish("locked", code="unlock_needed", admitted=False)
+
+        if action == "rotate":
+            if not session.unlocked or record.get("revoked") is True:
+                return finish("locked" if not session.unlocked else "revoked",
+                    code="unlock_needed" if not session.unlocked else "key_unavailable", admitted=False)
+            if expected_epoch is not None and int(expected_epoch) != int(record.get("epoch") or 0):
+                return finish("rotated", code="stale_key_epoch", admitted=False)
+            current = self._existing_case_key_id(tenant_id, case_id)
+            if not current:
+                return finish("absent", code="key_unavailable", admitted=False)
+            if captured_key_id is not None and str(captured_key_id) != current:
+                return finish("rotated", code="stale_key_epoch", admitted=False)
+            from integrations.private_storage import PrivateKeyMaterialError
+            try:
+                rotated = session.rotate_case_grant_data_key(
+                    tenant_id, case_id,
+                    resource_id=str(resource_id or case_id),
+                    expected_data_key_id=current,
+                    operation_id=uuid.uuid4().hex,
+                )
+            except PrivateKeyMaterialError as exc:
+                return finish("absent", code=str(exc), admitted=False)
+            record["epoch"] = int(record.get("epoch") or 0) + 1
+            record["status"] = "rotated"
+            record["key_id"] = str(rotated.get("new_data_key_id") or "")
+            receipt = finish("rotated", code="rotated", admitted=True, key_id=record["key_id"])
+            receipt["data_key_id"] = record["key_id"]
+            receipt["previous_data_key_id"] = current
+            receipt["clear_plaintext"] = True
+            receipt["reload"] = True
+            receipt["recovery_guidance"] = "The case key was rotated. Reload authorized content. Writes that still name the previous key epoch were refused."
+            return receipt
+
+        if action == "revoke":
+            if not session.unlocked:
+                return finish("locked", code="unlock_needed", admitted=False)
+            if not self._existing_case_key_id(tenant_id, case_id):
+                return finish("absent", code="key_unavailable", admitted=False)
+            record["revoked"] = True
+            record["epoch"] = int(record.get("epoch") or 0) + 1
+            record["status"] = "revoked"
+            record["key_id"] = None
+            return finish("revoked", code="key_unavailable", admitted=False)
+
+        if action == "write":
+            if record.get("revoked") is True or not session.unlocked:
+                status = "revoked" if record.get("revoked") is True else "locked"
+                return finish(status, code="key_unavailable" if status == "revoked" else "unlock_needed", admitted=False)
+            current = self._existing_case_key_id(tenant_id, case_id)
+            stale_epoch = expected_epoch is not None and int(expected_epoch) != int(record.get("epoch") or 0)
+            stale_key = captured_key_id is not None and (not current or str(captured_key_id) != current)
+            if stale_epoch or stale_key:
+                return finish(str(record.get("status") or "rotated"), code="stale_key_epoch", admitted=False)
+            if record.get("actor_id") and str(actor_id) != str(record.get("actor_id")):
+                return finish("foreign_wallet", code="foreign_wallet", admitted=False)
+            return finish("unlocked", code="unlocked", admitted=True, key_id=current)
+
+        return finish("absent", code="key_unavailable", admitted=False)
 
     def export_private_key_recovery(
         self,
@@ -12348,6 +18709,7 @@ class ComplaintWorkspaceService:
         """Mint or reload one case data key. The key id is opaque; bytes stay in memory."""
 
         self._require_private_case_key_access(tenant_id, case_id)
+        self._refuse_incoherent_key(tenant_id, case_id)
 
         from integrations.private_storage import PrivateKeyLockedError, task_key_receipt
 
@@ -12369,7 +18731,10 @@ class ComplaintWorkspaceService:
         """Request-checked lazy case provider; a handle retains no raw key map."""
 
         access = self._effective_access()
-        if access.trust == "trusted_local" and not access.principal_id and not access.case_id:
+        authority = self._owner_case_authority()
+        if authority is not None:
+            self._require_private_case_key_access(authority.canonical_owner_principal_id, authority.case_id)
+        elif access.trust == "trusted_local" and not access.principal_id and not access.case_id:
             self._require_local_filesystem_access()
         else:
             self._require_private_case_key_access(access.principal_id, access.case_id)
@@ -12378,7 +18743,7 @@ class ComplaintWorkspaceService:
             # Preserve the native typed construction failure without copying any
             # unlocked case keys into the returned, long-lived handle.
             session.provider()
-        return _WorkspaceCaseKeyProvider(self)
+        return _WorkspaceCaseKeyProvider(self, request_authority=authority)
 
     def continue_without_private_keys(self) -> Dict[str, Any]:
         """Let a coding supervisor proceed without user keys or a privacy bypass."""
@@ -12468,6 +18833,8 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.create_identity", "description": "Create a decentralized identity for browser or CLI use."},
                 {"name": "complaint.list_intake_questions", "description": "List the complaint intake questions used across browser, CLI, and MCP flows."},
                 {"name": "complaint.list_claim_elements", "description": "List the tracked claim elements used for evidence and review."},
+                {"name": "complaint.dispatch_bounded_gui_inference", "description": "Bound owner-case inference with fresh persisted purpose consent."},
+                {"name": "complaint.admit_bounded_gui_inference", "description": "Revalidate current case consent, grant and source before release."},
                 {"name": "complaint.start_session", "description": "Load or initialize a complaint workspace session."},
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
                 {"name": "complaint.run_intake_chat_turn", "description": "Advance the shared mediator-style intake chat one turn and persist the captured answer."},
@@ -12555,6 +18922,15 @@ class ComplaintWorkspaceService:
         return self._dispatch_mcp_tool(tool_name, args)
 
     def _dispatch_mcp_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        if tool_name == "complaint.dispatch_bounded_gui_inference":
+            if set(args) - {"user_id", "purpose", "inputs", "timeout_seconds"}:
+                return self._gui_inference_refusal("caller_authority_not_accepted")
+            return self.dispatch_bounded_gui_inference(args.get("user_id"), purpose=args.get("purpose"),
+                inputs=args.get("inputs"), timeout_seconds=args.get("timeout_seconds", 30.0))
+        if tool_name == "complaint.admit_bounded_gui_inference":
+            if set(args) - {"user_id", "invocation_id"}:
+                return self._gui_inference_refusal("caller_authority_not_accepted")
+            return self.admit_bounded_gui_inference(args.get("user_id"), invocation_id=args.get("invocation_id"))
         if tool_name == "complaint.read_contained_file":
             data = self.read_contained_workspace_file(args.get("user_id"), str(args.get("relative_name") or ""))
             return {
@@ -12599,6 +18975,8 @@ class ComplaintWorkspaceService:
                 question_id=args.get("question_id"),
                 expected_question_revision=args.get("expected_question_revision"),
                 interview_action=args.get("interview_action"),
+                expected_graph_revision=args.get("expected_graph_revision"),
+                expected_session_revision=args.get("expected_session_revision"),
             )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(

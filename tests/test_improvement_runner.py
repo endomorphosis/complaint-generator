@@ -21,6 +21,14 @@ pytestmark = [pytest.mark.no_auto_llm, pytest.mark.no_auto_network, pytest.mark.
 
 
 @pytest.fixture(autouse=True)
+def private_containerd_metadata(tmp_path, monkeypatch):
+    # Real fixture directory/capacity, replacing only fixed-path discovery.
+    metadata = tmp_path / "containerd_metadata"
+    metadata.mkdir(mode=0o700)
+    monkeypatch.setattr(runner, "_containerd_metadata_directory", lambda: metadata)
+
+
+@pytest.fixture(autouse=True)
 def restore_cwd(monkeypatch):
     monkeypatch.chdir(ROOT)
 
@@ -95,7 +103,7 @@ def test_explicit_environment_removes_ambient_routes_and_pins_model():
     assert environment["TODO_DAEMON_LLM_ALLOW_LOCAL_FALLBACK"] == "0"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_MAX_TURNS"] == "64"
     assert environment["IPFS_ACCELERATE_AGENT_GROK_REASONING_EFFORT"] == "low"
-    assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "0"
+    assert environment[runner.AUTOMATIC_RETRY_REARM_ENV] == "1"
     assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_SUBMODULE_PATHS"] == "external/ipfs_datasets_py,external/ipfs_kit_py"
     assert environment["IPFS_ACCELERATE_AGENT_WORKTREE_POOL_MAX_ENTRIES"] == "1"
     assert environment["HOME"] == "/preserved/user"
@@ -989,6 +997,135 @@ def test_status_reports_native_attempt_limit_block_despite_ready_dependencies(ca
     assert runner.status(root, spec, state)["status"] == "blocked"
 
 
+
+def _attempt_limited_native_state():
+    # Native keeps ready-but-budget-limited tasks out of blocked_task_ids.
+    return {
+        "active_task_id": "", "active_task_cid": "", "active_attempt": 0,
+        "active_phase": "", "implementation_in_progress": False,
+        "ready_task_ids": ["CIMP-UX-09", "CIMP-UX-18"],
+        "selectable_ready_task_ids": [], "blocked_task_ids": [],
+        "selection_idle_reason": "all_selectable_ready_tasks_reached_max_task_attempts",
+        "implementation_attempts": {"CIMP-UX-09": 3, "CIMP-UX-18": 3},
+        "implementation_attempts_by_cid": {"fixture-cid-09": 3, "fixture-cid-18": 3},
+        "task_identities": {task: {"canonical_task_cid": cid} for task, cid in (
+            ("CIMP-UX-09", "fixture-cid-09"), ("CIMP-UX-18", "fixture-cid-18"))},
+    }
+
+
+def _attempt_limited_status_fixture(campaign, monkeypatch):
+    body = _attempt_limited_native_state()
+    root, spec, state, record = _status_fixture(campaign, monkeypatch, native_state=body,
+        board={"count": 68, "completed": 15, "ready_task_ids": body["ready_task_ids"],
+               "manual_hold_task_ids": []})
+    record["started_at"] = runner.time.time() - 3600
+    runner._atomic_json(state / "launcher.json", record)
+    # A fresh poll repeats backpressure; it is activity, never useful progress.
+    events = state / f"{runner.STATE_PREFIX}_events.jsonl"
+    events.write_text(json.dumps({"type": "task_attempt_limit_backpressure",
+        "timestamp": datetime.now(timezone.utc).isoformat(), "max_task_attempts": 3,
+        "limited_task_ids": body["ready_task_ids"], "selection_idle_reason": body["selection_idle_reason"]}) + "\n")
+    return root, spec, state, record, body
+
+
+@pytest.mark.parametrize("heartbeat_status", ["running", "agentic_maintenance_started", "agentic_maintenance_completed"])
+def test_status_reports_actual_native_attempt_limit_without_claiming_heartbeat_progress(campaign, monkeypatch, heartbeat_status):
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    heartbeat_path = state / f"{runner.STATE_PREFIX}_supervisor_status.json"
+    heartbeat = json.loads(heartbeat_path.read_text())
+    heartbeat.update(status=heartbeat_status)
+    runner._atomic_json(heartbeat_path, heartbeat)
+    if heartbeat_status != "running":
+        from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_activity
+        monkeypatch.setattr(supervisor_activity, "observe_supervisor_activity", lambda *a, **k:
+                            SimpleNamespace(phase_ready=True))
+    paths = [state / "launcher.json", state / f"{runner.STATE_PREFIX}_task_state.json", heartbeat_path,
+             state / f"{runner.STATE_PREFIX}_events.jsonl"]
+    before = {p: p.read_bytes() for p in paths}
+    result = runner.status(root, spec, state)
+    assert result["status"] == "budget_exhausted" and not result["healthy"]
+    assert not result["progress_verified"]
+    assert result["attempt_budget"] == {
+        "reason": body["selection_idle_reason"], "max_task_attempts": 3,
+        "task_ids": ["CIMP-UX-09", "CIMP-UX-18"],
+        "attempts": {"CIMP-UX-09": 3, "CIMP-UX-18": 3},
+        "completion_authority": False,
+    }
+    assert before == {p: p.read_bytes() for p in paths}
+
+
+@pytest.mark.parametrize("change", ["available_task", "different_idle_reason", "new_cid", "active", "intentional_wait"])
+def test_attempt_limit_observation_preserves_other_native_states(campaign, monkeypatch, change):
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    expected = "running"
+    if change == "available_task":
+        body["selectable_ready_task_ids"] = ["CIMP-UX-18"]
+        body["implementation_attempts"]["CIMP-UX-18"] = 2
+        body["implementation_attempts_by_cid"]["fixture-cid-18"] = 2
+    elif change == "different_idle_reason":
+        body["selection_idle_reason"] = "no_ready_tasks"
+    elif change == "new_cid":
+        body["task_identities"]["CIMP-UX-18"]["canonical_task_cid"] = "fixture-new-cid"
+    elif change == "active":
+        body.update(active_task_id="CIMP-UX-09", active_task_cid="fixture-cid-09",
+                    active_attempt=3, implementation_in_progress=True,
+                    active_phase="implementation", active_task_started_at=datetime.now(timezone.utc).isoformat())
+        expected = "active"
+    else:
+        body.update(active_phase="waiting_for_user", active_task_id="CIMP-UX-09")
+        expected = "waiting_for_user"
+    runner._atomic_json(state / f"{runner.STATE_PREFIX}_task_state.json", body)
+    result = runner.status(root, spec, state)
+    assert result["status"] == expected
+    assert result["attempt_budget"] is None
+
+
+
+def test_attempt_limit_reads_real_native_authority_without_a_json_mirror(campaign, monkeypatch):
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import portal_task_state_control_plane as plane
+    root, spec, state, _, body = _attempt_limited_status_fixture(campaign, monkeypatch)
+    path = state / f"{runner.STATE_PREFIX}_task_state.json"
+    path.unlink()
+    monkeypatch.setenv(runner.ORCHESTRATION_DIR_ENV, str(state / "control-plane"))
+    body["heartbeat_at"] = body["last_progress_at"] = datetime.fromtimestamp(
+        runner.time.time() - 1800, timezone.utc).isoformat()
+    plane.save_portal_task_state(path.stem, body, state_path=path)
+    assert not path.exists()
+    result = runner.status(root, spec, state)
+    assert result["status"] == "budget_exhausted" and not result["healthy"]
+    assert result["native_state_source"]["source"] == "native_control_plane"
+    assert result["attempt_budget"]["attempts"] == {"CIMP-UX-09": 3, "CIMP-UX-18": 3}
+    after = plane.read_task_state_payload(path)
+    assert after["implementation_attempts"] == body["implementation_attempts"]
+    assert after["implementation_attempts_by_cid"] == body["implementation_attempts_by_cid"]
+    assert not path.exists()
+
+
+def test_attempt_limit_does_not_hide_real_canonical_validation(campaign, monkeypatch):
+    root, spec, state, _, _ = _attempt_limited_status_fixture(campaign, monkeypatch)
+    from integrations.ipfs_accelerate import reconciliation_activity
+    monkeypatch.setattr(reconciliation_activity, "evidence", lambda *a, **k:
+                        {"type": "canonical_native_executor_in_flight", "deadline_at": runner.time.time() + 30})
+    result = runner.status(root, spec, state)
+    assert result["status"] == "active" and result["healthy"]
+    assert result["validation_activity_verified"] and result["progress_verified"]
+
+
+def test_attempt_limit_keeps_initial_bounded_maintenance_grace(campaign, monkeypatch):
+    root, spec, state, record, _ = _attempt_limited_status_fixture(campaign, monkeypatch)
+    record["started_at"] = runner.time.time() - 10
+    runner._atomic_json(state / "launcher.json", record)
+    heartbeat_path = state / f"{runner.STATE_PREFIX}_supervisor_status.json"
+    heartbeat = json.loads(heartbeat_path.read_text())
+    heartbeat.update(status="agentic_maintenance_started")
+    runner._atomic_json(heartbeat_path, heartbeat)
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import supervisor_activity
+    monkeypatch.setattr(supervisor_activity, "observe_supervisor_activity", lambda *a, **k:
+                        SimpleNamespace(phase_ready=True))
+    result = runner.status(root, spec, state)
+    assert result["status"] == "maintenance" and result["healthy"]
+
+
 def test_status_detects_expired_attempt_without_log(campaign, monkeypatch):
     started = datetime.fromtimestamp(runner.time.time() - 1000, timezone.utc).isoformat()
     root, spec, state, _ = _status_fixture(campaign, monkeypatch, native_state={
@@ -1345,7 +1482,7 @@ def test_absent_resource_locations_use_owned_ancestor_without_creation(tmp_path,
     monkeypatch.setattr(runner.os, 'statvfs', lambda path: checked.append(Path(path)) or _capacity_metadata())
     monkeypatch.setattr(runner.os, 'access', lambda *a, **k: True)
     observed = runner._resource_capacity(root, state, worktrees, {'HOME': str(home), 'TMPDIR': str(temporary)})
-    assert observed['ready'] is True and len(checked) == 5
+    assert observed['ready'] is True and len(checked) == 6 + int(sys.platform.startswith('linux'))
     assert observed['roles']['state']['filesystem_path'] == str(tmp_path)
     assert not state.parent.exists() and not worktrees.parent.exists() and not temporary.parent.exists()
     assert observed['capacity_reserved'] is False
@@ -1410,6 +1547,8 @@ def test_public_native_loop_resource_hold_cannot_reach_run_once(tmp_path, monkey
 
 def test_public_native_loop_capacity_observation_allows_one_ordinary_pass(tmp_path, monkeypatch):
     from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon_runner as native_loop
+    from tests.test_worktree_capacity_admission import _world as pinned_git_world
+    repo = pinned_git_world(tmp_path)
     calls, closed, checks = [], [], []
     class InertDaemon:
         def run_once(self):
@@ -1423,7 +1562,7 @@ def test_public_native_loop_capacity_observation_allows_one_ordinary_pass(tmp_pa
         state_path=tmp_path / 'native-state.json', strategy_path=tmp_path / 'strategy.json',
         events_path=tmp_path / 'events.jsonl')
     native_loop.run_portal_implementation_daemon_loop(InertDaemon(), context,
-        logger=runner._LOGGER, hooks=(runner._resource_admission_hook(tmp_path, tmp_path / 'state', tmp_path / 'worktrees', {}),))
+        logger=runner._LOGGER, hooks=(runner._resource_admission_hook(repo, tmp_path / 'state', tmp_path / 'worktrees', {}),))
     assert len(checks) == 1 and calls == [True] and closed == [True]
     assert not context.events_path.exists() and not context.state_path.exists()
 
@@ -1441,9 +1580,9 @@ def test_native_resource_alarm_stops_remaining_filesystem_observations(tmp_path,
         {'HOME': str(paths['home']), 'TMPDIR': str(paths['temporary'])})
     assert calls == [paths['repository']]
     assert observed['ready'] is False and observed['reason'] == 'resource_observation_timed_out'
-    assert len(observed['roles']) == 5 and all(row['ready'] is False for row in observed['roles'].values())
+    assert len(observed['roles']) == 6 and all(row['ready'] is False for row in observed['roles'].values())
     assert all(observed['roles'][name]['reason'] == 'unobserved_after_timeout'
-        for name in ('state', 'worktrees', 'home', 'temporary'))
+        for name in ('state', 'worktrees', 'home', 'temporary', 'containerd_metadata'))
     assert observed['paid_dispatch'] is False and observed['live_wait_or_lease_claimed'] is False
 
 
@@ -2188,3 +2327,84 @@ def test_invalid_monitor_window_cannot_start_an_unmonitored_runner(tmp_path, mon
     monkeypatch.setattr(runner, "start", lambda *_a, **_k: pytest.fail("invalid monitor window started a runner"))
     result = runner.main(["start", "--watch", "--monitor-seconds", "nan", "--repo-root", str(ROOT), "--state-dir", str(tmp_path)])
     assert result == 2
+
+
+@pytest.mark.parametrize("damage", [None, "reopened", "revision", "no_branch_event", "unknown_reason", "unfinished"])
+def test_native_completed_candidate_is_retained_without_blocking_startup(tmp_path, monkeypatch, damage):
+    import subprocess
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_supervisor as native
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon import implementation_daemon as daemon_native
+    from ipfs_accelerate_py.agent_supervisor.task_sources.persistent_task_queue import PersistentTaskQueue
+
+    root, worktrees, state = (tmp_path / name for name in ("repo", "worktrees", "state"))
+    root.mkdir(); worktrees.mkdir(); state.mkdir()
+    def git(*args, cwd=root):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Synthetic startup fixture")
+    git("config", "user.email", "synthetic@example.invalid")
+    board = root / "board.md"
+    board_text = ("# Synthetic tasks\n\n## CIMP-MGND-01 Retained candidate\n\n"
+        "- Status: " + ("ready" if damage == "unfinished" else "completed") + "\n"
+        "- Completion: manual\n- Priority: P1\n- Track: ops\n"
+        "- Outputs: out/task.py\n- Acceptance: A synthetic check passes.\n")
+    board.write_text(board_text)
+    git("add", "board.md"); git("commit", "-qm", "Synthetic completed board")
+    original = "rescue/worktree/implementation-cimp-mgnd-01-synthetic"
+    leaf = worktrees / "retained"
+    git("worktree", "add", "-q", "-b", original, str(leaf), "HEAD")
+    (leaf / "retained.txt").write_text("Preserve the original candidate.\n")
+    git("add", "retained.txt", cwd=leaf); git("commit", "-qm", "Synthetic retained candidate", cwd=leaf)
+    candidate = git("rev-parse", "HEAD", cwd=leaf)
+    daemon = object.__new__(daemon_native.PortalImplementationDaemon)
+    daemon.task_source = None
+    daemon.todo_path = board
+    daemon.task_header_prefix = "CIMP-"
+    daemon.task_queue = PersistentTaskQueue()
+    event = {"type": "worktree_reconciliation_validation_started", "task_id": "CIMP-MGND-01", "branch": original}
+    daemon._iter_events = lambda: iter([] if damage == "no_branch_event" else [event])
+    daemon.reconcile_validated_worktree_candidate = lambda **kwargs: {
+        "merge_result": {"attempted": False, "merged": False, "reason": "synthetic_validation_rejected"}}
+    observed, dispatched = [], []
+
+    class Startup(native.PortalImplementationSupervisor):
+        def run_once(self, *, include_refill=True):
+            result = self.reconcile_backlogged_worktrees()
+            observed.append(result)
+            if damage == "reopened":
+                board.write_text(board_text.replace("Status: completed", "Status: ready"))
+            elif damage == "revision":
+                board.write_text(board_text.replace("out/task.py", "out/changed.py"))
+            elif damage == "unknown_reason":
+                result["processed"][0]["merge_result"]["reason"] = "unknown_terminal_claim"
+            return {"worktree_reconciliation": result}
+
+        def _run_forever_loop(self):
+            self.run_once(include_refill=False)
+            dispatched.append(True)
+
+    supervisor = object.__new__(runner._validation_aware_supervisor_class(Startup))
+    supervisor.config = SimpleNamespace(repo_root=root, state_dir=state, state_path=state / "task-state.json",
+        state_prefix="synthetic", worktree_root=worktrees, todo_path=board, task_prefix="CIMP-",
+        merge_target_branch="main", worktree_reconciliation_enabled=True,
+        worktree_reconciliation_max_merges=1, worktree_reconciliation_dry_run=False,
+        worktree_reconciliation_preflight_enabled=False, worktree_scan_cache_enabled=False,
+        worktree_scan_cache_ttl_seconds=0)
+    monkeypatch.setattr(supervisor, "_build_worktree_reconciliation_daemon", lambda: daemon)
+    monkeypatch.setattr(supervisor, "_list_process_commands", lambda: [])
+    monkeypatch.setattr(supervisor, "_shared_active_worktree_owners", lambda path: {})
+    monkeypatch.setattr(supervisor, "_record_event", lambda *_args: None)
+    if damage is None:
+        supervisor._run_forever_loop()
+        assert dispatched == [True]
+        assert supervisor._complaint_startup_reconciliation_context is None
+    else:
+        with pytest.raises(RuntimeError, match="candidate recovery remains unresolved"):
+            supervisor._run_forever_loop()
+        assert dispatched == []
+    row = observed[0]["processed"][0]
+    assert row["merged"] is False and row["merge_result"]["attempted"] is False
+    if damage not in {"unknown_reason", "unfinished"}:
+        assert row["merge_result"]["reason"] == "reconciliation_candidate_task_already_completed"
+    assert leaf.is_dir() and git("rev-parse", original) == candidate
+    assert (leaf / "retained.txt").read_text() == "Preserve the original candidate.\n"

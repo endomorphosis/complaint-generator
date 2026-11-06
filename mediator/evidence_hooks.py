@@ -17,6 +17,8 @@ import os
 import json
 import hashlib
 import mimetypes
+import base64
+import uuid
 from typing import Dict, List, Optional, Any, BinaryIO
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -33,11 +35,17 @@ from integrations.ipfs_datasets.documents import parse_document, should_parse_do
 from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot
 from integrations.ipfs_datasets.types import CaseArtifact, CaseFact
 from integrations.ipfs_datasets.storage import (
+    AUTOMATIC_PRIVATE_ARTIFACT_KINDS,
     IPFS_AVAILABLE,
+    PUBLIC_LEGAL_CONTENT_ORIGINS,
+    PUBLIC_LEGAL_CORPUS_FAMILIES,
     add_bytes,
     cat,
     get_ipfs_backend,
     pin,
+    retrieve_private_artifact,
+    store_automatic_private_artifact,
+    store_public_legal_corpus,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
 
@@ -114,13 +122,623 @@ class EvidenceHookError(RuntimeError):
 class EvidenceStorageError(EvidenceHookError):
     """Evidence could not be normalized or stored."""
 
+    def __init__(self, message: str = "", *, code: str = "storage_error", public_status: str = "unavailable") -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
+
 
 class EvidenceRetrievalError(EvidenceHookError):
     """Evidence could not be retrieved from the configured backend."""
 
+    def __init__(self, message: str = "", *, code: str = "retrieval_error", public_status: str = "unavailable") -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_status = public_status
+
 
 class EvidencePersistenceError(EvidenceHookError):
     """Evidence metadata could not be persisted."""
+
+
+class PrivateDerivedIndexUnavailable(EvidenceHookError):
+    """Private derived text could not be contained without a plaintext fallback."""
+
+    def __init__(self, message: str = "", *, code: str = "persistence_unavailable") -> None:
+        super().__init__(message or "Private derived index is unavailable.")
+        self.code = code
+        self.public_status = "unavailable"
+
+
+class PrivateDerivedIndex:
+    """Case-owned index for private derived text.
+
+    Directory names and permission bits are recorded and are never treated as
+    encryption. Durable mode seals through the private artifact owner. Ephemeral
+    mode keeps plaintext only in this process and can be rebuilt only from that
+    owner, never from a plaintext fallback file.
+    """
+
+    def __init__(self) -> None:
+        self.bound = False
+        self.unavailable_code = ""
+        self.context: Optional[Dict[str, Any]] = None
+        self.mode = "unbound"
+        self.case_id = ""
+        self.directory_mode_private = False
+        self.entries: Dict[str, Dict[str, Any]] = {}
+        self.public_law_cache: Dict[str, Dict[str, str]] = {}
+        self.created_rows: List[int] = []
+        self._secrets: List[str] = []
+        self._counter = 0
+        self._row_counter = 0
+        self.closed = False
+        self.plaintext_fallback_published = False
+
+    def bind(
+        self,
+        context: Optional[Dict[str, Any]],
+        *,
+        unavailable_code: str = "",
+        directory_mode_private: bool = False,
+    ) -> None:
+        self.bound = True
+        self.closed = False
+        self.directory_mode_private = bool(directory_mode_private)
+        self.unavailable_code = str(unavailable_code or "")
+        self.entries = {}
+        self.created_rows = []
+        self._secrets = []
+        self.context = None
+        self.case_id = ""
+        if self.unavailable_code or not context:
+            self.mode = "unavailable"
+            return
+        case_id = str(context.get("case_id") or "")
+        if not case_id:
+            self.mode = "unavailable"
+            self.unavailable_code = self.unavailable_code or "case_unavailable"
+            return
+        self.case_id = case_id
+        self.context = {
+            "access": context.get("access"),
+            "tenant_id": context.get("tenant_id"),
+            "case_id": case_id,
+            "principal_id": context.get("principal_id") or context.get("tenant_id"),
+            "key_provider": context.get("key_provider"),
+            "backend": context.get("backend"),
+            "backend_name": context.get("backend_name") or "local_cache",
+            "pin_content": bool(context.get("pin_content", False)),
+        }
+        requested = str(context.get("index_mode") or "ephemeral")
+        if requested == "durable":
+            if not self.context.get("key_provider"):
+                self.mode = "unavailable"
+                self.unavailable_code = "key_unavailable"
+                return
+            self.mode = "durable"
+            return
+        self.mode = "ephemeral"
+
+    def status(self) -> Dict[str, Any]:
+        encrypted = self.mode == "durable" and not self.unavailable_code and not self.closed
+        return {
+            "status": "unavailable" if self.mode in {"unavailable", "unbound"} or self.unavailable_code else "available",
+            "code": self.unavailable_code,
+            "index_mode": self.mode,
+            "case_id": self.case_id,
+            "encrypted": encrypted,
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": self.directory_mode_private,
+            "plaintext_fallback": False,
+            "plaintext_fallback_published": self.plaintext_fallback_published,
+            "owned": self.bound and self.mode in {"durable", "ephemeral"},
+            "rebuildable": self.mode in {"durable", "ephemeral"},
+            "closed": self.closed,
+        }
+
+    def accepts_writes(self) -> bool:
+        return self.bound and self.mode in {"durable", "ephemeral"} and not self.closed and not self.unavailable_code
+
+    def contain(self, text: str, *, kind: str) -> str:
+        if not self.accepts_writes():
+            raise PrivateDerivedIndexUnavailable(
+                "Private derived index is unavailable.",
+                code=self.unavailable_code or "persistence_unavailable",
+            )
+        payload = str(text)
+        if self.mode == "ephemeral":
+            self._counter += 1
+            token = f"cgidx:eph:{self._counter}"
+            self.entries[token] = {
+                "text": payload,
+                "case_id": self.case_id,
+                "kind": kind,
+                "durable": False,
+            }
+            self._secrets.append(payload)
+            return token
+        self._counter += 1
+        revision = f"index-{uuid.uuid4().hex}"
+        body = json.dumps({"text": payload, "kind": kind, "case_id": self.case_id}, sort_keys=True).encode("utf-8")
+        try:
+            from integrations.private_storage import (
+                PrivateCryptoCapabilityError,
+                PrivateKeyMaterialError,
+                PrivateStorageError,
+                store_private_artifact,
+            )
+
+            context = self.context or {}
+            receipt = store_private_artifact(
+                body,
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=self.case_id,
+                artifact_kind="index",
+                revision=revision,
+                principal_id=str(context.get("principal_id") or ""),
+                key_provider=context.get("key_provider"),
+                backend=context.get("backend"),
+                backend_name=str(context.get("backend_name") or "local_cache"),
+                pin_content=bool(context.get("pin_content", False)),
+            )
+            cid = str(receipt.get("cid") or "")
+            if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
+                raise PrivateDerivedIndexUnavailable("Private derived index is unavailable.", code="persistence_unavailable")
+            entry = {"case_id": self.case_id, "kind": kind, "durable": True,
+                "cid": cid, "revision": revision, "text": None}
+            token = self._seal_durable_reference(entry)
+        except PrivateDerivedIndexUnavailable:
+            raise
+        except Exception as exc:
+            code = str(getattr(exc, "code", "") or "")
+            if not code:
+                name = type(exc).__name__
+                if "Key" in name:
+                    code = "key_unavailable"
+                elif "Crypto" in name:
+                    code = "private_crypto_unavailable"
+                else:
+                    code = "persistence_unavailable"
+            raise PrivateDerivedIndexUnavailable(
+                "Private derived index is unavailable.",
+                code=code,
+            ) from exc
+        self.entries[token] = entry
+        self._secrets.append(payload)
+        return token
+
+    def _reference_key(self):
+        """Resolve current authority; a token never supplies its own AAD or key."""
+        from integrations.private_storage import (
+            PrivateArtifactBinding, PrivateKeyMaterialError, assert_access_matches_binding,
+        )
+        context = self.context or {}
+        binding = PrivateArtifactBinding(tenant_id=str(context.get("tenant_id") or ""),
+            case_id=self.case_id, artifact_kind="index-reference", revision="v1",
+            principal_id=str(context.get("principal_id") or ""))
+        assert_access_matches_binding(context.get("access"), binding)
+        provider = context.get("key_provider")
+        if provider is None:
+            raise PrivateKeyMaterialError("key_unavailable")
+        key_id, key = provider.resolve(binding)
+        return binding, key_id, key
+
+    def _seal_durable_reference(self, entry: Dict[str, Any]) -> str:
+        """Persist the reference as ciphertext, without a process-local lookup."""
+        from integrations.private_storage import PrivateArtifactIntegrityError, seal_private_artifact
+        binding, key_id, key = self._reference_key()
+        descriptor = {name: entry[name] for name in ("cid", "revision", "kind")}
+        raw = json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        envelope = seal_private_artifact(raw, binding=binding, key=key, key_id=key_id)
+        encoded = base64.urlsafe_b64encode(envelope).decode("ascii")
+        if len(encoded) > 16384:
+            raise PrivateArtifactIntegrityError("oversized")
+        return "cgidx:ref:v1:" + encoded
+
+    def _open_durable_reference(self, token: str) -> Dict[str, Any]:
+        from integrations.private_storage import PrivateArtifactIntegrityError, open_private_artifact
+        # A reference is small routing ciphertext, never a replacement for the
+        # separately authenticated content artifact or its current key owner.
+        encoded = token[len("cgidx:ref:v1:"):]
+        if not encoded or len(encoded) > 16384:
+            raise PrivateArtifactIntegrityError("malformed")
+        try:
+            envelope = base64.b64decode(encoded, altchars=b"-_", validate=True)
+        except (ValueError, UnicodeEncodeError):
+            raise PrivateArtifactIntegrityError("malformed") from None
+        binding, key_id, key = self._reference_key()
+        raw = open_private_artifact(envelope, binding=binding, key=key, expected_key_id=key_id)
+        try:
+            descriptor = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise PrivateArtifactIntegrityError("malformed") from None
+        if not isinstance(descriptor, dict) or set(descriptor) != {"cid", "revision", "kind"}:
+            raise PrivateArtifactIntegrityError("malformed")
+        if any(not isinstance(value, str) or not value for value in descriptor.values()):
+            raise PrivateArtifactIntegrityError("malformed")
+        return {**descriptor, "case_id": self.case_id, "durable": True, "text": None}
+
+    def cache_public_law(self, *, citation: str, text: str) -> str:
+        digest = hashlib.sha256(f"{citation}\n{text}".encode("utf-8")).hexdigest()[:24]
+        cache_id = f"pubcache:{digest}"
+        self.public_law_cache[cache_id] = {
+            "citation": str(citation or ""),
+            "text": str(text or ""),
+            "storage_class": "public_legal_corpus",
+        }
+        return cache_id
+
+    def reveal(self, token: str, *, case_id: str = "") -> Dict[str, Any]:
+        expected = case_id or self.case_id
+        if expected and expected != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if self.mode == "unavailable":
+            return {
+                "status": "unavailable",
+                "code": self.unavailable_code or "persistence_unavailable",
+                "plaintext_fallback": False,
+            }
+        if self.mode == "ephemeral" and self.closed:
+            return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
+        if self.mode == "durable" and isinstance(token, str) and token.startswith("cgidx:ref:v1:"):
+            try:
+                entry = self._open_durable_reference(token)
+            except Exception as exc:
+                return {"status": "unavailable", "code": str(getattr(exc, "code", "") or "persistence_unavailable"),
+                    "plaintext_fallback": False}
+        else:
+            # Old counter-only tokens remain usable by their original warm
+            # owner. Missing historical mappings cannot be reconstructed.
+            entry = self.entries.get(token)
+        if not entry or entry.get("case_id") != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if entry.get("durable"):
+            opened = self._open_durable(entry)
+            if opened.get("status") != "available":
+                return opened
+            self.entries[token] = entry
+            return {"status": "available", "text": opened["text"], "case_id": self.case_id, "encrypted": True}
+        if self.closed:
+            return {"status": "unavailable", "code": "index_closed", "plaintext_fallback": False}
+        return {"status": "available", "text": entry.get("text") or "", "case_id": self.case_id, "encrypted": False}
+
+    def _open_durable(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        context = self.context or {}
+        try:
+            from integrations.private_storage import retrieve_private_artifact
+
+            opened = retrieve_private_artifact(
+                str(entry.get("cid") or ""),
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=self.case_id,
+                artifact_kind="index",
+                revision=str(entry.get("revision") or ""),
+                principal_id=str(context.get("principal_id") or ""),
+                key_provider=context.get("key_provider"),
+                backend=context.get("backend"),
+                backend_name=str(context.get("backend_name") or "local_cache"),
+            )
+        except Exception as exc:
+            return {
+                "status": "unavailable",
+                "code": str(getattr(exc, "code", "") or "persistence_unavailable"),
+                "plaintext_fallback": False,
+            }
+        data = opened.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            return {"status": "unavailable", "code": "persistence_unavailable", "plaintext_fallback": False}
+        try:
+            payload = json.loads(bytes(data).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"status": "unavailable", "code": "persistence_unavailable", "plaintext_fallback": False}
+        if str(payload.get("case_id") or "") != self.case_id:
+            return {"status": "unavailable", "code": "case_mismatch", "plaintext_fallback": False}
+        if payload.get("kind") != entry.get("kind"):
+            return {"status": "unavailable", "code": "binding_rejected", "plaintext_fallback": False}
+        return {"status": "available", "text": str(payload.get("text") or "")}
+
+    def close(self, *, crash: bool = False) -> Dict[str, Any]:
+        self.closed = True
+        self._secrets = []
+        if self.mode == "ephemeral":
+            self.entries = {}
+        else:
+            for entry in self.entries.values():
+                entry["text"] = None
+        return {
+            "status": "closed",
+            "crash": bool(crash),
+            "plaintext_fallback_published": False,
+            "plaintext_fallback": False,
+            "case_id": self.case_id,
+        }
+
+    def rebuild(self) -> Dict[str, Any]:
+        if not self.bound or self.mode == "unavailable":
+            return {
+                "status": "unavailable",
+                "code": self.unavailable_code or "persistence_unavailable",
+                "rebuilt": 0,
+                "plaintext_fallback": False,
+            }
+        if self.mode == "ephemeral":
+            if self.closed or not self.entries:
+                return {
+                    "status": "unavailable",
+                    "code": "ephemeral_closed",
+                    "rebuilt": 0,
+                    "plaintext_fallback": False,
+                    "case_id": self.case_id,
+                }
+            own = [entry for entry in self.entries.values() if entry.get("case_id") == self.case_id]
+            return {
+                "status": "available",
+                "rebuilt": len(own),
+                "case_id": self.case_id,
+                "plaintext_fallback": False,
+                "encrypted": False,
+            }
+        rebuilt = 0
+        for entry in list(self.entries.values()):
+            if entry.get("case_id") != self.case_id or not entry.get("durable"):
+                continue
+            opened = self._open_durable(entry)
+            if opened.get("status") != "available":
+                return {
+                    "status": "unavailable",
+                    "code": opened.get("code") or "persistence_unavailable",
+                    "rebuilt": rebuilt,
+                    "plaintext_fallback": False,
+                }
+            entry["text"] = opened["text"]
+            rebuilt += 1
+        self.closed = False
+        return {
+            "status": "available",
+            "rebuilt": rebuilt,
+            "case_id": self.case_id,
+            "plaintext_fallback": False,
+            "encrypted": True,
+        }
+
+
+class PrivateDerivedIndexMixin:
+    """Constructor-level private column containment shared by hook databases."""
+
+    def _derived(self) -> PrivateDerivedIndex:
+        index = getattr(self, "_derived_index_state", None)
+        if index is None:
+            index = PrivateDerivedIndex()
+            self._derived_index_state = index
+        return index
+
+    def bind_private_derived_index(
+        self,
+        context: Optional[Dict[str, Any]],
+        *,
+        unavailable_code: str = "",
+        directory_mode_private: bool = False,
+    ) -> Dict[str, Any]:
+        self._derived().bind(
+            context,
+            unavailable_code=unavailable_code,
+            directory_mode_private=directory_mode_private,
+        )
+        return self.private_derived_index_status()
+
+    def private_derived_index_status(self) -> Dict[str, Any]:
+        return self._derived().status()
+
+    def _private_columns_sealed(self) -> bool:
+        return self._derived().accepts_writes()
+
+    def _seal_column(self, value: Any, kind: str) -> Any:
+        if not self._private_columns_sealed() or value is None:
+            return value
+        text = str(value)
+        if text == "":
+            return text
+        return self._derived().contain(text, kind=kind)
+
+    def _seal_json(self, payload: Any) -> str:
+        if not self._private_columns_sealed():
+            return json.dumps(payload if payload is not None else {})
+        return json.dumps(self._seal_nested(payload))
+
+    def _seal_nested(self, value: Any, *, kind: str = "nested") -> Any:
+        if not self._private_columns_sealed():
+            return value
+        if isinstance(value, str):
+            if len(value) < 8:
+                return value
+            return self._seal_column(value, kind)
+        if isinstance(value, dict):
+            return {key: self._seal_nested(item, kind=str(key)) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._seal_nested(item, kind=kind) for item in value]
+        return value
+
+    def cache_public_law_source(self, *, citation: str, text: str) -> Dict[str, Any]:
+        cache_id = self._derived().cache_public_law(citation=citation, text=text)
+        return {
+            "status": "available",
+            "cache_id": cache_id,
+            "storage_class": "public_legal_corpus",
+            "separated_from_private_associations": True,
+        }
+
+    def read_public_law_source(self, cache_id: str) -> Dict[str, Any]:
+        found = self._derived().public_law_cache.get(cache_id)
+        if not found:
+            return {"status": "unavailable", "code": "public_cache_miss"}
+        return {"status": "available", **found}
+
+    def commit_private_derived(
+        self,
+        *,
+        case_id: str,
+        kind: str,
+        text: str,
+        public_cache_id: str = "",
+    ) -> Dict[str, Any]:
+        index = self._derived()
+        if not index.bound or index.mode == "unavailable" or index.unavailable_code:
+            return {
+                "status": "unavailable",
+                "code": index.unavailable_code or "persistence_unavailable",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        if str(case_id or "") != index.case_id:
+            return {
+                "status": "unavailable",
+                "code": "case_mismatch",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        try:
+            token = index.contain(str(text or ""), kind=kind)
+        except PrivateDerivedIndexUnavailable as exc:
+            return {
+                "status": "unavailable",
+                "code": exc.code,
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        db_path = getattr(self, "db_path", None)
+        if not DUCKDB_AVAILABLE or not db_path:
+            return {
+                "status": "unavailable" if index.mode == "durable" else "available",
+                "code": "persistence_unavailable" if index.mode == "durable" else "",
+                "token": token,
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "row_persisted": False,
+                "index_mode": index.mode,
+                "case_id": index.case_id,
+            }
+        try:
+            conn = duckdb.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS private_derived_index (
+                    id BIGINT,
+                    case_id VARCHAR,
+                    kind VARCHAR,
+                    token VARCHAR,
+                    public_cache_id VARCHAR
+                )
+                """
+            )
+            index._row_counter += 1
+            row_id = index._row_counter
+            conn.execute(
+                "INSERT INTO private_derived_index VALUES (?, ?, ?, ?, ?)",
+                [row_id, index.case_id, kind, token, public_cache_id or ""],
+            )
+            conn.close()
+        except Exception:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "plaintext_persisted": False,
+                "plaintext_fallback": False,
+                "persisted": False,
+            }
+        index.created_rows.append(row_id)
+        return {
+            "status": "available",
+            "row_id": row_id,
+            "token": token,
+            "case_id": index.case_id,
+            "index_mode": index.mode,
+            "encrypted": index.mode == "durable",
+            "encryption_from_path_or_mode_bits": False,
+            "plaintext_persisted": False,
+            "plaintext_fallback": False,
+            "row_persisted": True,
+            "public_cache_id": public_cache_id or "",
+        }
+
+    def read_private_derived(self, token: str, *, case_id: str = "") -> Dict[str, Any]:
+        return self._derived().reveal(token, case_id=case_id)
+
+    def close_private_derived_index(self, *, crash: bool = False) -> Dict[str, Any]:
+        return self._derived().close(crash=crash)
+
+    def rebuild_private_derived_index(self) -> Dict[str, Any]:
+        rebuilt = self._derived().rebuild()
+        if rebuilt.get("status") != "available" or self._derived().mode != "durable":
+            return rebuilt
+        for entry in self._derived().entries.values():
+            if entry.get("case_id") == self._derived().case_id and entry.get("text"):
+                entry["text"] = None
+        return rebuilt
+
+    def audit_new_derived_rows(self) -> Dict[str, Any]:
+        index = self._derived()
+        if not index.bound:
+            return {"status": "unavailable", "code": "not_bound", "scope": "newly_created", "row_count": 0}
+        if not index.created_rows:
+            return {
+                "status": "available",
+                "scope": "newly_created",
+                "row_count": 0,
+                "plaintext_private_columns": 0,
+                "encryption_from_path_or_mode_bits": False,
+            }
+        db_path = getattr(self, "db_path", None)
+        if not DUCKDB_AVAILABLE or not db_path:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "scope": "newly_created",
+                "plaintext_persisted": False,
+            }
+        leaked = 0
+        found = 0
+        try:
+            conn = duckdb.connect(db_path)
+            for row_id in list(index.created_rows):
+                row = conn.execute(
+                    "SELECT case_id, kind, token, public_cache_id FROM private_derived_index WHERE id = ?",
+                    [row_id],
+                ).fetchone()
+                if row is None:
+                    continue
+                found += 1
+                blob = " ".join(str(part or "") for part in row)
+                if str(row[0] or "") != index.case_id:
+                    leaked += 1
+                for secret in index._secrets:
+                    if secret and secret in blob:
+                        leaked += 1
+                if str(row[2] or "").startswith("cgidx:"):
+                    continue
+                leaked += 1
+            conn.close()
+        except Exception:
+            return {
+                "status": "unavailable",
+                "code": "persistence_unavailable",
+                "scope": "newly_created",
+                "plaintext_fallback": False,
+            }
+        return {
+            "status": "available",
+            "scope": "newly_created",
+            "row_count": found,
+            "plaintext_private_columns": leaked,
+            "encrypted": index.mode == "durable",
+            "encryption_from_path_or_mode_bits": False,
+            "directory_mode_private": index.directory_mode_private,
+        }
 
 
 class EvidenceQueryError(EvidenceHookError):
@@ -381,7 +999,298 @@ class EvidenceStorageHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
+        self._private_context: Optional[Dict[str, Any]] = None
+        self._private_route_bound = False
+        self._private_unavailable_code = ""
+        self._private_records: Dict[str, Dict[str, Any]] = {}
+        self._public_legal_cids: Dict[str, Dict[str, Any]] = {}
+        self._private_revision_counter = 0
         self._check_ipfs_availability()
+
+    def bind_private_artifact_context(self, context: Optional[Dict[str, Any]], *, unavailable_code: str = "") -> None:
+        """Attach the workspace private-artifact context. Does not mint keys."""
+
+        self._private_route_bound = True
+        self._private_unavailable_code = str(unavailable_code or "")
+        if context is None:
+            self._private_context = None
+            return
+        self._private_context = {
+            "access": context.get("access"),
+            "tenant_id": context.get("tenant_id"),
+            "case_id": context.get("case_id"),
+            "principal_id": context.get("principal_id"),
+            "key_provider": context.get("key_provider"),
+            "backend": context.get("backend"),
+            "backend_name": context.get("backend_name") or "local_cache",
+            "pin_content": bool(context.get("pin_content", False)),
+        }
+
+    def enable_public_user_evidence_ingestion(self) -> None:
+        """User evidence stays on the private owner. This gate does not open a plaintext path."""
+
+        if not self._private_route_bound or not self._private_context or self._private_unavailable_code:
+            raise EvidenceStorageError(
+                "Public user evidence ingestion requires the encrypted private artifact route.",
+                code="private_route_required",
+                public_status="unavailable",
+            )
+        raise EvidenceStorageError(
+            "Public user evidence ingestion is disabled. Private bytes stay on the encrypted artifact owner.",
+            code="public_user_evidence_disabled",
+            public_status="unavailable",
+        )
+
+    def _is_public_legal_corpus(self, metadata: Optional[Dict[str, Any]]) -> bool:
+        meta = metadata or {}
+        if meta.get("storage_class") == "public_legal_corpus" or meta.get("classification") == "public_legal_corpus":
+            return True
+        origin = str(meta.get("content_origin") or "")
+        corpus = str(meta.get("corpus_family") or "")
+        if origin not in PUBLIC_LEGAL_CONTENT_ORIGINS:
+            return False
+        return not corpus or corpus in PUBLIC_LEGAL_CORPUS_FAMILIES
+
+    def _private_artifact_kind(self, evidence_type: str) -> str:
+        if evidence_type in AUTOMATIC_PRIVATE_ARTIFACT_KINDS:
+            return evidence_type
+        return "attachment"
+
+    def _build_provenance(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]):
+        content_hash = stable_content_hash(data)
+        provenance = build_provenance(
+            source_url=str((metadata or {}).get('source_url', '')),
+            acquisition_method=str((metadata or {}).get('acquisition_method', 'submitted')),
+            source_type=str((metadata or {}).get('source_type', evidence_type)),
+            acquired_at=datetime.now().isoformat(),
+            content_hash=content_hash,
+            source_system=str((metadata or {}).get('source_system', 'complaint_generator')),
+            jurisdiction=str((metadata or {}).get('jurisdiction', '')),
+        )
+        provenance = build_provenance(
+            source_url=str(provenance.source_url or ''),
+            acquisition_method=str(provenance.acquisition_method or ''),
+            source_type=str(provenance.source_type or ''),
+            acquired_at=str(provenance.acquired_at or ''),
+            content_hash=str(provenance.content_hash or ''),
+            source_system=str(provenance.source_system or ''),
+            jurisdiction=str(provenance.jurisdiction or ''),
+            metadata=_merge_intake_summary_handoff_metadata(
+                dict(getattr(provenance, 'metadata', {}) or {}),
+                self.mediator,
+            ),
+        )
+        normalized_metadata = _merge_intake_summary_handoff_metadata(
+            merge_metadata_with_provenance(metadata, provenance),
+            self.mediator,
+        )
+        return provenance, normalized_metadata, content_hash
+
+    def _attach_document_parse(self, result: Dict[str, Any], data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]], provenance) -> None:
+        if not self._should_parse_evidence(evidence_type, metadata):
+            return
+        document_parse = parse_document(
+            data=data,
+            filename=str((metadata or {}).get('filename', '')),
+            mime_type=str((metadata or {}).get('mime_type', '')),
+            source=str((metadata or {}).get('parse_source', 'bytes')),
+        )
+        parse_contract = build_document_parse_contract(
+            document_parse,
+            default_source=str((metadata or {}).get('parse_source', 'bytes')),
+        )
+        result['document_parse'] = document_parse
+        result['metadata']['document_parse_summary'] = parse_contract['summary']
+        result['metadata']['document_parse_contract'] = parse_contract
+        graph_payload = extract_graph_from_text(
+            parse_contract.get('text', ''),
+            source_id=result.get('artifact_id') or result.get('cid'),
+            metadata={
+                'artifact_id': result.get('artifact_id', ''),
+                'filename': str((metadata or {}).get('filename', '')),
+                'mime_type': str((metadata or {}).get('mime_type', '')),
+                'source_url': provenance.source_url,
+                'claim_type': str((metadata or {}).get('claim_type', '')),
+                'claim_element_id': str((metadata or {}).get('claim_element_id', '')),
+                'claim_element_text': str((metadata or {}).get('claim_element', '')),
+                'title': str((metadata or {}).get('title', '')),
+            },
+        )
+        result['document_graph'] = graph_payload
+        result['metadata']['document_graph_summary'] = {
+            'status': graph_payload.get('status'),
+            'entity_count': len(graph_payload.get('entities', []) or []),
+            'relationship_count': len(graph_payload.get('relationships', []) or []),
+        }
+
+    def _result_from_artifact(self, data: bytes, evidence_type: str, metadata, provenance, normalized_metadata, content_hash, cid: str) -> Dict[str, Any]:
+        artifact = CaseArtifact(
+            cid=cid,
+            artifact_type=evidence_type,
+            size=len(data),
+            timestamp=datetime.now().isoformat(),
+            mime_type=str((metadata or {}).get('mime_type', '')),
+            source_type=provenance.source_type,
+            content_hash=content_hash,
+            acquisition_method=provenance.acquisition_method,
+            source_url=provenance.source_url,
+            metadata=normalized_metadata,
+            provenance=provenance,
+        )
+        return artifact.as_dict()
+
+    def _store_private_evidence(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Seal private bytes with the existing artifact owner before any public store."""
+
+        from integrations.private_storage import (
+            PrivateCryptoCapabilityError,
+            PrivateKeyMaterialError,
+            PrivateStorageError,
+        )
+
+        if self._private_unavailable_code or not self._private_context or not self._private_context.get("key_provider"):
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code=self._private_unavailable_code or "key_unavailable",
+                public_status="unavailable",
+            )
+        context = self._private_context
+        kind = self._private_artifact_kind(str(evidence_type or "attachment"))
+        self._private_revision_counter += 1
+        revision = str((metadata or {}).get("revision") or f"{kind}-{self._private_revision_counter}")
+        backend = (metadata or {}).get("backend", context.get("backend"))
+        backend_name = str((metadata or {}).get("backend_name") or context.get("backend_name") or "local_cache")
+        pin_content = bool((metadata or {}).get("pin_content", context.get("pin_content", False)))
+        try:
+            receipt = store_automatic_private_artifact(
+                data,
+                artifact_kind=kind,
+                access=context.get("access"),
+                tenant_id=str(context.get("tenant_id") or ""),
+                case_id=str(context.get("case_id") or ""),
+                principal_id=str(context.get("principal_id") or context.get("tenant_id") or ""),
+                key_provider=context.get("key_provider"),
+                revision=revision,
+                backend=backend,
+                backend_name=backend_name,
+                pin_content=pin_content,
+            )
+        except PrivateKeyMaterialError as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="key_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except PrivateCryptoCapabilityError as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="private_crypto_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except (PrivateStorageError, ValueError) as exc:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            ) from exc
+        view = dict(receipt.get("receipt") or {})
+        cid = str(receipt.get("cid") or "")
+        cid_kind = str(view.get("cid_kind") or "")
+        local_only = bool(receipt.get("stored_local")) or cid_kind in {"pseudo_cid", "sha256_fallback", "missing", ""}
+        remote_durable = bool(view.get("network_durable")) and not local_only and bool(cid)
+        if not cid or str(receipt.get("status") or "") not in {"available", "degraded"}:
+            raise EvidenceStorageError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        provenance, normalized_metadata, content_hash = self._build_provenance(data, evidence_type, metadata)
+        result = self._result_from_artifact(data, evidence_type, metadata, provenance, normalized_metadata, content_hash, cid)
+        self._attach_document_parse(result, data, evidence_type, metadata, provenance)
+        result["private_artifact"] = True
+        result["classification"] = "private_evidence"
+        result["artifact_kind"] = kind
+        result["revision"] = revision
+        result["tenant_id"] = context.get("tenant_id")
+        result["case_id"] = context.get("case_id")
+        result["key_id"] = receipt.get("key_id")
+        result["cid_kind"] = cid_kind
+        result["network_durable"] = remote_durable
+        result["remote_durable"] = remote_durable
+        result["stored_local"] = bool(receipt.get("stored_local")) or local_only
+        result["ipfs_available"] = remote_durable
+        result["ipfs_persisted"] = remote_durable
+        result["storage_status"] = "stored" if remote_durable else "local_only"
+        if not remote_durable:
+            result["degraded_reason"] = "local deterministic identifier is not remote durability"
+            result["error_type"] = "LocalIdentifier"
+        self._private_records[cid] = {
+            "artifact_kind": kind,
+            "revision": revision,
+            "tenant_id": context.get("tenant_id"),
+            "case_id": context.get("case_id"),
+            "principal_id": context.get("principal_id"),
+            "backend": backend,
+            "backend_name": backend_name,
+            "content_hash": content_hash,
+            "provenance": result.get("provenance"),
+        }
+        self.mediator.log("evidence_stored_private", cid=cid, size=len(data), type=evidence_type, remote_durable=remote_durable)
+        return result
+
+    def _store_public_legal_evidence(self, data: bytes, evidence_type: str, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        meta = dict(metadata or {})
+        origin = str(meta.get("content_origin") or "authority_full_text")
+        corpus = str(meta.get("corpus_family") or "legal_authority")
+        if origin not in PUBLIC_LEGAL_CONTENT_ORIGINS:
+            origin = "authority_full_text"
+        if corpus not in PUBLIC_LEGAL_CORPUS_FAMILIES:
+            corpus = "legal_authority"
+        backend = meta.get("backend")
+        backend_name = meta.get("backend_name")
+        try:
+            stored = store_public_legal_corpus(
+                data,
+                content_origin=origin,
+                corpus_family=corpus,
+                backend=backend,
+                backend_name=str(backend_name) if backend_name else None,
+                pin_content=bool(meta.get("pin_content", True)),
+            )
+        except (TypeError, ValueError) as exc:
+            raise EvidenceStorageError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            ) from exc
+        cid = str(stored.get("cid") or "")
+        if stored.get("status") not in {"available", "degraded"} or not cid:
+            raise EvidenceStorageError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        provenance, normalized_metadata, content_hash = self._build_provenance(data, evidence_type, meta)
+        result = self._result_from_artifact(data, evidence_type, meta, provenance, normalized_metadata, content_hash, cid)
+        self._attach_document_parse(result, data, evidence_type, meta, provenance)
+        remote_durable = bool(stored.get("network_durable"))
+        result["private_artifact"] = False
+        result["classification"] = "public_legal_corpus"
+        result["content_origin"] = origin
+        result["corpus_family"] = corpus
+        result["cid_kind"] = stored.get("cid_kind") or ""
+        result["network_durable"] = remote_durable
+        result["remote_durable"] = remote_durable
+        result["stored_local"] = bool(stored.get("stored_local"))
+        result["ipfs_available"] = stored.get("status") == "available"
+        result["ipfs_persisted"] = remote_durable
+        result["storage_status"] = "stored" if remote_durable else "local_only"
+        if not remote_durable:
+            result["degraded_reason"] = "local deterministic identifier is not remote durability"
+            result["error_type"] = "LocalIdentifier"
+        self._public_legal_cids[cid] = {"backend": backend, "backend_name": backend_name, "content_origin": origin}
+        self.mediator.log("public_legal_corpus_stored", cid=cid, size=len(data), remote_durable=remote_durable)
+        return result
     
     def _check_ipfs_availability(self):
         """Check if IPFS backend is available."""
@@ -418,6 +1327,10 @@ class EvidenceStorageHook:
             - metadata: Any additional metadata
         """
         try:
+            if self._is_public_legal_corpus(metadata):
+                return self._store_public_legal_evidence(data, evidence_type, metadata)
+            if self._private_route_bound:
+                return self._store_private_evidence(data, evidence_type, metadata)
             storage_status = 'stored'
             storage_degraded_reason = ''
             storage_error_type = ''
@@ -533,6 +1446,8 @@ class EvidenceStorageHook:
                 result['error_type'] = storage_error_type
             return result
             
+        except EvidenceStorageError:
+            raise
         except Exception as e:
             self.mediator.log(
                 'evidence_storage_error',
@@ -590,7 +1505,7 @@ class EvidenceStorageHook:
             )
             raise EvidenceStorageError(f'Failed to store evidence file: {str(e)}') from e
     
-    def retrieve_evidence(self, cid: str) -> bytes:
+    def retrieve_evidence(self, cid: str, **binding: Any) -> bytes:
         """
         Retrieve evidence data from IPFS by CID.
         
@@ -601,6 +1516,10 @@ class EvidenceStorageHook:
             Evidence data as bytes
         """
         try:
+            if cid in self._private_records or (self._private_route_bound and cid not in self._public_legal_cids and self._private_records):
+                return self._retrieve_private_evidence(cid, binding)
+            if cid in self._public_legal_cids:
+                return self._retrieve_public_legal_evidence(cid)
             if IPFS_AVAILABLE:
                 data = cat(cid)
                 self.mediator.log('evidence_retrieved', cid=cid, size=len(data))
@@ -625,8 +1544,78 @@ class EvidenceStorageHook:
             )
             raise EvidenceRetrievalError(f'Failed to retrieve evidence: {str(e)}') from e
 
+    def _retrieve_private_evidence(self, cid: str, binding: Dict[str, Any]) -> bytes:
+        from integrations.private_storage import PrivateKeyMaterialError, PrivateStorageError
 
-class EvidenceStateHook:
+        record = self._private_records.get(cid)
+        context = self._private_context or {}
+        if record is None or not context:
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        case_id = str(binding.get("case_id") or record["case_id"])
+        tenant_id = str(binding.get("tenant_id") or record["tenant_id"])
+        principal_id = str(binding.get("principal_id") or record["principal_id"] or tenant_id)
+        access = binding.get("access", context.get("access"))
+        key_provider = binding.get("key_provider", context.get("key_provider"))
+        key = binding.get("key")
+        key_id = binding.get("key_id")
+        if key is not None or key_id is not None:
+            key_provider = None
+        try:
+            opened = retrieve_private_artifact(
+                cid,
+                access=access,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                artifact_kind=str(binding.get("artifact_kind") or record["artifact_kind"]),
+                revision=str(binding.get("revision") or record["revision"]),
+                principal_id=principal_id,
+                key=key,
+                key_id=key_id,
+                key_provider=key_provider,
+                backend=binding.get("backend", record.get("backend")),
+                backend_name=binding.get("backend_name", record.get("backend_name")),
+            )
+        except PrivateKeyMaterialError as exc:
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="key_unavailable",
+                public_status="unavailable",
+            ) from exc
+        except PrivateStorageError as exc:
+            raise EvidenceRetrievalError(
+                "Private evidence could not be opened for the expected binding.",
+                code=str(getattr(exc, "code", "") or "authentication_failed"),
+                public_status="recoverable",
+            ) from exc
+        data = opened.get("data")
+        if not isinstance(data, (bytes, bytearray)):
+            raise EvidenceRetrievalError(
+                "Private evidence storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        return bytes(data)
+
+    def _retrieve_public_legal_evidence(self, cid: str) -> bytes:
+        from integrations.ipfs_datasets.storage import retrieve_bytes
+
+        located = self._public_legal_cids.get(cid) or {}
+        loaded = retrieve_bytes(cid, backend=located.get("backend"), backend_name=located.get("backend_name"))
+        data = loaded.get("data")
+        if loaded.get("status") not in {"available", "degraded"} or not isinstance(data, (bytes, bytearray)):
+            raise EvidenceRetrievalError(
+                "Public legal corpus storage is unavailable.",
+                code="artifact_unavailable",
+                public_status="unavailable",
+            )
+        return bytes(data)
+
+
+class EvidenceStateHook(PrivateDerivedIndexMixin):
     """
     Hook for managing evidence state in DuckDB.
     
@@ -933,8 +1922,8 @@ class EvidenceStateHook:
                     chunk.get('index'),
                     chunk.get('start'),
                     chunk.get('end'),
-                    chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
+                    self._seal_column(chunk.get('text'), 'chunk_text'),
+                    self._seal_json(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
@@ -954,9 +1943,9 @@ class EvidenceStateHook:
                     evidence_id,
                     entity.get('id'),
                     entity.get('type'),
-                    entity.get('name'),
+                    self._seal_column(entity.get('name'), 'entity_name'),
                     entity.get('confidence', 0.0),
-                    json.dumps(_merge_intake_summary_handoff_metadata(
+                    self._seal_json(_merge_intake_summary_handoff_metadata(
                         entity.get('attributes', {}),
                         self.mediator,
                     )),
@@ -1062,11 +2051,11 @@ class EvidenceStateHook:
                 [
                     evidence_id,
                     fact.fact_id,
-                    fact.text,
+                    self._seal_column(fact.text, 'fact_text'),
                     fact.source_artifact_id,
                     fact.confidence,
-                    json.dumps(fact.metadata),
-                    json.dumps(fact.provenance.as_dict()),
+                    self._seal_json(fact.metadata),
+                    self._seal_json(fact.provenance.as_dict()),
                     fact.source_family,
                     fact.source_record_id,
                     fact.source_ref,
@@ -1081,7 +2070,7 @@ class EvidenceStateHook:
                     fact.page_count,
                     str(fact.metadata.get('chunk_id') or ''),
                     int(fact.metadata.get('chunk_index') or 0),
-                    json.dumps(fact.metadata.get('source_passage') or {}),
+                    self._seal_json(fact.metadata.get('source_passage') or {}),
                 ],
             )
 
@@ -1498,24 +2487,24 @@ class EvidenceStateHook:
                 evidence_info['cid'],
                 evidence_info['type'],
                 evidence_info['size'],
-                json.dumps(normalized_evidence_metadata),
+                self._seal_json(normalized_evidence_metadata),
                 complaint_id,
                 claim_type,
-                description,
+                self._seal_column(description, 'description'),
                 provenance_payload.get('content_hash'),
                 provenance_payload.get('source_url'),
                 provenance_payload.get('acquisition_method'),
-                json.dumps(provenance_payload),
+                self._seal_json(provenance_payload),
                 claim_element_id,
-                claim_element,
+                self._seal_column(claim_element, 'claim_element'),
                 parse_contract.get('status') or parse_metadata.get('status'),
                 parse_contract.get('chunk_count', 0),
-                parsed_text_preview,
-                json.dumps(parse_metadata),
+                self._seal_column(parsed_text_preview, 'parsed_text_preview'),
+                self._seal_json(parse_metadata),
                 document_graph.get('status') or document_graph_summary.get('status'),
                 len(document_graph.get('entities', []) or []),
                 len(document_graph.get('relationships', []) or []),
-                json.dumps(graph_metadata),
+                self._seal_json(graph_metadata),
             ]).fetchone()
             
             record_id = result[0]
@@ -2836,3 +3825,287 @@ Provide brief recommendations for:
                 error_type=type(exc).__name__,
             )
             return 'Evidence analysis available. Review submitted evidence and consider any gaps in documentation.'
+
+    def analyze_scoped_case(self, state: "EvidenceStateHook", *, case_id: str, actor_id: str, claim_type: str) -> Dict[str, Any]:
+        """Count admitted evidence chunks for this case and actor.
+
+        Annotation rows stay out of the evidence count. Model text is not consulted.
+        """
+
+        rows = [
+            row for row in _scoped_rows(state)
+            if row.get("case_id") == case_id and row.get("actor_id") == actor_id and row.get("claim_type") == claim_type
+        ]
+        evidence = [row for row in rows if row.get("kind") == "evidence" and row.get("annotation") is not True]
+        annotations = [row for row in rows if row.get("kind") == "annotation"]
+        return {
+            "claim_type": claim_type,
+            "case_id": case_id,
+            "actor_id": actor_id,
+            "evidence_count": len(evidence),
+            "annotation_count": len(annotations),
+            "chunk_count": sum(int(row.get("chunk_count") or 0) for row in evidence),
+            "evidence_ids": [str(row.get("record_id") or "") for row in evidence],
+            "annotation_ids": [str(row.get("record_id") or "") for row in annotations],
+            "annotation_converted_to_evidence": False,
+            "plaintext_fallback": False,
+            "model_consulted": False,
+        }
+
+
+_UNSAFE_MARKERS = (b"\x00", b"<script", b"javascript:", "\u202e".encode("utf-8"))
+_QUALIFY_OPERATION = "qualify_private_evidence"
+
+
+def _scoped_rows(state: "EvidenceStateHook") -> List[Dict[str, Any]]:
+    rows = getattr(state, "_scoped_owner_rows", None)
+    if rows is None:
+        state._scoped_owner_rows = []
+        rows = state._scoped_owner_rows
+    return rows
+
+
+def _qualification_refusal(code: str, status: str, **extra: Any) -> Dict[str, Any]:
+    receipt = {
+        "status": status,
+        "code": code,
+        "plaintext_fallback": False,
+        "plaintext_persisted": False,
+        "annotation_converted_to_evidence": False,
+        "local_durable": False,
+        "remote_durable": False,
+        "writes": 0,
+        "evidence_count": 0,
+        "annotation_count": 0,
+        "chunk_count": 0,
+    }
+    receipt.update(extra)
+    return receipt
+
+
+def _consent_allows(consent: Any, *, case_id: str, actor_id: str) -> bool:
+    if not isinstance(consent, dict):
+        return False
+    if consent.get("revoked") is True or consent.get("granted") is not True:
+        return False
+    if consent.get("case_id") != case_id or consent.get("actor_id") != actor_id:
+        return False
+    operations = consent.get("operations")
+    return isinstance(operations, list) and _QUALIFY_OPERATION in operations
+
+
+def _unsafe_source(payload: bytes) -> bool:
+    return any(marker in payload for marker in _UNSAFE_MARKERS)
+
+
+class _QualificationLog:
+    def log(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    def query_backend(self, _prompt: str) -> str:
+        raise EvidenceHookError("model text is not evidence")
+
+
+def qualify_scoped_private_evidence(
+    root: str,
+    *,
+    case_id: str,
+    actor_id: str,
+    tenant_id: str,
+    revision: str,
+    source: bytes,
+    source_sha256: str,
+    key: bytes | None,
+    key_id: str,
+    consent: Any,
+    annotation: bytes | None = None,
+    annotation_sha256: str | None = None,
+    claim_type: str = "synthetic-claim",
+    key_locked: bool = False,
+    capability_available: bool | None = None,
+    db_path: str | None = None,
+) -> Dict[str, Any]:
+    """Qualify storage, state, and analysis for one case and actor.
+
+    Ciphertext goes through the Kit local owner. Chunks and chunk metadata
+    come from the dataset text owner. Annotations stay annotations.
+    """
+
+    from integrations.ipfs_datasets.documents import parse_document_text
+    from integrations.private_storage import (
+        BoundPrivateRecordError,
+        PrivateArtifactBinding,
+        commit_scoped_kit_record,
+        open_scoped_kit_record,
+        probe_kit_evidence_capability,
+    )
+
+    scope = {"case_id": case_id, "actor_id": actor_id, "revision": revision}
+    if not _consent_allows(consent, case_id=case_id, actor_id=actor_id):
+        return _qualification_refusal("consent_refused", "refused", **scope)
+    if key_locked or key is None:
+        return _qualification_refusal("key_locked", "refused", **scope)
+    if not isinstance(source, (bytes, bytearray)) or _unsafe_source(bytes(source)):
+        return _qualification_refusal("unsafe_content", "refused", **scope)
+    if annotation is not None and _unsafe_source(bytes(annotation)):
+        return _qualification_refusal("unsafe_content", "refused", **scope)
+    probed = probe_kit_evidence_capability()
+    if capability_available is False or probed.get("available") is not True:
+        return _qualification_refusal("missing_capability", "unavailable", **scope, kit_owner=probed.get("owner", ""))
+    if not isinstance(source_sha256, str) or source_sha256 != hashlib.sha256(bytes(source)).hexdigest():
+        return _qualification_refusal("source_integrity", "refused", **scope)
+
+    try:
+        text = bytes(source).decode("utf-8")
+    except UnicodeError:
+        return _qualification_refusal("source_integrity", "refused", **scope)
+    parsed = parse_document_text(text, filename="evidence.txt", mime_type="text/plain", source="scoped-evidence")
+    chunks = list((parsed or {}).get("chunks") or [])
+    if not chunks:
+        return _qualification_refusal("source_integrity", "refused", **scope)
+    chunk_meta = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            return _qualification_refusal("missing_capability", "unavailable", **scope, kit_owner="dataset-chunk-owner")
+        chunk_text = str(chunk.get("text") or "")
+        metadata = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+        chunk_meta.append({
+            "chunk_id": str(chunk.get("chunk_id") or ""),
+            "index": int(chunk.get("index") or 0),
+            "start": int(chunk.get("start") or 0),
+            "end": int(chunk.get("end") or 0),
+            "sha256": hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+            "extraction_method": str(metadata.get("extraction_method") or ""),
+            "owner": "integrations.ipfs_datasets.documents.parse_document_text",
+        })
+    metadata_bytes = json.dumps({"chunks": chunk_meta, "case_id": case_id, "actor_id": actor_id}, sort_keys=True).encode("utf-8")
+    evidence_binding = PrivateArtifactBinding(
+        tenant_id=tenant_id, case_id=case_id, artifact_kind="evidence",
+        revision=f"{revision}.evidence", principal_id=actor_id,
+    )
+    metadata_binding = PrivateArtifactBinding(
+        tenant_id=tenant_id, case_id=case_id, artifact_kind="classification_revision",
+        revision=f"{revision}.metadata", principal_id=actor_id,
+    )
+    try:
+        stored = commit_scoped_kit_record(
+            root, record_id=f"ev-{revision}", kind="evidence", plaintext=bytes(source),
+            binding=evidence_binding, key=key, key_id=key_id, source_sha256=source_sha256, key_locked=key_locked,
+        )
+        meta_stored = commit_scoped_kit_record(
+            root, record_id=f"md-{revision}", kind="classification_revision", plaintext=metadata_bytes,
+            binding=metadata_binding, key=key, key_id=key_id,
+            source_sha256=hashlib.sha256(metadata_bytes).hexdigest(), key_locked=key_locked,
+        )
+        annotation_stored = None
+        if annotation is not None:
+            if not isinstance(annotation_sha256, str):
+                return _qualification_refusal("source_integrity", "refused", **scope)
+            note_binding = PrivateArtifactBinding(
+                tenant_id=tenant_id, case_id=case_id, artifact_kind="annotation",
+                revision=f"{revision}.annotation", principal_id=actor_id,
+            )
+            annotation_stored = commit_scoped_kit_record(
+                root, record_id=f"an-{revision}", kind="annotation", plaintext=bytes(annotation),
+                binding=note_binding, key=key, key_id=key_id, source_sha256=annotation_sha256, key_locked=key_locked,
+            )
+        opened = open_scoped_kit_record(root, record_id=f"ev-{revision}", binding=evidence_binding, key=key)
+        opened_meta = open_scoped_kit_record(root, record_id=f"md-{revision}", binding=metadata_binding, key=key)
+    except BoundPrivateRecordError as exc:
+        code = exc.code if exc.code in {"key_locked", "conflicting_revision", "source_integrity", "missing_capability"} else "source_integrity"
+        status = "unavailable" if code == "missing_capability" else "refused"
+        return _qualification_refusal(code, status, **scope)
+    if opened != bytes(source) or opened_meta != metadata_bytes:
+        return _qualification_refusal("source_integrity", "refused", **scope)
+    admitted_meta = json.loads(opened_meta.decode("utf-8"))
+    if admitted_meta.get("chunks") != chunk_meta:
+        return _qualification_refusal("source_integrity", "refused", **scope)
+
+    mediator = _QualificationLog()
+    storage = EvidenceStorageHook(mediator)
+    state = EvidenceStateHook(mediator, db_path=db_path)
+    analysis = EvidenceAnalysisHook(mediator)
+    state_row = {
+        "case_id": case_id,
+        "actor_id": actor_id,
+        "kind": "evidence",
+        "record_id": stored["record_id"],
+        "revision": evidence_binding.revision,
+        "source_sha256": stored["source_sha256"],
+        "chunk_count": len(chunk_meta),
+        "claim_type": claim_type,
+        "annotation": False,
+        "metadata_record_id": meta_stored["record_id"],
+        "dataset_owner": "integrations.ipfs_datasets.documents.parse_document_text",
+        "kit_owner": stored["kit_owner"],
+    }
+    _scoped_rows(state).append(state_row)
+    if annotation_stored is not None:
+        _scoped_rows(state).append({
+            "case_id": case_id,
+            "actor_id": actor_id,
+            "kind": "annotation",
+            "record_id": annotation_stored["record_id"],
+            "revision": f"{revision}.annotation",
+            "annotation": True,
+            "claim_type": claim_type,
+            "chunk_count": 0,
+        })
+    report = analysis.analyze_scoped_case(state, case_id=case_id, actor_id=actor_id, claim_type=claim_type)
+    return {
+        "status": "qualified",
+        "code": "qualified",
+        "plaintext_fallback": False,
+        "plaintext_persisted": False,
+        "annotation_converted_to_evidence": False,
+        "local_durable": True,
+        "remote_durable": False,
+        "writes": 2 if annotation_stored is None else 3,
+        "case_id": case_id,
+        "actor_id": actor_id,
+        "revision": revision,
+        "evidence_count": report["evidence_count"],
+        "annotation_count": report["annotation_count"],
+        "chunk_count": report["chunk_count"],
+        "analysis_evidence_ids": report["evidence_ids"],
+        "analysis_annotation_ids": report["annotation_ids"],
+        "metadata_record_id": meta_stored["record_id"],
+        "evidence_record_id": stored["record_id"],
+        "dataset_owner": state_row["dataset_owner"],
+        "kit_owner": stored["kit_owner"],
+        "storage_owner": type(storage).__name__,
+        "state_owner": type(state).__name__,
+        "analysis_owner": type(analysis).__name__,
+        "source_sha256": stored["source_sha256"],
+    }
+
+
+def read_scoped_private_evidence(
+    root: str,
+    *,
+    case_id: str,
+    actor_id: str,
+    tenant_id: str,
+    revision: str,
+    key: bytes | None,
+    record: str = "evidence",
+    key_locked: bool = False,
+) -> bytes:
+    from integrations.private_storage import PrivateArtifactBinding, open_scoped_kit_record
+
+    kinds = {"evidence": "evidence", "metadata": "classification_revision", "annotation": "annotation"}
+    ids = {"evidence": f"ev-{revision}", "metadata": f"md-{revision}", "annotation": f"an-{revision}"}
+    if record not in kinds:
+        raise EvidenceRetrievalError("record rejected", code="source_integrity")
+    binding = PrivateArtifactBinding(
+        tenant_id=tenant_id,
+        case_id=case_id,
+        artifact_kind=kinds[record],
+        revision=f"{revision}.{record if record != 'metadata' else 'metadata'}",
+        principal_id=actor_id,
+    )
+    try:
+        return open_scoped_kit_record(root, record_id=ids[record], binding=binding, key=key, key_locked=key_locked)
+    except Exception as exc:
+        code = getattr(exc, "code", "source_integrity")
+        raise EvidenceRetrievalError("scoped evidence is unavailable", code=code) from exc
