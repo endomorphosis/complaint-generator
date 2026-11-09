@@ -353,11 +353,11 @@ except Exception as e:
 ## References
 
 ### Key Files
-- [Config Validators](../ipfs_datasets_py/optimizers/graphrag/config_validators.py)
-- [Language Router](../ipfs_datasets_py/optimizers/graphrag/language_router.py)
-- [Integration Guide](../ipfs_datasets_py/optimizers/graphrag/integration_guide.py)
-- [Ontology Serialization](../ipfs_datasets_py/optimizers/graphrag/ontology_serialization.py)
-- [Error Handling Base](../ipfs_datasets_py/optimizers/graphrag/error_handling.py)
+- [Config Validators](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/config_validators.py)
+- [Language Router](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/language_router.py)
+- [Integration Guide](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/integration_guide.py)
+- [Ontology Serialization](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_serialization.py)
+- [Error Handling Base](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/error_handling.py)
 
 ### Test Files
 - Test Config Validators: `tests/unit/optimizers/graphrag/test_config_validators.py`

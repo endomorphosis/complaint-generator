@@ -566,8 +566,8 @@ with tracer.span_context("retry_attempt_2") as span2:
 
 ## Related Documentation
 
-- [Prometheus Metrics Guide](prometheus-guide.md)
-- [Logging Migration Guide](LOGGING_MIGRATION_GUIDE.md)
-- [Circuit Breaker Integration](CIRCUIT_BREAKER_GUIDE.md)
+- [Prometheus Metrics Guide](../metrics/PROMETHEUS_GUIDE.md)
+- [Logging Migration Guide](../migration/LOGGING_MIGRATION_GUIDE.md)
+- [Circuit Breaker Integration](../integration/CIRCUIT_BREAKER_GUIDE.md)
 - [OpenTelemetry Docs](https://opentelemetry.io/)
 - [Jaeger Docs](https://www.jaegertracing.io/)

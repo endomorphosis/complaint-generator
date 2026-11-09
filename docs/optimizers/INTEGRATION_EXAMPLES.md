@@ -1494,7 +1494,7 @@ pip install sentence-transformers
 
 - **[PERFORMANCE_TUNING_GUIDE.md](PERFORMANCE_TUNING_GUIDE.md)** - Optimization strategies
 - **[TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md)** - Solutions to common issues
-- **[README.md](../ipfs_datasets_py/optimizers/README.md)** - Main documentation
+- **[README.md](../../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/README.md)** - Main documentation
 
 ## Prometheus Metrics Scrape
 

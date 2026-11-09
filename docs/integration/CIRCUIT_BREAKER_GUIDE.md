@@ -610,7 +610,7 @@ def my_api_call():
 
 ## Related Docs
 
-- [Structured Logging Migration Guide](LOGGING_MIGRATION_GUIDE.md)
-- [Prometheus Metrics Guide](../metrics/prometheus-guide.md)
-- [OpenTelemetry Tracing Guide](../tracing/otel-guide.md)
-- [API Reference](../../ipfs_datasets_py/ipfs_datasets_py/logic/security/llm_circuit_breaker.py)
+- [Structured Logging Migration Guide](../migration/LOGGING_MIGRATION_GUIDE.md)
+- [Prometheus Metrics Guide](../metrics/PROMETHEUS_GUIDE.md)
+- [OpenTelemetry Tracing Guide](../tracing/OTEL_GUIDE.md)
+- [API Reference](../../external/ipfs_datasets_py/ipfs_datasets_py/logic/security/llm_circuit_breaker.py)

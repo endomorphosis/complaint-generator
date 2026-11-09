@@ -682,6 +682,6 @@ span.set_attribute("user_id", user_id)  # Not password!
 ---
 
 **For questions, refer to:**
-- [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md)
-- [OpenTelemetry Guide](docs/tracing/OTEL_GUIDE.md)
-- [Troubleshooting Guide](docs/observability/TROUBLESHOOTING.md)
+- [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md)
+- [OpenTelemetry Guide](tracing/OTEL_GUIDE.md)
+- [Troubleshooting Guide](observability/TROUBLESHOOTING.md)

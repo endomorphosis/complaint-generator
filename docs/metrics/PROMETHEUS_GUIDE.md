@@ -540,6 +540,6 @@ metrics.record_circuit_breaker_call(
 
 ## Related Documentation
 
-- [Circuit Breaker Guide](CIRCUIT_BREAKER_GUIDE.md)
-- [Logging Migration Guide](LOGGING_MIGRATION_GUIDE.md)
-- [OTel Integration Guide](otel-guide.md)
+- [Circuit Breaker Guide](../integration/CIRCUIT_BREAKER_GUIDE.md)
+- [Logging Migration Guide](../migration/LOGGING_MIGRATION_GUIDE.md)
+- [OTel Integration Guide](../tracing/OTEL_GUIDE.md)

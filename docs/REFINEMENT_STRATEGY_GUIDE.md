@@ -8,9 +8,9 @@ improving ontology quality. The main entry point is
 recommendation patterns, and graph stats to pick a single action.
 
 Source of truth in code:
-- Strategy selection: [suggest_refinement_strategy](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L869-L1038)
-- Recommendation-driven action application: [refine_ontology](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L432-L661)
-- Pipeline integration: [OntologyPipeline.run](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281)
+- Strategy selection: [suggest_refinement_strategy](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L869-L1038)
+- Recommendation-driven action application: [refine_ontology](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L432-L661)
+- Pipeline integration: [OntologyPipeline.run](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281)
 
 ## Quick Start
 
@@ -131,7 +131,7 @@ Implementation details:
 `OntologyPipeline.run()` calls `refine_ontology` when `refine=True`, then
 re-evaluates the ontology and logs a `PIPELINE_RUN` event. It does not call
 `suggest_refinement_strategy` directly. See
-[OntologyPipeline.run](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281).
+[OntologyPipeline.run](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281).
 
 ## Recommended Usage Patterns
 
@@ -176,6 +176,6 @@ recs = mediator.preview_recommendations(ontology, score, context)
 
 ## References
 
-- Strategy logic: [suggest_refinement_strategy](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L869-L1038)
-- Action application: [refine_ontology](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L432-L661)
-- Pipeline flow: [OntologyPipeline.run](ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281)
+- Strategy logic: [suggest_refinement_strategy](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L869-L1038)
+- Action application: [refine_ontology](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_mediator.py#L432-L661)
+- Pipeline flow: [OntologyPipeline.run](../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_pipeline.py#L218-L281)

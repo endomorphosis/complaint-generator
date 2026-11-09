@@ -6,8 +6,8 @@ This guide summarizes the most impactful performance levers for the GraphRAG
 pipeline, focusing on the rule-based extractor and relationship inference. It
 pulls from profiling reports in:
 
-- [INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md](ipfs_datasets_py/docs/profiling/INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md)
-- [PROFILING_EXTRACT_RULE_BASED.md](ipfs_datasets_py/docs/PROFILING_EXTRACT_RULE_BASED.md)
+- [INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md](../external/ipfs_datasets_py/docs/profiling/INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md)
+- [PROFILING_EXTRACT_RULE_BASED.md](../external/ipfs_datasets_py/docs/PROFILING_EXTRACT_RULE_BASED.md)
 
 The two largest costs are:
 1. Relationship inference (O(n^2) entity pair checks).
@@ -60,7 +60,7 @@ once and reuse.
 - `min_entity_length`: Reduces noisy entities and downstream pair checks.
 - `stopwords`: Expands stopword list to reduce trivial entities.
 
-See [EXTRACTION_CONFIG_GUIDE.md](ipfs_datasets_py/docs/EXTRACTION_CONFIG_GUIDE.md)
+See [EXTRACTION_CONFIG_GUIDE.md](../external/ipfs_datasets_py/docs/EXTRACTION_CONFIG_GUIDE.md)
 for details.
 
 ### Relationship window size
@@ -136,6 +136,6 @@ influenced by:
 
 ## References
 
-- [INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md](ipfs_datasets_py/docs/profiling/INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md)
-- [PROFILING_EXTRACT_RULE_BASED.md](ipfs_datasets_py/docs/PROFILING_EXTRACT_RULE_BASED.md)
-- [EXTRACTION_CONFIG_GUIDE.md](ipfs_datasets_py/docs/EXTRACTION_CONFIG_GUIDE.md)
+- [INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md](../external/ipfs_datasets_py/docs/profiling/INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md)
+- [PROFILING_EXTRACT_RULE_BASED.md](../external/ipfs_datasets_py/docs/PROFILING_EXTRACT_RULE_BASED.md)
+- [EXTRACTION_CONFIG_GUIDE.md](../external/ipfs_datasets_py/docs/EXTRACTION_CONFIG_GUIDE.md)

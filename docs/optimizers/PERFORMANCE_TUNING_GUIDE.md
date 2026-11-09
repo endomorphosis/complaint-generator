@@ -39,7 +39,7 @@ The OntologyGenerator pipeline exhibits **O(n^1.5) to O(n^2)** scaling behavior:
 
 ### Key Bottlenecks (10K Token Document)
 
-From comprehensive profiling ([PROFILING_BATCH_262_ANALYSIS.md](../docs/PROFILING_BATCH_262_ANALYSIS.md)):
+From comprehensive profiling ([PROFILING_BATCH_262_ANALYSIS.md](../PROFILING_BATCH_262_ANALYSIS.md)):
 
 | Component | Time | % Total | Function Calls | Notes |
 |-----------|------|---------|----------------|-------|
@@ -612,10 +612,10 @@ def test_performance_regression():
 
 ## References
 
-- **[PROFILING_BATCH_262_ANALYSIS.md](../docs/PROFILING_BATCH_262_ANALYSIS.md)** - Detailed profiling analysis
-- **[CONFIGURATION_REFERENCE.md](../docs/CONFIGURATION_REFERENCE.md)** - Complete configuration guide
-- **[GRAPHRAG_QUICK_START.md](../docs/optimizers/GRAPHRAG_QUICK_START.md)** - Quick start guide
-- **[README.md](README.md)** - Main optimizers documentation
+- **[PROFILING_BATCH_262_ANALYSIS.md](../PROFILING_BATCH_262_ANALYSIS.md)** - Detailed profiling analysis
+- **[CONFIGURATION_REFERENCE.md](../../external/ipfs_datasets_py/docs/optimizers/graphrag/CONFIGURATION_REFERENCE.md)** - Complete configuration guide
+- **[GRAPHRAG_QUICK_START.md](../../external/ipfs_datasets_py/docs/optimizers/GRAPHRAG_QUICK_START.md)** - Quick start guide
+- **[README.md](../../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/README.md)** - Main optimizers documentation
 
 ## Version History
 

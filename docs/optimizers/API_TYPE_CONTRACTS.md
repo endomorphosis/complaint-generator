@@ -6,7 +6,7 @@
 
 ## Overview
 
-All public API entrypoints in the GraphRAG optimizer modules now return properly typed structures defined as TypedDict definitions in [ontology_types.py](../../ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_types.py).
+All public API entrypoints in the GraphRAG optimizer modules now return properly typed structures defined as TypedDict definitions in [ontology_types.py](../../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_types.py).
 
 This provides:
 - **Static type checking** via mypy/pyright
@@ -169,7 +169,7 @@ print(f"Recommendations: {score.recommendations}")
 
 ## Testing
 
-Comprehensive test suite in [test_batch_264_api_type_contracts.py](../../../tests/test_batch_264_api_type_contracts.py):
+Comprehensive test suite in [test_batch_264_api_type_contracts.py](../../tests/test_batch_264_api_type_contracts.py):
 
 - ✅ **Structure validation** - Verify returned dicts match TypedDict fields
 - ✅ **Type annotation checks** - Verify method signatures have proper return types
@@ -244,9 +244,9 @@ pyright ipfs_datasets_py/optimizers/graphrag/ontology_generator.py
 
 ## Related Documentation
 
-- [ontology_types.py](../../ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_types.py) - Complete type definitions
-- [API Reference](./API_REFERENCE.md) - Public API documentation
-- [GraphRAG Quick Start](./OPTIMIZERS_QUICK_START.md) - Usage examples
+- [ontology_types.py](../../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/graphrag/ontology_types.py) - Complete type definitions
+- [API Reference](../API_REFERENCE.md) - Public API documentation
+- [GraphRAG Quick Start](../../external/ipfs_datasets_py/docs/OPTIMIZERS_QUICK_START.md) - Usage examples
 
 ## Future Improvements
 

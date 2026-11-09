@@ -6,17 +6,17 @@ Complete guide to implementing, testing, and deploying the MCP++ observability s
 
 **New to MCP++ observability?** Start here:
 
-1. [Session 84 Phase 4 Summary](SESSION_84_PHASE4_SUMMARY.md) — 5-minute overview of what's included
-2. [Quick Start Example](examples/session84_observability_examples.py) — Copy-paste examples (Examples 1-3)
-3. [Logging Migration Guide](docs/migration/LOGGING_MIGRATION_GUIDE.md) — Integrate structured logging
-4. [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md) — Understand state machine
+1. [Session 84 Phase 4 Summary](archive/sessions/SESSION_84_PHASE4_SUMMARY.md) — 5-minute overview of what's included
+2. [Quick Start Example](../examples/session84_observability_examples.py) — Copy-paste examples (Examples 1-3)
+3. [Logging Migration Guide](migration/LOGGING_MIGRATION_GUIDE.md) — Integrate structured logging
+4. [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md) — Understand state machine
 
 **For Production?** Jump to:
 
-1. [Production Deployment Guide](docs/PRODUCTION_DEPLOYMENT_GUIDE.md) — Pre-deployment checklist
-2. [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) — Metrics infrastructure
-3. [OpenTelemetry Guide](docs/tracing/OTEL_GUIDE.md) — Distributed tracing setup
-4. [Troubleshooting Guide](docs/observability/TROUBLESHOOTING.md) — Common issues & fixes
+1. [Production Deployment Guide](PRODUCTION_DEPLOYMENT_GUIDE.md) — Pre-deployment checklist
+2. [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) — Metrics infrastructure
+3. [OpenTelemetry Guide](tracing/OTEL_GUIDE.md) — Distributed tracing setup
+4. [Troubleshooting Guide](observability/TROUBLESHOOTING.md) — Common issues & fixes
 
 ---
 
@@ -82,19 +82,19 @@ and its worker have been confirmed stopped.
 
 **1. Metrics (Prometheus)**
 - What: Quantitative measurements (counters, histograms, gauges)
-- Where: [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md)
+- Where: [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md)
 - Example: "Success rate is 98.5%", "P99 latency is 250ms"
 - Use when: Tracking aggregate behavior, dashboards, alerting
 
 **2. Traces (OpenTelemetry + Jaeger)**
 - What: Distributed request flows across services
-- Where: [OpenTelemetry Guide](docs/tracing/OTEL_GUIDE.md)
+- Where: [OpenTelemetry Guide](tracing/OTEL_GUIDE.md)
 - Example: Request from API → Database → Cache (timing for each)
 - Use when: Debugging complex flows, understanding latency distribution
 
 **3. Circuit Breaker**
 - What: Fault tolerant pattern for external service calls
-- Where: [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md)
+- Where: [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md)
 - Example: "Service down → open circuit → return fallback → try again after 5s"
 - Use when: Preventing cascading failures, protecting system
 
@@ -114,16 +114,16 @@ and its worker have been confirmed stopped.
 
 | Example | Complexity | Use Case | Location |
 |---------|-----------|----------|----------|
-| Basic circuit breaker | Beginner | Simple service calls | [Example 1](examples/session84_observability_examples.py) |
-| Structured logging | Beginner | Adding context to logs | [Example 2](examples/session84_observability_examples.py) |
-| Error handling | Intermediate | Comprehensive error tracking | [Example 3](examples/session84_observability_examples.py) |
-| Prometheus metrics | Intermediate | Recording & export | [Example 4](examples/session84_observability_examples.py) |
-| OpenTelemetry traces | Intermediate | Distributed tracing | [Example 5](examples/session84_observability_examples.py) |
-| Complete integration | Advanced | Metrics + traces + CB | [Example 6](examples/session84_observability_examples.py) |
-| Prometheus endpoint | Intermediate | FastAPI integration | [Example 7](examples/session84_observability_examples.py) |
-| Concurrent workers | Advanced | Thread-safe usage | [Example 8](examples/session84_observability_examples.py) |
-| Fallback strategies | Advanced | 4 different approaches | [Example 9](examples/session84_observability_examples.py) |
-| Testing patterns | Advanced | Unit + integration tests | [Example 10](examples/session84_observability_examples.py) |
+| Basic circuit breaker | Beginner | Simple service calls | [Example 1](../examples/session84_observability_examples.py) |
+| Structured logging | Beginner | Adding context to logs | [Example 2](../examples/session84_observability_examples.py) |
+| Error handling | Intermediate | Comprehensive error tracking | [Example 3](../examples/session84_observability_examples.py) |
+| Prometheus metrics | Intermediate | Recording & export | [Example 4](../examples/session84_observability_examples.py) |
+| OpenTelemetry traces | Intermediate | Distributed tracing | [Example 5](../examples/session84_observability_examples.py) |
+| Complete integration | Advanced | Metrics + traces + CB | [Example 6](../examples/session84_observability_examples.py) |
+| Prometheus endpoint | Intermediate | FastAPI integration | [Example 7](../examples/session84_observability_examples.py) |
+| Concurrent workers | Advanced | Thread-safe usage | [Example 8](../examples/session84_observability_examples.py) |
+| Fallback strategies | Advanced | 4 different approaches | [Example 9](../examples/session84_observability_examples.py) |
+| Testing patterns | Advanced | Unit + integration tests | [Example 10](../examples/session84_observability_examples.py) |
 
 ---
 
@@ -134,9 +134,9 @@ and its worker have been confirmed stopped.
 **Goal:** Understand observability concepts and basic integration
 
 Reading:
-1. [Logging Migration Guide](docs/migration/LOGGING_MIGRATION_GUIDE.md) — 5-phase approach
-2. [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md) — State machine & patterns (sections 1-4)
-3. Examples 1-3 from [session84_observability_examples.py](examples/session84_observability_examples.py)
+1. [Logging Migration Guide](migration/LOGGING_MIGRATION_GUIDE.md) — 5-phase approach
+2. [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md) — State machine & patterns (sections 1-4)
+3. Examples 1-3 from [session84_observability_examples.py](../examples/session84_observability_examples.py)
 
 Hands-on:
 - Integrate circuit breaker into 2 service calls
@@ -148,9 +148,9 @@ Hands-on:
 **Goal:** Implement metrics and tracing in real services
 
 Reading:
-1. [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) — FastAPI integration section
-2. [OpenTelemetry Guide](docs/tracing/OTEL_GUIDE.md) — Setup & basic instrumentation
-3. Examples 4-7 from [session84_observability_examples.py](examples/session84_observability_examples.py)
+1. [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) — FastAPI integration section
+2. [OpenTelemetry Guide](tracing/OTEL_GUIDE.md) — Setup & basic instrumentation
+3. Examples 4-7 from [session84_observability_examples.py](../examples/session84_observability_examples.py)
 
 Hands-on:
 - Set up Prometheus scraping in development environment
@@ -163,9 +163,9 @@ Hands-on:
 **Goal:** Deploy observability stack to production
 
 Reading:
-1. [Production Deployment Guide](docs/PRODUCTION_DEPLOYMENT_GUIDE.md) — All sections
-2. [Troubleshooting Guide](docs/observability/TROUBLESHOOTING.md) — Reference as needed
-3. [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) — Grafana dashboards & alerting
+1. [Production Deployment Guide](PRODUCTION_DEPLOYMENT_GUIDE.md) — All sections
+2. [Troubleshooting Guide](observability/TROUBLESHOOTING.md) — Reference as needed
+3. [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) — Grafana dashboards & alerting
 
 Hands-on:
 - Deploy full Docker stack (Prometheus, Grafana, Jaeger, AlertManager)
@@ -179,9 +179,9 @@ Hands-on:
 **Goal:** Handle edge cases and optimize performance
 
 Reading:
-1. [Chaos Testing Scenarios](examples/chaos_testing_scenarios.py) — Run scenarios 1-7
-2. [Performance Benchmarking](examples/observability_benchmarks.py) — All benchmarks
-3. [Property-Based Testing](tests/mcp/unit/test_observability_property_based.py) — Reference
+1. [Chaos Testing Scenarios](../examples/chaos_testing_scenarios.py) — Run scenarios 1-7
+2. [Performance Benchmarking](../examples/observability_benchmarks.py) — All benchmarks
+3. [Property-Based Testing](../tests/mcp/unit/test_observability_property_based.py) — Reference
 
 Hands-on:
 - Run chaos scenarios against your services
@@ -198,37 +198,37 @@ Hands-on:
 
 | Topic | Guide | Key Points |
 |-------|-------|-----------|
-| **Observability Architecture** | [Session 84 Summary](SESSION_84_PHASE4_SUMMARY.md) | 4 phases, test architecture |
-| **Metrics Design** | [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) | Cardinality, labels, retention |
-| **Tracing Design** | [OpenTelemetry Guide](docs/tracing/OTEL_GUIDE.md) | Span hierarchy, context propagation |
-| **Circuit Breaker Pattern** | [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md) | State machine, thresholds, timeouts |
+| **Observability Architecture** | [Session 84 Summary](archive/sessions/SESSION_84_PHASE4_SUMMARY.md) | 4 phases, test architecture |
+| **Metrics Design** | [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) | Cardinality, labels, retention |
+| **Tracing Design** | [OpenTelemetry Guide](tracing/OTEL_GUIDE.md) | Span hierarchy, context propagation |
+| **Circuit Breaker Pattern** | [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md) | State machine, thresholds, timeouts |
 
 ### Integration & Implementation
 
 | Topic | Guide | Key Points |
 |-------|-------|-----------|
-| **Logging Integration** | [Logging Migration Guide](docs/migration/LOGGING_MIGRATION_GUIDE.md) | 5 phases, 7 patterns |
-| **FastAPI Setup** | [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) + [OTel Guide](docs/tracing/OTEL_GUIDE.md) | Middleware, endpoints |
-| **Service Architecture** | [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md) | Patterns & examples |
-| **Error Handling** | [Examples](examples/session84_observability_examples.py) | Try/except patterns |
+| **Logging Integration** | [Logging Migration Guide](migration/LOGGING_MIGRATION_GUIDE.md) | 5 phases, 7 patterns |
+| **FastAPI Setup** | [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) + [OTel Guide](tracing/OTEL_GUIDE.md) | Middleware, endpoints |
+| **Service Architecture** | [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md) | Patterns & examples |
+| **Error Handling** | [Examples](../examples/session84_observability_examples.py) | Try/except patterns |
 
 ### Operations & Maintenance
 
 | Topic | Guide | Key Points |
 |-------|-------|-----------|
-| **Deployment** | [Production Deployment Guide](docs/PRODUCTION_DEPLOYMENT_GUIDE.md) | Docker, config, verification |
-| **Monitoring** | [Prometheus Guide](docs/metrics/PROMETHEUS_GUIDE.md) | Dashboards, scraping, retention |
-| **Alerting** | [Production Deployment Guide](docs/PRODUCTION_DEPLOYMENT_GUIDE.md) | Alert rules, AlertManager |
-| **Troubleshooting** | [Troubleshooting Guide](docs/observability/TROUBLESHOOTING.md) | Common issues, diagnostics |
+| **Deployment** | [Production Deployment Guide](PRODUCTION_DEPLOYMENT_GUIDE.md) | Docker, config, verification |
+| **Monitoring** | [Prometheus Guide](metrics/PROMETHEUS_GUIDE.md) | Dashboards, scraping, retention |
+| **Alerting** | [Production Deployment Guide](PRODUCTION_DEPLOYMENT_GUIDE.md) | Alert rules, AlertManager |
+| **Troubleshooting** | [Troubleshooting Guide](observability/TROUBLESHOOTING.md) | Common issues, diagnostics |
 
 ### Testing & Validation
 
 | Topic | Guide | Key Points |
 |-------|-------|-----------|
-| **Unit Testing** | [Examples 10](examples/session84_observability_examples.py) | Pytest patterns |
-| **Chaos Testing** | [Chaos Scenarios](examples/chaos_testing_scenarios.py) | 7 production scenarios |
-| **Performance Testing** | [Benchmarking Suite](examples/observability_benchmarks.py) | 9 benchmarks |
-| **Property Testing** | [Property-Based Tests](tests/mcp/unit/test_observability_property_based.py) | Hypothesis framework |
+| **Unit Testing** | [Examples 10](../examples/session84_observability_examples.py) | Pytest patterns |
+| **Chaos Testing** | [Chaos Scenarios](../examples/chaos_testing_scenarios.py) | 7 production scenarios |
+| **Performance Testing** | [Benchmarking Suite](../examples/observability_benchmarks.py) | 9 benchmarks |
+| **Property Testing** | [Property-Based Tests](../tests/mcp/unit/test_observability_property_based.py) | Hypothesis framework |
 
 ---
 
@@ -406,11 +406,11 @@ def handle_call(request):
 
 | Issue | Guide | Solutions |
 |-------|-------|-----------|
-| Metrics not appearing | [Troubleshooting](docs/observability/TROUBLESHOOTING.md) | Collector init, recording, endpoint, format |
-| High memory usage | [Troubleshooting](docs/observability/TROUBLESHOOTING.md) | Latency buffer, trace buffer, cardinality |
-| Missing traces | [Troubleshooting](docs/observability/TROUBLESHOOTING.md) | Tracer init, span lifecycle, export |
-| Circuit breaker not opening | [Troubleshooting](docs/observability/TROUBLESHOOTING.md) | Threshold, timeout, exception handling |
-| Metrics/traces don't correlate | [Troubleshooting](docs/observability/TROUBLESHOOTING.md) | Component names, timestamps, context |
+| Metrics not appearing | [Troubleshooting](observability/TROUBLESHOOTING.md) | Collector init, recording, endpoint, format |
+| High memory usage | [Troubleshooting](observability/TROUBLESHOOTING.md) | Latency buffer, trace buffer, cardinality |
+| Missing traces | [Troubleshooting](observability/TROUBLESHOOTING.md) | Tracer init, span lifecycle, export |
+| Circuit breaker not opening | [Troubleshooting](observability/TROUBLESHOOTING.md) | Threshold, timeout, exception handling |
+| Metrics/traces don't correlate | [Troubleshooting](observability/TROUBLESHOOTING.md) | Component names, timestamps, context |
 | Background workflow appears stalled | [Troubleshooting](observability/TROUBLESHOOTING.md#long-running-automation-stalls) | PID and heartbeat checks, logs, last-cycle fields, safe task release |
 
 ---
@@ -419,11 +419,11 @@ def handle_call(request):
 
 ### Adding a New Service to Observability
 
-1. **Read:** [Circuit Breaker Guide](docs/integration/CIRCUIT_BREAKER_GUIDE.md) — Section 4 (Configuration)
-2. **Code:** Copy Pattern 3 from [Examples](examples/session84_observability_examples.py)
+1. **Read:** [Circuit Breaker Guide](integration/CIRCUIT_BREAKER_GUIDE.md) — Section 4 (Configuration)
+2. **Code:** Copy Pattern 3 from [Examples](../examples/session84_observability_examples.py)
 3. **Configure:** Set appropriate `failure_threshold` and `timeout_seconds`
-4. **Test:** Add tests following [Example 10](examples/session84_observability_examples.py)
-5. **Deploy:** Follow [Production Deployment Guide](docs/PRODUCTION_DEPLOYMENT_GUIDE.md)
+4. **Test:** Add tests following [Example 10](../examples/session84_observability_examples.py)
+5. **Deploy:** Follow [Production Deployment Guide](PRODUCTION_DEPLOYMENT_GUIDE.md)
 
 ### Running Tests Locally
 
@@ -458,8 +458,8 @@ python examples/chaos_testing_scenarios.py          # All scenarios
 
 ### Quick Reference
 
-- [Glossary of Terms](docs/observability/) — (add glossary.md)
-- [Configuration Reference](docs/PRODUCTION_DEPLOYMENT_GUIDE.md#performance-tuning)
+- [Glossary of Terms](observability/TROUBLESHOOTING.md) — (add glossary.md)
+- [Configuration Reference](PRODUCTION_DEPLOYMENT_GUIDE.md#performance-tuning)
 - [API Reference](#) — (docstrings in metrics_prometheus.py, otel_integration.py)
 
 ### External Resources
@@ -492,8 +492,8 @@ For detailed help on specific topics:
 1. **Concept questions?** → [Quick Start](#quick-start) section
 2. **Integration help?** → [Learning Path](#learning-path) → appropriate level
 3. **Troubleshooting?** → [Troubleshooting Index](#troubleshooting-index)
-4. **Performance?** → [Benchmarking Suite](examples/observability_benchmarks.py)
-5. **Testing?** → [Test Examples](examples/session84_observability_examples.py#example-10)
+4. **Performance?** → [Benchmarking Suite](../examples/observability_benchmarks.py)
+5. **Testing?** → [Test Examples](../examples/session84_observability_examples.py#example-10)
 
 ---
 

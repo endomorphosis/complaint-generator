@@ -436,7 +436,7 @@ print(f"Inferred {len(ontology['relationships'])} relationships")
 - [Ray Documentation](https://docs.ray.io/)
 - [Celery Documentation](https://docs.celeryq.dev/)
 - [GraphRAG Architecture](../ARCHITECTURE.md)
-- [Performance Tuning Guide](../PERFORMANCE_TUNING_GUIDE.md)
+- [Performance Tuning Guide](PERFORMANCE_TUNING_GUIDE.md)
 
 ## Changelog
 

@@ -413,9 +413,9 @@ All logs will have:
 
 ## Next Steps
 
-1. **Prometheus Integration:** See [Prometheus Metrics Guide](../metrics/prometheus-guide.md)
-2. **OpenTelemetry:** See [Distributed Tracing Guide](../tracing/otel-guide.md)
-3. **Log Analysis:** See [Log Query Examples](../analysis/log-queries.md)
+1. **Prometheus Integration:** See [Prometheus Metrics Guide](../metrics/PROMETHEUS_GUIDE.md)
+2. **OpenTelemetry:** See [Distributed Tracing Guide](../tracing/OTEL_GUIDE.md)
+3. **Log Analysis:** See [Log Query Examples](../../examples/session84_observability_examples.py)
 4. **Alerting:** Set up alerts on structured logs using ELK or Datadog
 
 ---
@@ -423,6 +423,6 @@ All logs will have:
 ## Support
 
 For questions or issues:
-- See [Structured Logging API](../../ipfs_datasets_py/logic/observability/structured_logging.py)
-- Check [examples/logging_examples.py](../../examples/logging_examples.py)
+- See [Structured Logging API](../../external/ipfs_datasets_py/ipfs_datasets_py/logic/observability/structured_logging.py)
+- Check [examples/logging_examples.py](../../examples/session84_observability_examples.py)
 - File issues on the project tracker

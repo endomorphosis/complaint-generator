@@ -553,4 +553,4 @@ test_custom_complaint_type()
 
 ---
 
-For more information, see the main [README.md](README.md).
+For more information, see the main [README.md](../README.md).

@@ -605,72 +605,72 @@
     {
       "rank": 1,
       "path": "applications/complaint_workspace.py",
-      "byte_size": 914188
+      "byte_size": 867375
     },
     {
       "rank": 2,
       "path": "mediator/mediator.py",
-      "byte_size": 587918
+      "byte_size": 526779
     },
     {
       "rank": 3,
       "path": "complaint_phases/document_pipeline.py",
-      "byte_size": 489169
+      "byte_size": 455270
     },
     {
       "rank": 4,
-      "path": "mediator/claim_support_hooks.py",
-      "byte_size": 446562
-    },
-    {
-      "rank": 5,
       "path": "integrations/ipfs_datasets/logic.py",
       "byte_size": 406825
     },
     {
-      "rank": 6,
-      "path": "complaint_phases/denoiser.py",
-      "byte_size": 386165
+      "rank": 5,
+      "path": "mediator/claim_support_hooks.py",
+      "byte_size": 404643
     },
     {
-      "rank": 7,
+      "rank": 6,
       "path": "tests/test_claim_support_review_playwright_smoke.py",
       "byte_size": 379599
     },
     {
-      "rank": 8,
+      "rank": 7,
       "path": "integrations/private_storage.py",
       "byte_size": 365443
     },
     {
-      "rank": 9,
-      "path": "adversarial_harness/optimizer.py",
-      "byte_size": 338380
+      "rank": 8,
+      "path": "complaint_phases/denoiser.py",
+      "byte_size": 354870
     },
     {
-      "rank": 10,
+      "rank": 9,
       "path": "scripts/synthesize_hacc_complaint.py",
       "byte_size": 332990
     },
     {
-      "rank": 11,
+      "rank": 10,
       "path": "tests/test_review_api.py",
       "byte_size": 328457
     },
     {
-      "rank": 12,
+      "rank": 11,
       "path": "integrations/ipfs_accelerate/improvement_runner.py",
       "byte_size": 326280
     },
     {
+      "rank": 12,
+      "path": "scripts/refactor_agent_supervisor.py",
+      "byte_size": 305289
+    },
+    {
       "rank": 13,
-      "path": "applications/dashboard_ui.py",
-      "byte_size": 325087
+      "path": "adversarial_harness/optimizer.py",
+      "byte_size": 291074
     },
     {
       "rank": 14,
-      "path": "scripts/refactor_agent_supervisor.py",
-      "byte_size": 305289
+      "path": "applications/dashboard_hub.py",
+      "byte_size": 282083
     },
     {
       "rank": 15,

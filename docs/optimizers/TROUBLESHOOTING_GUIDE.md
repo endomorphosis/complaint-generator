@@ -938,9 +938,9 @@ print(f"Differences: {diff}")
 If you encounter issues not covered in this guide:
 
 1. **Check existing documentation**:
-   - [README.md](../ipfs_datasets_py/optimizers/README.md) - Main documentation
+   - [README.md](../../external/ipfs_datasets_py/ipfs_datasets_py/optimizers/README.md) - Main documentation
    - [PERFORMANCE_TUNING_GUIDE.md](PERFORMANCE_TUNING_GUIDE.md) - Performance optimization
-   - [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) - Complete configuration reference
+   - [CONFIGURATION_REFERENCE.md](../../external/ipfs_datasets_py/docs/optimizers/graphrag/CONFIGURATION_REFERENCE.md) - Complete configuration reference
 
 2. **Search existing issues**: Check the GitHub issue tracker for similar problems
 
