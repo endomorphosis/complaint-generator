@@ -6,7 +6,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 
 ## CIMP-BND-01 Delegate dependency readiness into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -50,7 +50,7 @@ Implementation instructions:
 
 ## CIMP-BND-02 Delegate adversarial intake selection into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -96,7 +96,7 @@ Implementation instructions:
 
 ## CIMP-BND-03 Delegate evidence record storage into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -141,7 +141,7 @@ Implementation instructions:
 
 ## CIMP-BND-04 Delegate formal-document rendering into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -186,7 +186,7 @@ Implementation instructions:
 
 ## CIMP-BND-05 Delegate workflow action steps into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -231,7 +231,7 @@ Implementation instructions:
 
 ## CIMP-BND-06 Delegate dataset graph queries into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -276,7 +276,7 @@ Implementation instructions:
 
 ## CIMP-BND-07 Delegate workspace terminal handlers into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -322,7 +322,7 @@ Implementation instructions:
 
 ## CIMP-BND-08 Delegate mediator gap packets into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -368,7 +368,7 @@ Implementation instructions:
 
 ## CIMP-BND-09 Delegate legacy draft assembly into a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -413,7 +413,7 @@ Implementation instructions:
 
 ## CIMP-BND-10 Make the adversarial harness package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -456,7 +456,7 @@ Implementation instructions:
 
 ## CIMP-BND-11 Make the complaint analysis package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -499,7 +499,7 @@ Implementation instructions:
 
 ## CIMP-BND-12 Make the mediator package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -542,7 +542,7 @@ Implementation instructions:
 
 ## CIMP-BND-13 Make the complaint phases package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -584,7 +584,7 @@ Implementation instructions:
 
 ## CIMP-BND-14 Make the lib package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -626,7 +626,7 @@ Implementation instructions:
 
 ## CIMP-BND-15 Make the backends package import lazy
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -669,7 +669,7 @@ Implementation instructions:
 
 ## CIMP-BND-16 Stop the complaint generator package from importing workspace
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -712,7 +712,7 @@ Implementation instructions:
 
 ## CIMP-BND-17 Expose the three integration facades from the package
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -756,7 +756,7 @@ Implementation instructions:
 
 ## CIMP-BND-18 Record the new siblings and replace the stale size table
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -836,7 +836,7 @@ Implementation instructions:
 
 ## CIMP-BND-19 Document the versioned interfaces from the code that declares them
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -878,7 +878,7 @@ Implementation instructions:
 
 ## CIMP-BND-20 Lock the new module boundaries with an independent ratchet
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
