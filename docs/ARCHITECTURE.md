@@ -68,18 +68,18 @@ modules.
 
 ### Current Extraction Priorities
 
-The codebase scan that seeded the refactor taskboard found 433 Python files,
-260 test files, and 243,492 Python lines. The largest runtime modules and their
-first extraction direction are:
+These sizes are the current splitlines() counts of the named files. The largest
+runtime modules and their first extraction direction are:
 
 | Module | Current size signal | First safe extraction |
 |---|---:|---|
-| `mediator/mediator.py` | 10,852 lines | Move one cohesive workflow service behind private helpers while keeping `Mediator` public methods stable. |
-| `applications/complaint_workspace.py` | 7,881 lines | Extract route/service payload builders and workspace state helpers from request-level orchestration. |
-| `scripts/synthesize_hacc_complaint.py` | 6,933 lines | Split batch orchestration, data loading, and report rendering into importable helpers before behavior changes. |
-| `complaint_phases/denoiser.py` | 5,691 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
-| `applications/dashboard_ui.py` | 5,562 lines | Extract dashboard entry catalogs, fixture builders, and render helpers from route setup. |
-| `mediator/claim_support_hooks.py` | 5,309 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
+| `mediator/mediator.py` | 11452 lines | Move one cohesive workflow service behind private helpers while keeping `Mediator` public methods stable. |
+| `applications/complaint_workspace.py` | 16666 lines | Extract route/service payload builders and workspace state helpers from request-level orchestration. |
+| `scripts/synthesize_hacc_complaint.py` | 6935 lines | Split batch orchestration, data loading, and report rendering into importable helpers before behavior changes. |
+| `complaint_phases/denoiser.py` | 7332 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
+| `applications/dashboard_ui.py` | 1015 lines | Route setup stays in this module. Dashboard hub rendering lives in `applications/dashboard_hub.py`, and this module still defines `create_dashboard_ui_router`. |
+| `applications/dashboard_hub.py` | 4689 lines | Hub rendering extracted from `applications/dashboard_ui.py`. |
+| `mediator/claim_support_hooks.py` | 8802 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
 
 ### Allowed Import Direction
 

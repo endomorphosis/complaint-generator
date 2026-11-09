@@ -22,120 +22,96 @@ Example:
     >>> print(f"Risk: {result['risk_level']}, Categories: {result['categories']}")
 """
 
-from .base import (
-    BaseLegalPatternExtractor,
-    BaseKeywordRegistry,
-    BaseRiskScorer
-)
-from .legal_patterns import (
-    LegalPatternExtractor, 
-    LEGAL_TERMS_REGISTRY, 
-    COMPLAINT_LEGAL_TERMS,
-    register_legal_terms,
-    get_legal_terms
-)
-from .keywords import (
-    KeywordRegistry,
-    get_keywords,
-    get_type_specific_keywords,
-    register_keywords,
-    COMPLAINT_KEYWORDS,
-    EVIDENCE_KEYWORDS,
-    LEGAL_AUTHORITY_KEYWORDS,
-    APPLICABILITY_KEYWORDS
-)
-from .risk_scoring import ComplaintRiskScorer
-from .dei_risk_scoring import DEIRiskScorer
-from .dei_provision_extractor import DEIProvisionExtractor
-from .dei_report_generator import DEIReportGenerator
-from .indexer import HybridDocumentIndexer
-from .complaint_types import (
-    register_housing_complaint,
-    register_employment_complaint,
-    register_civil_rights_complaint,
-    register_consumer_complaint,
-    register_healthcare_complaint,
-    register_free_speech_complaint,
-    register_immigration_complaint,
-    register_family_law_complaint,
-    register_criminal_defense_complaint,
-    register_tax_law_complaint,
-    register_intellectual_property_complaint,
-    register_environmental_law_complaint,
-    register_dei_complaint,
-    get_registered_types
-)
-from .analyzer import ComplaintAnalyzer
-from .seed_generator import SeedGenerator, SeedComplaintTemplate
-from .decision_trees import (
-    DecisionTreeGenerator,
-    DecisionTree,
-    QuestionNode
-)
-from .prompt_templates import (
-    PromptTemplate,
-    PromptLibrary,
-    ReturnFormat
-)
-from .response_parsers import (
-    BaseResponseParser,
-    JSONResponseParser,
-    StructuredTextParser,
-    EntityParser,
-    RelationshipParser,
-    QuestionParser,
-    ClaimParser,
-    StateFileIngester,
-    ResponseParserFactory,
-    ParsedResponse
-)
-from .research_queue_workflow import (
-    build_download_queue,
-    download_queue,
-    filter_download_queue,
-)
-from .research_bootstrap_workflow import (
-    extract_external_document_queue,
-    extract_third_party_candidates_from_corpus,
-    load_manifest_rows,
-    write_candidates_csv,
-)
+from importlib import import_module
 
-# Aliases for backward compatibility
-RiskScorer = ComplaintRiskScorer
-ComplaintLegalPatternExtractor = LegalPatternExtractor  # Backward compatibility alias
+_LAZY_EXPORTS = {
+    'BaseLegalPatternExtractor': ('.base', 'BaseLegalPatternExtractor'),
+    'BaseKeywordRegistry': ('.base', 'BaseKeywordRegistry'),
+    'BaseRiskScorer': ('.base', 'BaseRiskScorer'),
+    'LegalPatternExtractor': ('.legal_patterns', 'LegalPatternExtractor'),
+    'ComplaintLegalPatternExtractor': ('.legal_patterns', 'LegalPatternExtractor'),
+    'KeywordRegistry': ('.keywords', 'KeywordRegistry'),
+    'ComplaintRiskScorer': ('.risk_scoring', 'ComplaintRiskScorer'),
+    'DEIRiskScorer': ('.dei_risk_scoring', 'DEIRiskScorer'),
+    'DEIProvisionExtractor': ('.dei_provision_extractor', 'DEIProvisionExtractor'),
+    'DEIReportGenerator': ('.dei_report_generator', 'DEIReportGenerator'),
+    'RiskScorer': ('.risk_scoring', 'ComplaintRiskScorer'),
+    'HybridDocumentIndexer': ('.indexer', 'HybridDocumentIndexer'),
+    'ComplaintAnalyzer': ('.analyzer', 'ComplaintAnalyzer'),
+    'SeedGenerator': ('.seed_generator', 'SeedGenerator'),
+    'SeedComplaintTemplate': ('.seed_generator', 'SeedComplaintTemplate'),
+    'DecisionTreeGenerator': ('.decision_trees', 'DecisionTreeGenerator'),
+    'DecisionTree': ('.decision_trees', 'DecisionTree'),
+    'QuestionNode': ('.decision_trees', 'QuestionNode'),
+    'PromptTemplate': ('.prompt_templates', 'PromptTemplate'),
+    'PromptLibrary': ('.prompt_templates', 'PromptLibrary'),
+    'ReturnFormat': ('.prompt_templates', 'ReturnFormat'),
+    'BaseResponseParser': ('.response_parsers', 'BaseResponseParser'),
+    'JSONResponseParser': ('.response_parsers', 'JSONResponseParser'),
+    'StructuredTextParser': ('.response_parsers', 'StructuredTextParser'),
+    'EntityParser': ('.response_parsers', 'EntityParser'),
+    'RelationshipParser': ('.response_parsers', 'RelationshipParser'),
+    'QuestionParser': ('.response_parsers', 'QuestionParser'),
+    'ClaimParser': ('.response_parsers', 'ClaimParser'),
+    'StateFileIngester': ('.response_parsers', 'StateFileIngester'),
+    'ResponseParserFactory': ('.response_parsers', 'ResponseParserFactory'),
+    'ParsedResponse': ('.response_parsers', 'ParsedResponse'),
+    'build_download_queue': ('.research_queue_workflow', 'build_download_queue'),
+    'download_queue': ('.research_queue_workflow', 'download_queue'),
+    'filter_download_queue': ('.research_queue_workflow', 'filter_download_queue'),
+    'extract_external_document_queue': ('.research_bootstrap_workflow', 'extract_external_document_queue'),
+    'extract_third_party_candidates_from_corpus': ('.research_bootstrap_workflow', 'extract_third_party_candidates_from_corpus'),
+    'load_manifest_rows': ('.research_bootstrap_workflow', 'load_manifest_rows'),
+    'write_candidates_csv': ('.research_bootstrap_workflow', 'write_candidates_csv'),
+    'get_keywords': ('.keywords', 'get_keywords'),
+    'get_type_specific_keywords': ('.keywords', 'get_type_specific_keywords'),
+    'register_keywords': ('.keywords', 'register_keywords'),
+    'register_legal_terms': ('.legal_patterns', 'register_legal_terms'),
+    'get_legal_terms': ('.legal_patterns', 'get_legal_terms'),
+    'COMPLAINT_KEYWORDS': ('.keywords', 'COMPLAINT_KEYWORDS'),
+    'EVIDENCE_KEYWORDS': ('.keywords', 'EVIDENCE_KEYWORDS'),
+    'LEGAL_AUTHORITY_KEYWORDS': ('.keywords', 'LEGAL_AUTHORITY_KEYWORDS'),
+    'APPLICABILITY_KEYWORDS': ('.keywords', 'APPLICABILITY_KEYWORDS'),
+    'LEGAL_TERMS_REGISTRY': ('.legal_patterns', 'LEGAL_TERMS_REGISTRY'),
+    'COMPLAINT_LEGAL_TERMS': ('.legal_patterns', 'COMPLAINT_LEGAL_TERMS'),
+    'register_housing_complaint': ('.complaint_types', 'register_housing_complaint'),
+    'register_employment_complaint': ('.complaint_types', 'register_employment_complaint'),
+    'register_civil_rights_complaint': ('.complaint_types', 'register_civil_rights_complaint'),
+    'register_consumer_complaint': ('.complaint_types', 'register_consumer_complaint'),
+    'register_healthcare_complaint': ('.complaint_types', 'register_healthcare_complaint'),
+    'register_free_speech_complaint': ('.complaint_types', 'register_free_speech_complaint'),
+    'register_immigration_complaint': ('.complaint_types', 'register_immigration_complaint'),
+    'register_family_law_complaint': ('.complaint_types', 'register_family_law_complaint'),
+    'register_criminal_defense_complaint': ('.complaint_types', 'register_criminal_defense_complaint'),
+    'register_tax_law_complaint': ('.complaint_types', 'register_tax_law_complaint'),
+    'register_intellectual_property_complaint': ('.complaint_types', 'register_intellectual_property_complaint'),
+    'register_environmental_law_complaint': ('.complaint_types', 'register_environmental_law_complaint'),
+    'register_dei_complaint': ('.complaint_types', 'register_dei_complaint'),
+    'get_registered_types': ('.complaint_types', 'get_registered_types'),
+}
 
 __all__ = [
-    # Base classes for extension
     'BaseLegalPatternExtractor',
     'BaseKeywordRegistry',
     'BaseRiskScorer',
-    
-    # Main classes
     'LegalPatternExtractor',
-    'ComplaintLegalPatternExtractor',  # Backward compatibility alias
+    'ComplaintLegalPatternExtractor',
     'KeywordRegistry',
     'ComplaintRiskScorer',
-    'DEIRiskScorer',  # DEI-specific risk scorer
-    'DEIProvisionExtractor',  # DEI provision extractor
-    'DEIReportGenerator',  # DEI report generator
-    'RiskScorer',  # Alias
+    'DEIRiskScorer',
+    'DEIProvisionExtractor',
+    'DEIReportGenerator',
+    'RiskScorer',
     'HybridDocumentIndexer',
     'ComplaintAnalyzer',
-    
-    # Seed generation and decision trees
     'SeedGenerator',
     'SeedComplaintTemplate',
     'DecisionTreeGenerator',
     'DecisionTree',
     'QuestionNode',
-    
-    # Prompt engineering
     'PromptTemplate',
     'PromptLibrary',
     'ReturnFormat',
-    
-    # Response parsing
     'BaseResponseParser',
     'JSONResponseParser',
     'StructuredTextParser',
@@ -153,25 +129,17 @@ __all__ = [
     'extract_third_party_candidates_from_corpus',
     'load_manifest_rows',
     'write_candidates_csv',
-    
-    # Functions
     'get_keywords',
     'get_type_specific_keywords',
     'register_keywords',
     'register_legal_terms',
     'get_legal_terms',
-    
-    # Default keyword sets
     'COMPLAINT_KEYWORDS',
     'EVIDENCE_KEYWORDS',
     'LEGAL_AUTHORITY_KEYWORDS',
     'APPLICABILITY_KEYWORDS',
-    
-    # Registry
     'LEGAL_TERMS_REGISTRY',
     'COMPLAINT_LEGAL_TERMS',
-    
-    # Registration functions
     'register_housing_complaint',
     'register_employment_complaint',
     'register_civil_rights_complaint',
@@ -189,3 +157,18 @@ __all__ = [
 ]
 
 __version__ = '2.0.0'
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attribute_name = _LAZY_EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    module = import_module(module_name, __name__)
+    value = module if attribute_name is None else getattr(module, attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_EXPORTS))

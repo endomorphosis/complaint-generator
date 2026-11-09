@@ -14,7 +14,7 @@ Public entry for new code is [`applications.interface`](interface.py).
 
 `INTERFACE_VERSION` is `1.0.0`. Importing `applications.interface` records owner modules and symbol names. That import does not import the owner modules, start a server, or read a private workspace path.
 
-New code imports `applications.interface` rather than `complaint_workspace`. `applications.complaint_workspace` is not an owner of this interface and is not imported by the facade. The module map lists [`applications/complaint_workspace.py`](complaint_workspace.py) as the largest Python module in the repository and [`applications/dashboard_ui.py`](dashboard_ui.py) among the largest modules. Those files stay implementation modules behind the facade.
+New code imports `applications.interface` rather than `complaint_workspace`. `applications.complaint_workspace` is not an owner of this interface and is not imported by the facade. The module map lists [`applications/complaint_workspace.py`](complaint_workspace.py) as the largest Python module in the repository. Dashboard hub rendering lives in [`applications/dashboard_hub.py`](dashboard_hub.py). [`applications/dashboard_ui.py`](dashboard_ui.py) still defines `create_dashboard_ui_router`. Those files stay implementation modules behind the facade.
 
 ## Owner modules
 

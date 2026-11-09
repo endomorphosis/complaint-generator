@@ -30,5 +30,14 @@ Each row is a sibling module extracted by the repository consolidation and the o
 | `mediator/claim_support_review_followups.py` | `mediator/claim_support_review.py` |
 | `mediator/hook_runtime_dispatch.py` | `mediator/hook_runtime.py` |
 | `mediator/legal_authority_storage.py` | `mediator/legal_authority_hooks.py` |
+| `complaint_phases/dependency_graph_readiness.py` | `complaint_phases/dependency_graph.py` |
+| `adversarial_harness/session_intake.py` | `adversarial_harness/session.py` |
+| `mediator/evidence_record_store.py` | `mediator/evidence_hooks.py` |
+| `mediator/formal_document_render.py` | `mediator/formal_document.py` |
+| `mediator/workflow_action_steps.py` | `mediator/workflow_service.py` |
+| `integrations/ipfs_datasets/graph_queries.py` | `integrations/ipfs_datasets/graphs.py` |
+| `applications/complaint_workspace_handlers.py` | `applications/complaint_workspace.py` |
+| `mediator/mediator_gap_packets.py` | `mediator/mediator.py` |
+| `complaint_phases/document_pipeline_legacy.py` | `complaint_phases/document_pipeline.py` |
 
 Session reports live in `docs/archive/sessions`. Plans and profiles live in `docs/archive/reports`.
