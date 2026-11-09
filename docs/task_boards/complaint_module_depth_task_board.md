@@ -6,7 +6,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 
 ## CIMP-DEP-01 Delegate workspace research and interview helpers to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -45,7 +45,7 @@ Implementation instructions:
 
 ## CIMP-DEP-02 Delegate mediator follow-up execution to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -85,7 +85,7 @@ Implementation instructions:
 
 ## CIMP-DEP-03 Delegate formal-document rendering to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -124,7 +124,7 @@ Implementation instructions:
 
 ## CIMP-DEP-04 Delegate claim-support recommendation builders to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -163,7 +163,7 @@ Implementation instructions:
 
 ## CIMP-DEP-05 Delegate denoiser binding and review-question helpers to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -202,7 +202,7 @@ Implementation instructions:
 
 ## CIMP-DEP-06 Move dashboard hub rendering out of dashboard_ui.py
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
@@ -241,7 +241,7 @@ Implementation instructions:
 
 ## CIMP-DEP-07 Delegate optimizer fallback construction to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -280,7 +280,7 @@ Implementation instructions:
 
 ## CIMP-DEP-08 Delegate knowledge-graph extraction to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -319,7 +319,7 @@ Implementation instructions:
 
 ## CIMP-DEP-09 Delegate intake open-item builders to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -358,7 +358,7 @@ Implementation instructions:
 
 ## CIMP-DEP-10 Delegate document-optimization support context to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -397,7 +397,7 @@ Implementation instructions:
 
 ## CIMP-DEP-11 Delegate claim-support follow-up summaries to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -436,7 +436,7 @@ Implementation instructions:
 
 ## CIMP-DEP-12 Delegate hook-runtime effect dispatch to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -475,7 +475,7 @@ Implementation instructions:
 
 ## CIMP-DEP-13 Delegate legal-authority storage setup to a sibling module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -514,7 +514,7 @@ Implementation instructions:
 
 ## CIMP-DEP-14 Add a versioned interface for the adversarial harness
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -554,7 +554,7 @@ Implementation instructions:
 
 ## CIMP-DEP-15 Add a versioned interface for complaint analysis
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -594,7 +594,7 @@ Implementation instructions:
 
 ## CIMP-DEP-16 Add a versioned interface for router backends
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -634,7 +634,7 @@ Implementation instructions:
 
 ## CIMP-DEP-17 Add a package interface over the three integration facades
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -672,7 +672,7 @@ Implementation instructions:
 
 ## CIMP-DEP-18 Retarget the sixteen current docs whose relative links do not resolve
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
@@ -710,7 +710,7 @@ Implementation instructions:
 
 ## CIMP-DEP-19 Name the new sibling modules in the consolidation map and root docs
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
@@ -747,7 +747,7 @@ Implementation instructions:
 
 ## CIMP-DEP-20 Enforce the module-depth ratchet independently of earlier helpers
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
