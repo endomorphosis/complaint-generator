@@ -1,18 +1,23 @@
 """Integration primitives for ipfs_datasets_py enhancements."""
 
-from .adapter import IPFSDatasetsAdapter, detect_ipfs_datasets_capabilities
-from .contracts import (
-    CapabilityCatalog,
-    CapabilityStatus,
-    NormalizedRetrievalBundle,
-    NormalizedRetrievalRecord,
-)
-from .settings import IntegrationFeatureFlags
-from .retrieval_orchestrator import RetrievalOrchestrator
-from .provenance import ProvenanceRecord, build_provenance_record
-from .caching import TTLCache
-from .vector_tools import VectorRetrievalAugmentor
-from .graph_tools import GraphRetrievalAugmentor, GraphAwareRetrievalReranker
+from importlib import import_module
+
+_LAZY_EXPORTS = {
+    "IPFSDatasetsAdapter": (".adapter", "IPFSDatasetsAdapter"),
+    "detect_ipfs_datasets_capabilities": (".adapter", "detect_ipfs_datasets_capabilities"),
+    "CapabilityCatalog": (".contracts", "CapabilityCatalog"),
+    "CapabilityStatus": (".contracts", "CapabilityStatus"),
+    "NormalizedRetrievalBundle": (".contracts", "NormalizedRetrievalBundle"),
+    "NormalizedRetrievalRecord": (".contracts", "NormalizedRetrievalRecord"),
+    "IntegrationFeatureFlags": (".settings", "IntegrationFeatureFlags"),
+    "RetrievalOrchestrator": (".retrieval_orchestrator", "RetrievalOrchestrator"),
+    "ProvenanceRecord": (".provenance", "ProvenanceRecord"),
+    "build_provenance_record": (".provenance", "build_provenance_record"),
+    "TTLCache": (".caching", "TTLCache"),
+    "VectorRetrievalAugmentor": (".vector_tools", "VectorRetrievalAugmentor"),
+    "GraphRetrievalAugmentor": (".graph_tools", "GraphRetrievalAugmentor"),
+    "GraphAwareRetrievalReranker": (".graph_tools", "GraphAwareRetrievalReranker"),
+}
 
 __all__ = [
     "IPFSDatasetsAdapter",
@@ -30,3 +35,18 @@ __all__ = [
     "GraphRetrievalAugmentor",
     "GraphAwareRetrievalReranker",
 ]
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attribute_name = _LAZY_EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    module = import_module(module_name, __name__)
+    value = getattr(module, attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_EXPORTS))
