@@ -606,7 +606,7 @@ Implementation instructions:
 
 ## CIMP-SEA-19 Record the seam siblings and refresh the architecture sizes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
