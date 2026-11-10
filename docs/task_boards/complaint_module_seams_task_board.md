@@ -320,7 +320,7 @@ Implementation instructions:
 
 ## CIMP-SEA-10 Move bounded corpus lookup out of the datasets legal module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
