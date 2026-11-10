@@ -30,7 +30,7 @@ A current package is a top-level directory that contains `__init__.py`, as recor
 
 ## Where the consolidated code lives
 
-Session reports live in [`docs/archive/sessions`](docs/archive/sessions/INDEX.md). Plans and profiles live in [`docs/archive/reports`](docs/archive/reports/INDEX.md). The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. The sibling map is [`docs/architecture/consolidation_modules.md`](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [`docs/architecture/module_boundaries.md`](docs/architecture/module_boundaries.md).
+Session reports live in [`docs/archive/sessions`](docs/archive/sessions/INDEX.md). Plans and profiles live in [`docs/archive/reports`](docs/archive/reports/INDEX.md). The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. The sibling map is [`docs/architecture/consolidation_modules.md`](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [`docs/architecture/module_boundaries.md`](docs/architecture/module_boundaries.md). Seam siblings are recorded in [`docs/architecture/module_seams.md`](docs/architecture/module_seams.md).
 
 ## Layout
 
