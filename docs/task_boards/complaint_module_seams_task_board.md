@@ -181,7 +181,7 @@ Implementation instructions:
 
 ## CIMP-SEA-06 Move the UI feedback loop out of Optimizer
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
