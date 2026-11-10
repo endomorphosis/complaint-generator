@@ -448,6 +448,8 @@ def test_stale_revision_reaches_same_transition_from_every_entrypoint(tmp_path, 
             router = create_complaint_workspace_router(value)
             endpoint = next(route.endpoint for route in router.routes if route.path == "/api/complaint-workspace/intake-chat")
             response = asyncio.run(endpoint(IntakeChatTurnRequest(**args)))
+            if not isinstance(response, dict):
+                response = json.loads(response.body)
     assert response["interview"]["status"] == "refused"
     assert response["interview"]["error"]["code"] == "stale_question"
     assert response["interview"]["session_revision"] == current["session_revision"]

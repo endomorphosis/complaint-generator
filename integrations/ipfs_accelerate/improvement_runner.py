@@ -4773,6 +4773,40 @@ def _impacted_behavioral_checks(root, changed_paths):
     return sorted(selected)
 
 
+def _impacted_companion_opt_in_flags(root, impacted, command):
+    """Execute companions the repository skips unless a declared flag opts in.
+
+    The impact set is required evidence. A default skip is not that evidence,
+    and it is not a candidate failure. Flags already present on the declared
+    command stay as written.
+    """
+    from importlib.util import module_from_spec, spec_from_file_location
+    import shlex
+
+    files = [Path(root) / selector.partition("::")[0] for selector in impacted]
+    files = [path for path in files if path.is_file()]
+    conftest = Path(root) / "tests" / "conftest.py"
+    if not files or not conftest.is_file():
+        return []
+    spec = spec_from_file_location("_complaint_companion_conftest", conftest)
+    if spec is None or spec.loader is None:
+        return []
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    classify = getattr(module, "_classify_test_file", None)
+    if not callable(classify):
+        return []
+    needed = [False, False, False]
+    for path in files:
+        flags = classify(str(path))
+        if not isinstance(flags, tuple) or len(flags) != 3 or any(type(flag) is not bool for flag in flags):
+            continue
+        needed = [left or right for left, right in zip(needed, flags)]
+    present = set(shlex.split(command))
+    return [flag for flag, required in zip(("--run-llm", "--run-network", "--run-heavy"), needed)
+            if required and flag not in present]
+
+
 def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, Any], command: str, *,
                                runner, environment: dict, timeout_seconds: float = TIMEOUT_SECONDS,
                                context: Mapping[str, Any] | None = None, declared_command: str | None = None,
@@ -4891,6 +4925,7 @@ def measure_behavioral_command(root: Path, state_dir: Path, task: Mapping[str, A
         declared_tokens = shlex.split(command)
         options += [p for p in impacted if p not in declared_tokens
                     and p.partition("::")[0] not in declared_tokens]
+        options += _impacted_companion_opt_in_flags(root, impacted, command)
         instrumented = _pytest_instrument(command, options, pythonpath=bootstrap_roots)
         export = "export IPFS_ACCELERATE_PYTEST_SEAL_DUCKDB=" + shlex.quote(str(catalog))
         # Never depend on ambient pytest injection or a shared/reused catalog.

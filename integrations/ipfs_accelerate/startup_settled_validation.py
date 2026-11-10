@@ -74,9 +74,18 @@ def _proof(supervisor, daemon, item):
     _need(not any(r['sequence'] > start['sequence'] and r.get('branch') == branch
         and r.get('type') in {'merge_candidate_enqueued', 'merge_finished'} for r in rows))
     reports, report_digest = _journal(Path(config.events_path))
-    prior = [(r, entry) for r in reports if r.get('type') == 'worktree_reconciliation'
-        for entry in r.get('processed', []) if entry.get('branch') == branch and entry.get('head') == head
-        and entry.get('recovery_key') == key and _scope(entry.get('recovery_result', {})) == _scope(end)]
+    # A later startup pass records the same candidate with no recovery receipt.
+    # That observation must not erase the earlier failed-validation proof.
+    prior = []
+    for report in reports:
+        if report.get('type') != 'worktree_reconciliation':
+            continue
+        for entry in report.get('processed', []):
+            recovery = entry.get('recovery_result')
+            if (entry.get('branch') == branch and entry.get('head') == head
+                    and entry.get('recovery_key') == key and isinstance(recovery, Mapping)
+                    and _scope(recovery) == _scope(end)):
+                prior.append((report, entry))
     _need(bool(prior))
     report, entry = prior[-1]
     failed = entry['recovery_result']

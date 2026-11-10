@@ -158,6 +158,17 @@ def test_pending_native_merge_remains_blocking(pending_world):
         assert d.merge_queue.cancel(pending, reason='Synthetic refusal fixture cleanup') is not None
 
 
+def test_second_startup_keeps_the_failed_candidate_nonblocking(failed_world):
+    w = failed_world
+    s = w['supervisor']
+    for _ in range(2):
+        s._complaint_startup_preflight_pending = True
+        s._complaint_startup_reconciliation_context = None
+        result = s.run_once(include_refill=False)
+        assert result.get('maintenance_blocked') is not True
+        assert s._complaint_startup_preflight_pending is False
+
+
 def test_public_startup_continues_and_native_selects_independent_task(failed_world):
     w = failed_world
     s, d = w['supervisor'], w['daemon']

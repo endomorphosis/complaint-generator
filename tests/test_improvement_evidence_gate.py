@@ -855,6 +855,23 @@ def test_private_aliases_and_symlinked_source_parents_are_refused_before_body_re
     assert called == []
 
 
+def test_impacted_companion_opt_in_follows_repository_file_gates(tmp_path):
+    from integrations.ipfs_accelerate.improvement_runner import _impacted_companion_opt_in_flags
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "conftest.py").write_text(
+        "def _classify_test_file(path):\n"
+        "    text = open(path, encoding='utf-8').read()\n"
+        "    return ('llm-word' in text, 'net-word' in text, 'heavy-word' in text)\n"
+    )
+    companion = tests / "test_companion.py"
+    companion.write_text("VALUE = 'net-word heavy-word'\n")
+    command = "python -m pytest -q tests/test_task.py"
+    assert _impacted_companion_opt_in_flags(tmp_path, ["tests/test_companion.py"], command) == ["--run-network", "--run-heavy"]
+    assert _impacted_companion_opt_in_flags(tmp_path, ["tests/test_companion.py"], command + " --run-network") == ["--run-heavy"]
+    assert _impacted_companion_opt_in_flags(tmp_path, [], command) == []
+
+
 def test_impacted_checks_use_actual_reused_adapter_paths():
     from integrations.ipfs_accelerate.improvement_runner import _impacted_behavioral_checks
     root = Path(__file__).resolve().parents[1]
