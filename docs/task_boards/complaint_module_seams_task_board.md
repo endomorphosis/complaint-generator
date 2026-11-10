@@ -456,7 +456,7 @@ Implementation instructions:
 
 ## CIMP-SEA-14 Load the accelerate facade on attribute access
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
