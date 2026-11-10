@@ -286,7 +286,7 @@ Implementation instructions:
 
 ## CIMP-SEA-09 Move canonical legal IR compilation out of the datasets logic module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
