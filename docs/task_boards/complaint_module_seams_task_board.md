@@ -111,7 +111,7 @@ Implementation instructions:
 
 ## CIMP-SEA-04 Move testimony persistence out of ClaimSupportHook
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
