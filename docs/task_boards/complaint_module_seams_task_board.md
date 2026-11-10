@@ -251,7 +251,7 @@ Implementation instructions:
 
 ## CIMP-SEA-08 Move document-generation fallback out of AdversarialSession
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
