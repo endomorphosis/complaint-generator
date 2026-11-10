@@ -216,7 +216,7 @@ Implementation instructions:
 
 ## CIMP-SEA-07 Move the scraper queue out of EvidenceStateHook
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
