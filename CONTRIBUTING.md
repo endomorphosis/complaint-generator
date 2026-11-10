@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to the complaint generator! This guide will help you get started.
 
-The Git remote is `endomorphosis/complaint-generator`. Session reports live in `docs/archive/sessions`. Plans and profiles live in `docs/archive/reports`. The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. Keep `INTERFACE_SCHEMA` at `complaint-generator/module-interface@1` and `INTERFACE_VERSION` at `1.0.0`. See [docs/architecture/consolidation_modules.md](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [docs/architecture/module_boundaries.md](docs/architecture/module_boundaries.md).
+The Git remote is `endomorphosis/complaint-generator`. Session reports live in `docs/archive/sessions`. Plans and profiles live in `docs/archive/reports`. The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. Keep `INTERFACE_SCHEMA` at `complaint-generator/module-interface@1` and `INTERFACE_VERSION` at `1.0.0`. See [docs/architecture/consolidation_modules.md](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [docs/architecture/module_boundaries.md](docs/architecture/module_boundaries.md). Seam siblings are recorded in [docs/architecture/module_seams.md](docs/architecture/module_seams.md).
 
 ## Table of Contents
 
