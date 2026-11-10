@@ -576,7 +576,7 @@ Implementation instructions:
 
 ## CIMP-SEA-18 Load mediator integration adapters on attribute access
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
