@@ -354,7 +354,7 @@ Implementation instructions:
 
 ## CIMP-SEA-11 Move remote hook dispatch out of hook runtime
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
