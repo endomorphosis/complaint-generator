@@ -41,7 +41,7 @@ Implementation instructions:
 
 ## CIMP-SEA-02 Move follow-up query builders out of Mediator
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
