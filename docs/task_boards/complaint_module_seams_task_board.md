@@ -388,7 +388,7 @@ Implementation instructions:
 
 ## CIMP-SEA-12 Move chronology helpers out of the formal document module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
