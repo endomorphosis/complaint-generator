@@ -1,0 +1,2127 @@
+{
+  "abstraction_ids": [],
+  "actors": [
+    {
+      "actor_id": "actor.complaint_improvement",
+      "authority_ids": [],
+      "capabilities": [
+        "behavioral_validation",
+        "implementation"
+      ],
+      "contract_version": 1,
+      "kind": "agent",
+      "metadata": {
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        }
+      },
+      "principal_id": "complaint-generator",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-actor@1"
+    }
+  ],
+  "contract_version": 1,
+  "effects": [],
+  "events": [],
+  "evidence_requirements": [
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_01.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named ComplaintWorkspaceService methods are one-line calls into complaint_workspace_mike, and the sentinels still have their bodies.",
+          "applications/complaint_workspace.py has at most 16750 lines and applications/complaint_workspace_mike.py has at least 450 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_01.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-01",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-01",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_02.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named Mediator methods are one-line calls into mediator_follow_up_queries, and the sentinels still have their bodies.",
+          "mediator/mediator.py has at most 11550 lines and mediator/mediator_follow_up_queries.py has at least 320 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_02.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-02",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-02",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_03.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named FormalComplaintDocumentBuilder methods are one-line calls into document_pipeline_email, and the sentinels still have their bodies.",
+          "complaint_phases/document_pipeline.py has at most 9050 lines and complaint_phases/document_pipeline_email.py has at least 300 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_03.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-03",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-03",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_04.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named ClaimSupportHook methods are one-line calls into claim_support_testimony, and the sentinels still have their bodies.",
+          "mediator/claim_support_hooks.py has at most 8900 lines and mediator/claim_support_testimony.py has at least 400 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_04.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-04",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-04",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_05.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named ComplaintDenoiser methods are one-line calls into denoiser_question_disposition, and the sentinels still have their bodies.",
+          "complaint_phases/denoiser.py has at most 7450 lines and complaint_phases/denoiser_question_disposition.py has at least 320 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_05.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-05",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-05",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_06.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named Optimizer methods are one-line calls into optimizer_ui_feedback, and the sentinels still have their bodies.",
+          "adversarial_harness/optimizer.py has at most 5850 lines and adversarial_harness/optimizer_ui_feedback.py has at least 700 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_06.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-06",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-06",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_07.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named EvidenceStateHook methods are one-line calls into evidence_scraper_queue, and the sentinels still have their bodies.",
+          "mediator/evidence_hooks.py has at most 3400 lines and mediator/evidence_scraper_queue.py has at least 280 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_07.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-07",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-07",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_08.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named AdversarialSession methods are one-line calls into session_document_fallback, and the sentinels still have their bodies.",
+          "adversarial_harness/session.py has at most 3450 lines and adversarial_harness/session_document_fallback.py has at least 320 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_08.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-08",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-08",
+        "SEA-product",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_09.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in canonical_legal_ir and re-exported by the owner.",
+          "integrations/ipfs_datasets/logic.py has at most 8850 lines and integrations/ipfs_datasets/canonical_legal_ir.py has at least 800 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_09.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-09",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-09",
+        "SEA-adapters",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_10.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in legal_corpus and re-exported by the owner.",
+          "integrations/ipfs_datasets/legal.py has at most 5100 lines and integrations/ipfs_datasets/legal_corpus.py has at least 800 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_10.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-10",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-10",
+        "SEA-adapters",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_11.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in hook_runtime_remote and re-exported by the owner.",
+          "mediator/hook_runtime.py has at most 4000 lines and mediator/hook_runtime_remote.py has at least 450 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_11.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-11",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-11",
+        "SEA-adapters",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_12.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in formal_document_chronology and re-exported by the owner.",
+          "mediator/formal_document.py has at most 2200 lines and mediator/formal_document_chronology.py has at least 280 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_12.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-12",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-12",
+        "SEA-adapters",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_13.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in private_workspace_transfer and re-exported by the owner.",
+          "integrations/private_storage.py has at most 9200 lines and integrations/private_workspace_transfer.py has at least 400 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_13.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-13",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-13",
+        "SEA-adapters",
+        "SEA-seams"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_14.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "Importing integrations/ipfs_accelerate/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_14.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-14",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-14",
+        "SEA-facade",
+        "SEA-inits"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_15.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "Importing integrations/mike/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_15.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-15",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-15",
+        "SEA-facade",
+        "SEA-inits"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_16.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "Importing lib/formal_logic/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_16.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-16",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-16",
+        "SEA-facade",
+        "SEA-inits"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_17.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "Importing lib/document_render/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_17.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-17",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-17",
+        "SEA-facade",
+        "SEA-inits"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_18.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "Importing mediator/integrations/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_18.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-18",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-18",
+        "SEA-facade",
+        "SEA-inits"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_19.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "module_seams.md lists the thirteen new sibling rows, the old consolidation table is unchanged, and the architecture size column matches splitlines().",
+          "The four root docs link to the seam document and still link to the existing architecture documents."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_19.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-19",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-19",
+        "SEA-docs",
+        "SEA-record"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_sea_20.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The module map matches the tree, the thirteen new floors hold, and the five package imports still leave their owners unloaded.",
+          "The seam table, the old sibling table, the root links, and the interface schema assignments still match the source."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_20.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-SEA-20",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-SEA-20",
+        "SEA-closure",
+        "SEA-ratchet"
+      ]
+    }
+  ],
+  "fluents": [],
+  "formulas": [
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "SEA-inits",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "SEA-record",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "SEA-product",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "SEA-facade",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "SEA-closure",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "SEA-seams",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "SEA-docs",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "SEA-adapters",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "SEA-ratchet",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    }
+  ],
+  "goals": [
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-20"
+      ],
+      "goal_id": "SEA-closure",
+      "metadata": {
+        "title": "Lock the seams with an independent ratchet"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeeravklyvw42l3il2azl6xhrkzhziyu3vqbeh5xcffmhi4h2lfixl5ra",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_module_seams_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-19"
+      ],
+      "goal_id": "SEA-docs",
+      "metadata": {
+        "title": "Make the documentation match the seams that moved"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeerawclwmwo43jbsuyr2hh6ucocj4whgpkc3joejm3wbfp2e77lnv4hq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_module_seams_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-14",
+        "test.CIMP-SEA-15",
+        "test.CIMP-SEA-16",
+        "test.CIMP-SEA-17",
+        "test.CIMP-SEA-18"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "title": "Stop the remaining package imports from executing their owners"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeerapfbsq7awfmack4hr7vkbxljxfszq7qk5s3nwqjw2ybhl7pvgwyxq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_module_seams_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-01",
+        "test.CIMP-SEA-02",
+        "test.CIMP-SEA-03",
+        "test.CIMP-SEA-04",
+        "test.CIMP-SEA-05",
+        "test.CIMP-SEA-06",
+        "test.CIMP-SEA-07",
+        "test.CIMP-SEA-08",
+        "test.CIMP-SEA-09",
+        "test.CIMP-SEA-10",
+        "test.CIMP-SEA-11",
+        "test.CIMP-SEA-12",
+        "test.CIMP-SEA-13"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "title": "Move the remaining cohesive bodies into sibling modules"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeeraw6pzhaf322yp663qep5mi7yha3c4cxsu3edupmhcti2zidksne3q",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_module_seams_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    }
+  ],
+  "metadata": {
+    "evidence_policy": "Ingestion and bounded consistency are not execution or task completion.",
+    "execution_policy": {
+      "automatic_fallback": false,
+      "context_exclude": [
+        ".complaint_workspace/**",
+        ".complaint_workspace*/**",
+        "data/**",
+        "output/**",
+        "statefiles/**",
+        "exports/**",
+        "secrets/**",
+        "evidence/**",
+        "uploads/**",
+        "attachments/**",
+        ".env*",
+        "*.key",
+        "*.pem",
+        "workspace/**",
+        "artifacts/**",
+        "external/**"
+      ],
+      "deployment": false,
+      "development_inputs": "Local baseline 70fd55eb9 on codex/module-seams-20261110. origin/main is 141e063b2 and does not contain the module-depth or module-boundaries moves. Do not rebase onto origin/main and do not push.",
+      "implementation_provider_scope": "Authorized Grok 4.7 development implementation via llm_router. Offline tests do not disable that provider process. Development permission is not consent to case-data egress.",
+      "implementation_timeout_seconds": 900,
+      "initial_lanes": 4,
+      "initial_ready_task": "CIMP-SEA-01",
+      "live_exceptions": [],
+      "manual_holds_respected": true,
+      "max_agent_turns": 64,
+      "max_task_attempts": 3,
+      "merge_target": "codex/module-seams-20261110",
+      "native_task_source_profile": "explicit legacy-markdown projection of the Native FormalWorkPlan",
+      "offline_default": true,
+      "parallelism": "CIMP-SEA-01 through CIMP-SEA-18 edit disjoint files and have no dependencies. CIMP-SEA-19 waits for the thirteen extractions. CIMP-SEA-20 waits for the lazy imports and the seam document.",
+      "product_inference": "This plan does not change case inference, consent, or legal conclusions.",
+      "protected_state": "The completed intake, mediator-grounding, GUI collaboration, GUI UX, repository-reorganization, repository-consolidation, module-depth, and module-boundaries campaigns, both retained quarantines, submodule pins, and unrelated campaign processes stay untouched. completion_authority stays false.",
+      "provider_role": "grok-only",
+      "qualification_scope": "One focused pytest command per task. Do not run the full historical suite inside the 900-second task budget.",
+      "remote_push": false,
+      "required_evidence": [
+        "A focused pytest module with positive checks and zero skips",
+        "Extracted symbols defined in the sibling and no longer implemented in the owner",
+        "Package imports that do not execute the named owner modules",
+        "A seam table and an architecture size column that match the source"
+      ],
+      "stop_semantics": "A test that passes while the named body still lives in the owner, or while a package import still executes an owner, is a failed task. Do not mark a task complete by hand.",
+      "upstream_checkout_policy": "Use the pinned external checkouts. Do not float pins, recursively initialize submodules, or clone CommonCrawl.",
+      "validation_timeout_seconds": 900,
+      "worktree_pool_max_entries": 4
+    },
+    "provider": {
+      "allow_fallback": false,
+      "model": "grok-4.7",
+      "provider": "grok_cli",
+      "router": "ipfs_accelerate_py.llm_router"
+    },
+    "spec_sha256": "0a4388d87d853cc6f513dad7af513526985fa73a3fc01842e7758b8bafdb7057",
+    "title": "Split the remaining owner seams and record their current sizes"
+  },
+  "norms": [],
+  "plan_id": "baguqeeraygfeytf4t5mfd7ukyvoyoflxwvjxnretc7jwpl5pm4abo53mnena",
+  "preconditions": [],
+  "repository_tree_id": "",
+  "schema": "ipfs_accelerate_py/agent-supervisor/formal-work-plan@1",
+  "source_ids": [
+    "complaint-generator",
+    "docs/task_boards/complaint_module_seams_spec.json"
+  ],
+  "subgoals": [
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-09",
+        "test.CIMP-SEA-10",
+        "test.CIMP-SEA-11",
+        "test.CIMP-SEA-12",
+        "test.CIMP-SEA-13"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "title": "Extract the adapter, dispatch, chronology, and workspace-transfer seams"
+      },
+      "parent_id": "SEA-seams",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeraxmpjaxwa3rq5hff5pc7ajxqpm7vvikdulbehaxoihdpenuy33rca",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "SEA-adapters"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-14",
+        "test.CIMP-SEA-15",
+        "test.CIMP-SEA-16",
+        "test.CIMP-SEA-17",
+        "test.CIMP-SEA-18"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "title": "Load the five remaining facades on attribute access"
+      },
+      "parent_id": "SEA-facade",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeramkabh5duurhmq6bxseloaadvlatxfgny5ikqzkk4pdbrymvysbiq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "SEA-inits"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-01",
+        "test.CIMP-SEA-02",
+        "test.CIMP-SEA-03",
+        "test.CIMP-SEA-04",
+        "test.CIMP-SEA-05",
+        "test.CIMP-SEA-06",
+        "test.CIMP-SEA-07",
+        "test.CIMP-SEA-08"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "title": "Extract the next product-owner seams without touching finished siblings"
+      },
+      "parent_id": "SEA-seams",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeranekooeum5qfadurjufbepegopylcyk4a46dld4qvc62psdagdzfq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "SEA-product"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-20"
+      ],
+      "goal_id": "SEA-closure",
+      "metadata": {
+        "title": "Fail the campaign if an owner body, an eager import, or a stale size returns"
+      },
+      "parent_id": "SEA-closure",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeerazurxwqeftsyexhinf4g3du7ixzs3klvs7jh4gkii7zu75cqiwqya",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "SEA-ratchet"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-19"
+      ],
+      "goal_id": "SEA-docs",
+      "metadata": {
+        "title": "Record the new siblings and refresh the architecture sizes"
+      },
+      "parent_id": "SEA-docs",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeramzjubgxhetrwjwkkfzyw33dduzncly3xvics6rc5cc5qtm6ac5ja",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "SEA-record"
+    }
+  ],
+  "tasks": [
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-01"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named ComplaintWorkspaceService methods are one-line calls into complaint_workspace_mike, and the sentinels still have their bodies.",
+          "applications/complaint_workspace.py has at most 16750 lines and applications/complaint_workspace_mike.py has at least 450 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only applications/complaint_workspace.py, applications/complaint_workspace_mike.py, and tests/test_cimp_sea_01.py.\nMove these methods of ComplaintWorkspaceService into complaint_workspace_mike: get_mike_integration_status, _build_mike_submodule_inventory, _build_mike_logic_review, _build_mike_sync_diagnostics, _check_mike_citation_links, _normalize_mike_sync_provenance, _build_mike_reasoning_predicates, _summarize_mike_evidence_context.\nLeave these methods implemented on ComplaintWorkspaceService: improve_draft. Do not edit complaint_workspace_drafting.py, complaint_workspace_research.py, or complaint_workspace_handlers.py. Do not move improve_draft, sync_mike_final_draft, build_mike_handoff, _dispatch_mcp_tool, run_intake_chat_turn, apply_terminal_graph_edit, commit_factual_graph_revision, or resume_encrypted_interview. Some moved methods are classmethods and some are staticmethods; keep the decorator that is already on the owner.\nEach moved owner method is exactly one Return of a Call to complaint_workspace_mike.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import complaint_workspace_mike` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 16750 lines and the sibling has at least 450 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "applications/complaint_workspace.py",
+          "applications/complaint_workspace_mike.py",
+          "tests/test_cimp_sea_01.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "applications/complaint_workspace.py",
+          "applications/complaint_workspace_mike.py",
+          "tests/test_cimp_sea_01.py"
+        ],
+        "title": "Move the Mike handoff helpers out of the complaint workspace",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_01.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-01",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-02"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named Mediator methods are one-line calls into mediator_follow_up_queries, and the sentinels still have their bodies.",
+          "mediator/mediator.py has at most 11550 lines and mediator/mediator_follow_up_queries.py has at least 320 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/mediator.py, mediator/mediator_follow_up_queries.py, and tests/test_cimp_sea_02.py.\nMove these methods of Mediator into mediator_follow_up_queries: _build_follow_up_queries, _build_follow_up_record_metadata, _build_follow_up_source_preferences, _refresh_follow_up_task_queries, _build_follow_up_time_window, _should_suppress_follow_up_task.\nLeave these methods implemented on Mediator: research_case_automatically, get_claim_follow_up_plan. Do not edit claim_follow_up_flow.py, intake_question_flow.py, or mediator_gap_packets.py. Do not move execute_claim_follow_up_plan, _build_follow_up_task, or build_inquiry_gap_context. Preserve the owner's indentation.\nEach moved owner method is exactly one Return of a Call to mediator_follow_up_queries.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import mediator_follow_up_queries` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 11550 lines and the sibling has at least 320 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/mediator.py",
+          "mediator/mediator_follow_up_queries.py",
+          "tests/test_cimp_sea_02.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/mediator.py",
+          "mediator/mediator_follow_up_queries.py",
+          "tests/test_cimp_sea_02.py"
+        ],
+        "title": "Move follow-up query builders out of Mediator",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_02.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-02",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-03"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named FormalComplaintDocumentBuilder methods are one-line calls into document_pipeline_email, and the sentinels still have their bodies.",
+          "complaint_phases/document_pipeline.py has at most 9050 lines and complaint_phases/document_pipeline_email.py has at least 300 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_phases/document_pipeline.py, complaint_phases/document_pipeline_email.py, and tests/test_cimp_sea_03.py.\nMove these methods of FormalComplaintDocumentBuilder into document_pipeline_email: _enrich_draft_with_email_timeline_handoff, _build_email_timeline_narrative_text, _build_email_timeline_fact_entries, _build_email_timeline_issue_allegations, _build_email_timeline_narrative_fact_entries, _build_email_timeline_chronology_lines, _specialize_generic_claims_from_email_support, _resolve_email_timeline_handoff.\nLeave these methods implemented on FormalComplaintDocumentBuilder: build_package. Do not edit document_pipeline_render.py, document_pipeline_guidance.py, document_pipeline_readiness.py, document_pipeline_legacy.py, or the root document_pipeline.py shim.\nEach moved owner method is exactly one Return of a Call to document_pipeline_email.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import document_pipeline_email` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 9050 lines and the sibling has at least 300 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_phases/document_pipeline.py",
+          "complaint_phases/document_pipeline_email.py",
+          "tests/test_cimp_sea_03.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "complaint_phases/document_pipeline.py",
+          "complaint_phases/document_pipeline_email.py",
+          "tests/test_cimp_sea_03.py"
+        ],
+        "title": "Move email-timeline builders out of the document pipeline",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_03.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-03",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-04"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named ClaimSupportHook methods are one-line calls into claim_support_testimony, and the sentinels still have their bodies.",
+          "mediator/claim_support_hooks.py has at most 8900 lines and mediator/claim_support_testimony.py has at least 400 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/claim_support_hooks.py, mediator/claim_support_testimony.py, and tests/test_cimp_sea_04.py.\nMove these methods of ClaimSupportHook into claim_support_testimony: save_testimony_record, backfill_claim_testimony_links, get_claim_testimony_records, _build_testimony_support_link, _resolve_testimony_claim_element, _summarize_testimony_records, _build_testimony_fact_text.\nLeave these methods implemented on ClaimSupportHook: upsert_support_link. Do not edit claim_support_recommendations.py, claim_support_diagnostics.py, claim_support_review_sections.py, or claim_support_review_followups.py.\nEach moved owner method is exactly one Return of a Call to claim_support_testimony.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import claim_support_testimony` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 8900 lines and the sibling has at least 400 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/claim_support_hooks.py",
+          "mediator/claim_support_testimony.py",
+          "tests/test_cimp_sea_04.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/claim_support_hooks.py",
+          "mediator/claim_support_testimony.py",
+          "tests/test_cimp_sea_04.py"
+        ],
+        "title": "Move testimony persistence out of ClaimSupportHook",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_04.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-04",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-05"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named ComplaintDenoiser methods are one-line calls into denoiser_question_disposition, and the sentinels still have their bodies.",
+          "complaint_phases/denoiser.py has at most 7450 lines and complaint_phases/denoiser_question_disposition.py has at least 320 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_phases/denoiser.py, complaint_phases/denoiser_question_disposition.py, and tests/test_cimp_sea_05.py.\nMove these methods of ComplaintDenoiser into denoiser_question_disposition: record_question_disposition, reopen_disposed_question, load_question_dispositions, is_question_target_closed, _phase1_question_targeting, _phase1_question_metadata, generate_questions.\nLeave these methods implemented on ComplaintDenoiser: process_answer, select_question_candidates. Do not edit denoiser_questions.py or denoiser_bindings.py. Do not move collect_question_candidates, generate_evidence_questions, evaluate_interview_stop, or _build_history_follow_up_questions.\nEach moved owner method is exactly one Return of a Call to denoiser_question_disposition.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import denoiser_question_disposition` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 7450 lines and the sibling has at least 320 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_question_disposition.py",
+          "tests/test_cimp_sea_05.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_question_disposition.py",
+          "tests/test_cimp_sea_05.py"
+        ],
+        "title": "Move question disposition out of ComplaintDenoiser",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_05.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-05",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-06"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named Optimizer methods are one-line calls into optimizer_ui_feedback, and the sentinels still have their bodies.",
+          "adversarial_harness/optimizer.py has at most 5850 lines and adversarial_harness/optimizer_ui_feedback.py has at least 700 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only adversarial_harness/optimizer.py, adversarial_harness/optimizer_ui_feedback.py, and tests/test_cimp_sea_06.py.\nMove these methods of Optimizer into optimizer_ui_feedback: run_agentic_ui_ux_feedback_loop, build_ui_ux_optimization_task, build_ui_optimization_bundle, build_ui_patch_tasks, run_agentic_ui_ux_autopatch, build_ui_ux_optimization_bundle, _build_ui_patch_briefs.\nLeave these methods implemented on Optimizer: analyze. Do not edit optimizer_fallback.py. Do not move _fallback_agentic_optimizer_components. _build_ui_patch_briefs is a staticmethod with no parameters.\nEach moved owner method is exactly one Return of a Call to optimizer_ui_feedback.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import optimizer_ui_feedback` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 5850 lines and the sibling has at least 700 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "adversarial_harness/optimizer.py",
+          "adversarial_harness/optimizer_ui_feedback.py",
+          "tests/test_cimp_sea_06.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "adversarial_harness/optimizer.py",
+          "adversarial_harness/optimizer_ui_feedback.py",
+          "tests/test_cimp_sea_06.py"
+        ],
+        "title": "Move the UI feedback loop out of Optimizer",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_06.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-06",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-07"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named EvidenceStateHook methods are one-line calls into evidence_scraper_queue, and the sentinels still have their bodies.",
+          "mediator/evidence_hooks.py has at most 3400 lines and mediator/evidence_scraper_queue.py has at least 280 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/evidence_hooks.py, mediator/evidence_scraper_queue.py, and tests/test_cimp_sea_07.py.\nMove these methods of EvidenceStateHook into evidence_scraper_queue: get_scraper_run_details, complete_scraper_job, enqueue_scraper_job, claim_next_scraper_job, get_scraper_runs, get_scraper_queue.\nLeave these methods implemented on EvidenceStateHook: get_scraper_queue_state. Do not edit evidence_record_store.py. Do not move upsert_evidence_record, _initialize_schema, persist_scraper_run, or store_evidence. Several moved bodies have only two statements; that is enough.\nEach moved owner method is exactly one Return of a Call to evidence_scraper_queue.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import evidence_scraper_queue` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 3400 lines and the sibling has at least 280 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/evidence_hooks.py",
+          "mediator/evidence_scraper_queue.py",
+          "tests/test_cimp_sea_07.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/evidence_hooks.py",
+          "mediator/evidence_scraper_queue.py",
+          "tests/test_cimp_sea_07.py"
+        ],
+        "title": "Move the scraper queue out of EvidenceStateHook",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_07.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-07",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-08"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named AdversarialSession methods are one-line calls into session_document_fallback, and the sentinels still have their bodies.",
+          "adversarial_harness/session.py has at most 3450 lines and adversarial_harness/session_document_fallback.py has at least 320 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only adversarial_harness/session.py, adversarial_harness/session_document_fallback.py, and tests/test_cimp_sea_08.py.\nMove these methods of AdversarialSession into session_document_fallback: _build_document_generation_fallback, _build_fallback_probe, _run_document_generation, _compact_document_generation_result.\nLeave these methods implemented on AdversarialSession: run. Do not edit session_intake.py. Do not move _inject_intake_prompt_questions, _reprioritize_candidates_for_intake_objectives, _summarize_intake_priority_coverage, or _select_next_question. _compact_document_generation_result is a staticmethod.\nEach moved owner method is exactly one Return of a Call to session_document_fallback.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import session_document_fallback` at column 0 after the owner's helpers are bound. Do not redefine the moved names.\nThe owner file has at most 3450 lines and the sibling has at least 320 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "adversarial_harness/session.py",
+          "adversarial_harness/session_document_fallback.py",
+          "tests/test_cimp_sea_08.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "adversarial_harness/session.py",
+          "adversarial_harness/session_document_fallback.py",
+          "tests/test_cimp_sea_08.py"
+        ],
+        "title": "Move document-generation fallback out of AdversarialSession",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_08.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-product",
+      "task_id": "CIMP-SEA-08",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-09"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in canonical_legal_ir and re-exported by the owner.",
+          "integrations/ipfs_datasets/logic.py has at most 8850 lines and integrations/ipfs_datasets/canonical_legal_ir.py has at least 800 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only integrations/ipfs_datasets/logic.py, integrations/ipfs_datasets/canonical_legal_ir.py, and tests/test_cimp_sea_09.py.\nThis is a module-level function move. Move these functions into canonical_legal_ir: compile_canonical_legal_ir, generate_bound_legal_ir_proof_obligations, attach_canonical_legal_ir_source_obligations, ground_bound_formal_analysis.\nLeave prepare_acquired_authority_record defined in the owner with a body longer than one statement. Do not edit graphs.py or graph_queries.py. Do not invent a content identifier or a formula identifier. Copy the function bodies verbatim.\nThe owner must not define the moved functions. The sibling defines each one with an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nThe owner re-exports the moved names with `from .canonical_legal_ir import compile_canonical_legal_ir, generate_bound_legal_ir_proof_obligations, attach_canonical_legal_ir_source_obligations, ground_bound_formal_analysis` after its remaining helpers are bound. Do not copy mutable module globals. Import a referenced global from the owner when the sibling needs the same object.\nThe owner file has at most 8850 lines and the sibling has at least 800 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved function, if the re-export is missing, if a sentinel is missing, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/ipfs_datasets/logic.py",
+          "integrations/ipfs_datasets/canonical_legal_ir.py",
+          "tests/test_cimp_sea_09.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/ipfs_datasets/logic.py",
+          "integrations/ipfs_datasets/canonical_legal_ir.py",
+          "tests/test_cimp_sea_09.py"
+        ],
+        "title": "Move canonical legal IR compilation out of the datasets logic module",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_09.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-adapters",
+      "task_id": "CIMP-SEA-09",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-10"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in legal_corpus and re-exported by the owner.",
+          "integrations/ipfs_datasets/legal.py has at most 5100 lines and integrations/ipfs_datasets/legal_corpus.py has at least 800 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/legal_corpus.py, and tests/test_cimp_sea_10.py.\nThis is a module-level function move. Move these functions into legal_corpus: lookup_bounded_legal_corpus, build_bounded_legal_acquisition_request, constrain_assertions_to_corpus, handoff_acquired_legal_sources.\nLeave search_state_laws defined in the owner with a body longer than one statement. Do not invent citations or corpus records. Copy the function bodies verbatim.\nThe owner must not define the moved functions. The sibling defines each one with an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nThe owner re-exports the moved names with `from .legal_corpus import lookup_bounded_legal_corpus, build_bounded_legal_acquisition_request, constrain_assertions_to_corpus, handoff_acquired_legal_sources` after its remaining helpers are bound. Do not copy mutable module globals. Import a referenced global from the owner when the sibling needs the same object.\nThe owner file has at most 5100 lines and the sibling has at least 800 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved function, if the re-export is missing, if a sentinel is missing, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/ipfs_datasets/legal.py",
+          "integrations/ipfs_datasets/legal_corpus.py",
+          "tests/test_cimp_sea_10.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/ipfs_datasets/legal.py",
+          "integrations/ipfs_datasets/legal_corpus.py",
+          "tests/test_cimp_sea_10.py"
+        ],
+        "title": "Move bounded corpus lookup out of the datasets legal module",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_10.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-adapters",
+      "task_id": "CIMP-SEA-10",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-11"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in hook_runtime_remote and re-exported by the owner.",
+          "mediator/hook_runtime.py has at most 4000 lines and mediator/hook_runtime_remote.py has at least 450 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/hook_runtime.py, mediator/hook_runtime_remote.py, and tests/test_cimp_sea_11.py.\nThis is a module-level function move. Move these functions into hook_runtime_remote: dispatch_gui_bounded_inference, dispatch_declared_hook_purpose, prepare_remote_hook_query, record_bounded_hook_outcome.\nLeave dispatch_registered_hook_operation defined in the owner with a body longer than one statement. Do not edit hook_runtime_dispatch.py.\nThe owner must not define the moved functions. The sibling defines each one with an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nThe owner re-exports the moved names with `from .hook_runtime_remote import dispatch_gui_bounded_inference, dispatch_declared_hook_purpose, prepare_remote_hook_query, record_bounded_hook_outcome` after its remaining helpers are bound. Do not copy mutable module globals. Import a referenced global from the owner when the sibling needs the same object.\nThe owner file has at most 4000 lines and the sibling has at least 450 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved function, if the re-export is missing, if a sentinel is missing, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/hook_runtime.py",
+          "mediator/hook_runtime_remote.py",
+          "tests/test_cimp_sea_11.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/hook_runtime.py",
+          "mediator/hook_runtime_remote.py",
+          "tests/test_cimp_sea_11.py"
+        ],
+        "title": "Move remote hook dispatch out of hook runtime",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_11.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-adapters",
+      "task_id": "CIMP-SEA-11",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-12"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in formal_document_chronology and re-exported by the owner.",
+          "mediator/formal_document.py has at most 2200 lines and mediator/formal_document_chronology.py has at least 280 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/formal_document.py, mediator/formal_document_chronology.py, and tests/test_cimp_sea_12.py.\nThis is a module-level function move. Move these functions into formal_document_chronology: _build_claim_chronology_support, _build_anchored_chronology_summary, _build_claim_reasoning_temporal_fallbacks, _formalize_allegation_fragment.\nLeave ComplaintDocumentBuilder._build_claims defined in the owner with a body longer than one statement. Do not edit formal_document_render.py. Do not move render_text, build, _write_docx, or _write_pdf. The sentinel is a class method, not a module function. The test checks that _build_claims remains on ComplaintDocumentBuilder with a body longer than one statement and is absent from the sibling.\nThe owner must not define the moved functions. The sibling defines each one with an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nThe owner re-exports the moved names with `from .formal_document_chronology import _build_claim_chronology_support, _build_anchored_chronology_summary, _build_claim_reasoning_temporal_fallbacks, _formalize_allegation_fragment` after its remaining helpers are bound. Do not copy mutable module globals. Import a referenced global from the owner when the sibling needs the same object.\nThe owner file has at most 2200 lines and the sibling has at least 280 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved function, if the re-export is missing, if a sentinel is missing, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/formal_document.py",
+          "mediator/formal_document_chronology.py",
+          "tests/test_cimp_sea_12.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/formal_document.py",
+          "mediator/formal_document_chronology.py",
+          "tests/test_cimp_sea_12.py"
+        ],
+        "title": "Move chronology helpers out of the formal document module",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_12.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-adapters",
+      "task_id": "CIMP-SEA-12",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-13"
+      ],
+      "goal_id": "SEA-seams",
+      "metadata": {
+        "acceptance": [
+          "The named functions are defined only in private_workspace_transfer and re-exported by the owner.",
+          "integrations/private_storage.py has at most 9200 lines and integrations/private_workspace_transfer.py has at least 400 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only integrations/private_storage.py, integrations/private_workspace_transfer.py, and tests/test_cimp_sea_13.py.\nThis is a module-level function move. Move these functions into private_workspace_transfer: import_encrypted_workspace, restore_encrypted_workspace, commit_private_revision, recover_private_revision.\nLeave publish_case_manifest defined in the owner with a body longer than one statement. Do not move any UserOwnedKeySession method. Do not change key derivation, wrapping, revocation, or recovery proofs. Copy the four function bodies verbatim.\nThe owner must not define the moved functions. The sibling defines each one with an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nThe owner re-exports the moved names with `from .private_workspace_transfer import import_encrypted_workspace, restore_encrypted_workspace, commit_private_revision, recover_private_revision` after its remaining helpers are bound. Do not copy mutable module globals. Import a referenced global from the owner when the sibling needs the same object.\nThe owner file has at most 9200 lines and the sibling has at least 400 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved function, if the re-export is missing, if a sentinel is missing, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/private_storage.py",
+          "integrations/private_workspace_transfer.py",
+          "tests/test_cimp_sea_13.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/private_storage.py",
+          "integrations/private_workspace_transfer.py",
+          "tests/test_cimp_sea_13.py"
+        ],
+        "title": "Move encrypted workspace transfer out of private storage",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_13.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-adapters",
+      "task_id": "CIMP-SEA-13",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-14"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "acceptance": [
+          "Importing integrations/ipfs_accelerate/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nReplace the eager routers import with a lazy export map and __getattr__. Preserve the docstring and the exact __all__ order: COMPLAINT_PROVIDER_ALIASES, accelerate_provider_name, load_embedding_symbols, load_llm_symbols, load_multimodal_symbols, normalize_accelerate_provider. There is no __version__. The third-party facade stem is ipfs_ plus the concatenation of accel and erate. The test must build that stem by concatenation and must not contain those eight letters in a row. In a fresh subprocess, importing the package must not put its routers module in sys.modules. Accessing each name in __all__ must return the same object from that routers module.\n\nEdit only integrations/ipfs_accelerate/__init__.py and tests/test_cimp_sea_14.py. Do not edit the owner modules or any interface.py. The test parses the init with ast and fails if a module-level Import or ImportFrom names anything other than importlib. The behavior check starts a fresh subprocess, because an already-imported package would hide an eager import. A skipped test is a failed task.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/ipfs_accelerate/__init__.py",
+          "tests/test_cimp_sea_14.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/ipfs_accelerate/__init__.py",
+          "tests/test_cimp_sea_14.py"
+        ],
+        "title": "Load the accelerate facade on attribute access",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_14.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-inits",
+      "task_id": "CIMP-SEA-14",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-15"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "acceptance": [
+          "Importing integrations/mike/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nReplace the eager llm_patch and skills imports with a lazy export map and __getattr__. Preserve the docstring and the exact __all__ order: apply_mike_llm_router_patch, MIKE_LLM_PATCH_VERSION, load_skill, list_skill_ids, SKILLS_DIR. In a fresh subprocess, importing integrations.mike must not put integrations.mike.llm_patch or integrations.mike.skills in sys.modules. Accessing apply_mike_llm_router_patch returns the llm_patch function, and accessing load_skill returns the skills function.\n\nEdit only integrations/mike/__init__.py and tests/test_cimp_sea_15.py. Do not edit the owner modules or any interface.py. The test parses the init with ast and fails if a module-level Import or ImportFrom names anything other than importlib. The behavior check starts a fresh subprocess, because an already-imported package would hide an eager import. A skipped test is a failed task.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/mike/__init__.py",
+          "tests/test_cimp_sea_15.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/mike/__init__.py",
+          "tests/test_cimp_sea_15.py"
+        ],
+        "title": "Load the mike package on attribute access",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_15.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-inits",
+      "task_id": "CIMP-SEA-15",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-16"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "acceptance": [
+          "Importing lib/formal_logic/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nReplace the eager capabilities, core, and frames imports with a lazy export map and __getattr__. Preserve the docstring and the exact __all__ order of 29 names, beginning Action, Conjunction, DeonticKnowledgeBase and ending Predicate, Proposition, TemporalOperator, TimeInterval. In a fresh subprocess, importing lib.formal_logic must not put lib.formal_logic.capabilities, lib.formal_logic.core, or lib.formal_logic.frames in sys.modules. Accessing Action returns core.Action and accessing Frame returns frames.Frame.\n\nEdit only lib/formal_logic/__init__.py and tests/test_cimp_sea_16.py. Do not edit the owner modules or any interface.py. The test parses the init with ast and fails if a module-level Import or ImportFrom names anything other than importlib. The behavior check starts a fresh subprocess, because an already-imported package would hide an eager import. A skipped test is a failed task.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "lib/formal_logic/__init__.py",
+          "tests/test_cimp_sea_16.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "lib/formal_logic/__init__.py",
+          "tests/test_cimp_sea_16.py"
+        ],
+        "title": "Load formal logic on attribute access",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_16.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-inits",
+      "task_id": "CIMP-SEA-16",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-17"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "acceptance": [
+          "Importing lib/document_render/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nReplace the eager reportlab helper import with a lazy export map and __getattr__. Preserve the docstring and the exact __all__ order: HAS_REPORTLAB, build_case_caption_table, build_case_caption_text_lines, build_caption_party_block_html, build_caption_party_block_lines, build_case_detail_lines, make_page_footer_renderer. In a fresh subprocess, importing lib.document_render must not put lib.document_render.reportlab_helpers in sys.modules. Accessing build_case_caption_text_lines returns that helper function. Do not copy a URL into the test.\n\nEdit only lib/document_render/__init__.py and tests/test_cimp_sea_17.py. Do not edit the owner modules or any interface.py. The test parses the init with ast and fails if a module-level Import or ImportFrom names anything other than importlib. The behavior check starts a fresh subprocess, because an already-imported package would hide an eager import. A skipped test is a failed task.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "lib/document_render/__init__.py",
+          "tests/test_cimp_sea_17.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "lib/document_render/__init__.py",
+          "tests/test_cimp_sea_17.py"
+        ],
+        "title": "Load document render helpers on attribute access",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_17.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-inits",
+      "task_id": "CIMP-SEA-17",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-18"
+      ],
+      "goal_id": "SEA-facade",
+      "metadata": {
+        "acceptance": [
+          "Importing mediator/integrations/__init__.py does not execute its owner modules, and each public name still returns the owner object."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nReplace the eager adapter, contract, settings, retrieval, provenance, caching, vector, and graph imports with a lazy export map and __getattr__. Preserve the docstring and the exact __all__ order of 14 names, from IPFSDatasetsAdapter through GraphAwareRetrievalReranker. In a fresh subprocess, importing mediator.integrations must not put mediator.integrations.adapter, mediator.integrations.retrieval_orchestrator, mediator.integrations.vector_tools, or mediator.integrations.graph_tools in sys.modules. Accessing IPFSDatasetsAdapter returns the adapter class and accessing RetrievalOrchestrator returns the orchestrator class.\n\nEdit only mediator/integrations/__init__.py and tests/test_cimp_sea_18.py. Do not edit the owner modules or any interface.py. The test parses the init with ast and fails if a module-level Import or ImportFrom names anything other than importlib. The behavior check starts a fresh subprocess, because an already-imported package would hide an eager import. A skipped test is a failed task.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/integrations/__init__.py",
+          "tests/test_cimp_sea_18.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/integrations/__init__.py",
+          "tests/test_cimp_sea_18.py"
+        ],
+        "title": "Load mediator integration adapters on attribute access",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_18.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-inits",
+      "task_id": "CIMP-SEA-18",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-SEA-01",
+        "CIMP-SEA-02",
+        "CIMP-SEA-03",
+        "CIMP-SEA-04",
+        "CIMP-SEA-05",
+        "CIMP-SEA-06",
+        "CIMP-SEA-07",
+        "CIMP-SEA-08",
+        "CIMP-SEA-09",
+        "CIMP-SEA-10",
+        "CIMP-SEA-11",
+        "CIMP-SEA-12",
+        "CIMP-SEA-13"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-19"
+      ],
+      "goal_id": "SEA-docs",
+      "metadata": {
+        "acceptance": [
+          "module_seams.md lists the thirteen new sibling rows, the old consolidation table is unchanged, and the architecture size column matches splitlines().",
+          "The four root docs link to the seam document and still link to the existing architecture documents."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/architecture/module_seams.md, docs/ARCHITECTURE.md, README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and tests/test_cimp_sea_19.py.\nCreate docs/architecture/module_seams.md with one table. Each row is a sibling and the owner it was extracted from. The rows, in order, are: applications/complaint_workspace_mike.py from applications/complaint_workspace.py; mediator/mediator_follow_up_queries.py from mediator/mediator.py; complaint_phases/document_pipeline_email.py from complaint_phases/document_pipeline.py; mediator/claim_support_testimony.py from mediator/claim_support_hooks.py; complaint_phases/denoiser_question_disposition.py from complaint_phases/denoiser.py; adversarial_harness/optimizer_ui_feedback.py from adversarial_harness/optimizer.py; mediator/evidence_scraper_queue.py from mediator/evidence_hooks.py; adversarial_harness/session_document_fallback.py from adversarial_harness/session.py; integrations/ipfs_datasets/canonical_legal_ir.py from integrations/ipfs_datasets/logic.py; integrations/ipfs_datasets/legal_corpus.py from integrations/ipfs_datasets/legal.py; mediator/hook_runtime_remote.py from mediator/hook_runtime.py; mediator/formal_document_chronology.py from mediator/formal_document.py; integrations/private_workspace_transfer.py from integrations/private_storage.py.\nDo not edit docs/architecture/consolidation_modules.md. The existing boundary ratchet requires that table to stay exactly this sequence: complaint_phases/intake_status.py from intake_status.py; complaint_phases/workflow_phase_guidance.py from workflow_phase_guidance.py; complaint_phases/document_pipeline.py from document_pipeline.py; complaint_phases/document_optimization.py from document_optimization.py; mediator/claim_support_review.py from claim_support_review.py; complaint_phases/document_pipeline_guidance.py from complaint_phases/document_pipeline.py; mediator/claim_support_review_sections.py from mediator/claim_support_review.py; complaint_phases/document_pipeline_readiness.py from complaint_phases/document_pipeline.py; complaint_phases/document_optimization_summaries.py from complaint_phases/document_optimization.py; applications/complaint_workspace_drafting.py from applications/complaint_workspace.py; mediator/intake_question_flow.py from mediator/mediator.py; complaint_phases/denoiser_questions.py from complaint_phases/denoiser.py; mediator/claim_support_diagnostics.py from mediator/claim_support_hooks.py; applications/complaint_workspace_research.py from applications/complaint_workspace.py; mediator/claim_follow_up_flow.py from mediator/mediator.py; complaint_phases/document_pipeline_render.py from complaint_phases/document_pipeline.py; mediator/claim_support_recommendations.py from mediator/claim_support_hooks.py; complaint_phases/denoiser_bindings.py from complaint_phases/denoiser.py; applications/dashboard_hub.py from applications/dashboard_ui.py; adversarial_harness/optimizer_fallback.py from adversarial_harness/optimizer.py; complaint_phases/knowledge_graph_extraction.py from complaint_phases/knowledge_graph.py; complaint_phases/intake_case_open_items.py from complaint_phases/intake_case_file.py; complaint_phases/document_optimization_support.py from complaint_phases/document_optimization.py; mediator/claim_support_review_followups.py from mediator/claim_support_review.py; mediator/hook_runtime_dispatch.py from mediator/hook_runtime.py; mediator/legal_authority_storage.py from mediator/legal_authority_hooks.py; complaint_phases/dependency_graph_readiness.py from complaint_phases/dependency_graph.py; adversarial_harness/session_intake.py from adversarial_harness/session.py; mediator/evidence_record_store.py from mediator/evidence_hooks.py; mediator/formal_document_render.py from mediator/formal_document.py; mediator/workflow_action_steps.py from mediator/workflow_service.py; integrations/ipfs_datasets/graph_queries.py from integrations/ipfs_datasets/graphs.py; applications/complaint_workspace_handlers.py from applications/complaint_workspace.py; mediator/mediator_gap_packets.py from mediator/mediator.py; complaint_phases/document_pipeline_legacy.py from complaint_phases/document_pipeline.py. The new test reads that file and fails if the parsed pairs change.\nDo not edit docs/architecture/module_boundaries.md. Interfaces did not change, so that document stays as it is.\nIn docs/ARCHITECTURE.md, recompute the Current Extraction Priorities size column from splitlines() after the extractions. Every displayed integer in that table must equal the current line count of the named file. The stale comma strings 10,852 lines, 7,881 lines, 6,933 lines, 5,691 lines, 5,562 lines, and 5,309 lines must stay absent. Keep applications/dashboard_hub.py named in that section.\nAdd a resolving relative link to docs/architecture/module_seams.md in README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, and TESTING.md. Keep the existing links to docs/architecture/consolidation_modules.md and docs/architecture/module_boundaries.md, the archive sentences, the root-shim sentence, INTERFACE_SCHEMA complaint-generator/module-interface@1, and INTERFACE_VERSION 1.0.0.\nThe root markdown set stays exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md. Do not add or delete a root markdown file.\nThe test parses the new seam table, checks the old table is unchanged, checks every architecture size integer, and checks the four root links resolve. Use a local percent decoder. Do not import urllib.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/module_seams.md",
+          "docs/ARCHITECTURE.md",
+          "README.md",
+          "DOCUMENTATION_INDEX.md",
+          "CONTRIBUTING.md",
+          "TESTING.md",
+          "tests/test_cimp_sea_19.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/architecture/module_seams.md",
+          "docs/ARCHITECTURE.md",
+          "README.md",
+          "DOCUMENTATION_INDEX.md",
+          "CONTRIBUTING.md",
+          "TESTING.md",
+          "tests/test_cimp_sea_19.py"
+        ],
+        "title": "Record the seam siblings and refresh the architecture sizes",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_19.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-record",
+      "task_id": "CIMP-SEA-19",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-SEA-14",
+        "CIMP-SEA-15",
+        "CIMP-SEA-16",
+        "CIMP-SEA-17",
+        "CIMP-SEA-18",
+        "CIMP-SEA-19"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-SEA-20"
+      ],
+      "goal_id": "SEA-closure",
+      "metadata": {
+        "acceptance": [
+          "The module map matches the tree, the thirteen new floors hold, and the five package imports still leave their owners unloaded.",
+          "The seam table, the old sibling table, the root links, and the interface schema assignments still match the source."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, or any tests/test_cimp_bnd_*.py file. Do not restart the completed consolidation campaign, the completed module-depth campaign, the completed module-boundaries campaign, or the completed repository-reorganization campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md or docs/architecture/module_boundaries.md. Do not edit docs/architecture/repository_module_map.json. CIMP-SEA-20 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nThis task is the campaign ratchet. It may edit only docs/architecture/repository_module_map.json and tests/test_cimp_sea_20.py. Do not edit a product module to make the ratchet pass. Do not import or edit tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, tests/test_cimp_dep_*.py, or tests/test_cimp_bnd_*.py.\nRefresh the module map so every recorded path and byte_size pair matches the file, and every recorded init_path and init_byte_size pair matches that file. Replace packages with the discovered top-level packages and rebuild largest_python_modules with limit 15, ordered by byte size descending and path ascending. Keep schema complaint-generator/repository-module-map@1, task_id CIMP-MOD-01, source_files_moved true, and source_files_rewritten false. An updater script may import the discover helpers, but the committed test must repeat the checks itself. The largest recorded module must still be applications/complaint_workspace.py.\nThe test re-parses the thirteen new owner and sibling pairs and requires these floors: complaint_workspace.py <= 16750 and complaint_workspace_mike.py >= 450; mediator.py <= 11550 and mediator_follow_up_queries.py >= 320; document_pipeline.py <= 9050 and document_pipeline_email.py >= 300; claim_support_hooks.py <= 8900 and claim_support_testimony.py >= 400; denoiser.py <= 7450 and denoiser_question_disposition.py >= 320; optimizer.py <= 5850 and optimizer_ui_feedback.py >= 700; evidence_hooks.py <= 3400 and evidence_scraper_queue.py >= 280; session.py <= 3450 and session_document_fallback.py >= 320; logic.py <= 8850 and canonical_legal_ir.py >= 800; legal.py <= 5100 and legal_corpus.py >= 800; hook_runtime.py <= 4000 and hook_runtime_remote.py >= 450; formal_document.py <= 2200 and formal_document_chronology.py >= 280; private_storage.py <= 9200 and private_workspace_transfer.py >= 400.\nIt also re-checks these earlier floors: complaint_workspace_research.py >= 850; claim_follow_up_flow.py >= 1100; document_pipeline_render.py >= 600; claim_support_recommendations.py >= 700; denoiser_bindings.py >= 500; dashboard_hub.py >= 4500; dashboard_ui.py <= 1200; optimizer_fallback.py >= 700; knowledge_graph_extraction.py >= 900; intake_case_open_items.py >= 950; document_optimization_support.py >= 550; claim_support_review_followups.py >= 600; hook_runtime_dispatch.py >= 500; legal_authority_storage.py >= 500; dependency_graph_readiness.py >= 1800; session_intake.py >= 1600; evidence_record_store.py >= 700; formal_document_render.py >= 700; workflow_action_steps.py >= 500; graph_queries.py >= 650; complaint_workspace_handlers.py >= 700; mediator_gap_packets.py >= 750; document_pipeline_legacy.py >= 500.\nThe five root shims intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, and claim_support_review.py are each at most 40 lines, define no function or class, and still delegate.\nOne subprocess imports the five packages touched by CIMP-SEA-14 through CIMP-SEA-18 and asserts the same unloaded-owner conditions. Build the facade stem by concatenation. Do not write the banned substrings.\nThe test checks docs/architecture/module_seams.md contains the thirteen new rows and docs/architecture/consolidation_modules.md still contains the previous rows. The four root docs still link to consolidation_modules.md, module_boundaries.md, and module_seams.md. The root markdown set stays exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nEvery product interface.py still assigns INTERFACE_SCHEMA to complaint-generator/module-interface@1 and INTERFACE_VERSION to 1.0.0. Parse those assignments. Do not import the interface modules.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/repository_module_map.json",
+          "tests/test_cimp_sea_20.py"
+        ],
+        "priority": "P0",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/architecture/repository_module_map.json",
+          "tests/test_cimp_sea_20.py"
+        ],
+        "title": "Lock the new seams with an independent ratchet",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_sea_20.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "SEA-ratchet",
+      "task_id": "CIMP-SEA-20",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    }
+  ],
+  "temporal_constraints": [],
+  "trace_bound": 1,
+  "vocabulary_profile_id": "supervisor-reviewed",
+  "vocabulary_version": 2
+}
