@@ -146,7 +146,7 @@ Implementation instructions:
 
 ## CIMP-SEA-05 Move question disposition out of ComplaintDenoiser
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
