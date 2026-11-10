@@ -546,7 +546,7 @@ Implementation instructions:
 
 ## CIMP-SEA-17 Load document render helpers on attribute access
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
