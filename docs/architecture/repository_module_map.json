@@ -240,12 +240,12 @@
     },
     {
       "path": "CONTRIBUTING.md",
-      "byte_size": 12981,
+      "byte_size": 13083,
       "session_or_batch_report": false
     },
     {
       "path": "DOCUMENTATION_INDEX.md",
-      "byte_size": 21428,
+      "byte_size": 21530,
       "session_or_batch_report": false
     },
     {
@@ -295,7 +295,7 @@
     },
     {
       "path": "README.md",
-      "byte_size": 7835,
+      "byte_size": 7939,
       "session_or_batch_report": false
     },
     {
@@ -370,7 +370,7 @@
     },
     {
       "path": "TESTING.md",
-      "byte_size": 10964,
+      "byte_size": 11066,
       "session_or_batch_report": false
     },
     {
@@ -595,7 +595,7 @@
         },
         {
           "path": "mediator/formal_document.py",
-          "byte_size": 97647,
+          "byte_size": 78603,
           "role": "formal complaint document assembly and export"
         }
       ]
@@ -605,42 +605,42 @@
     {
       "rank": 1,
       "path": "applications/complaint_workspace.py",
-      "byte_size": 825739
+      "byte_size": 792485
     },
     {
       "rank": 2,
       "path": "mediator/mediator.py",
-      "byte_size": 486489
+      "byte_size": 462635
     },
     {
       "rank": 3,
       "path": "complaint_phases/document_pipeline.py",
-      "byte_size": 423031
+      "byte_size": 405706
     },
     {
       "rank": 4,
-      "path": "integrations/ipfs_datasets/logic.py",
-      "byte_size": 406825
+      "path": "mediator/claim_support_hooks.py",
+      "byte_size": 384665
     },
     {
       "rank": 5,
-      "path": "mediator/claim_support_hooks.py",
-      "byte_size": 404643
-    },
-    {
-      "rank": 6,
       "path": "tests/test_claim_support_review_playwright_smoke.py",
       "byte_size": 379599
     },
     {
+      "rank": 6,
+      "path": "integrations/ipfs_datasets/logic.py",
+      "byte_size": 359315
+    },
+    {
       "rank": 7,
       "path": "integrations/private_storage.py",
-      "byte_size": 365443
+      "byte_size": 340598
     },
     {
       "rank": 8,
       "path": "complaint_phases/denoiser.py",
-      "byte_size": 354870
+      "byte_size": 335319
     },
     {
       "rank": 9,
@@ -655,7 +655,7 @@
     {
       "rank": 11,
       "path": "integrations/ipfs_accelerate/improvement_runner.py",
-      "byte_size": 326280
+      "byte_size": 327837
     },
     {
       "rank": 12,
@@ -664,18 +664,18 @@
     },
     {
       "rank": 13,
-      "path": "adversarial_harness/optimizer.py",
-      "byte_size": 291074
-    },
-    {
-      "rank": 14,
       "path": "applications/dashboard_hub.py",
       "byte_size": 282083
     },
     {
-      "rank": 15,
+      "rank": 14,
       "path": "tests/test_claim_support_hooks.py",
       "byte_size": 252947
+    },
+    {
+      "rank": 15,
+      "path": "adversarial_harness/optimizer.py",
+      "byte_size": 241330
     }
   ]
 }
