@@ -422,7 +422,7 @@ Implementation instructions:
 
 ## CIMP-SEA-13 Move encrypted workspace transfer out of private storage
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
