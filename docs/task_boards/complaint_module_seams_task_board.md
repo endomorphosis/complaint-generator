@@ -641,7 +641,7 @@ Implementation instructions:
 
 ## CIMP-SEA-20 Lock the new seams with an independent ratchet
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
