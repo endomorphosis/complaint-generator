@@ -1,0 +1,469 @@
+{
+  "schema_version": "complaint-generator/improvement-spec@1",
+  "title": "Record the current layout and split the remaining allegation, persistence, and temporal seams",
+  "created_at": "2026-11-14T12:00:00+00:00",
+  "baseline_commit": "9b4974f8608e16c3857464e3fd3d6158ac1fa87e",
+  "campaign": {
+    "spec_relative": "docs/task_boards/complaint_current_layout_spec.json",
+    "plan_relative": "docs/task_boards/complaint_current_layout_formal_work_plan.json",
+    "board_relative": "docs/task_boards/complaint_current_layout_task_board.md",
+    "board_namespace": "complaint-current-layout"
+  },
+  "provider": {
+    "router": "ipfs_accelerate_py.llm_router",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "allow_fallback": false
+  },
+  "execution_policy": {
+    "initial_lanes": 4,
+    "worktree_pool_max_entries": 4,
+    "initial_ready_task": "CIMP-CUR-01",
+    "native_task_source_profile": "explicit legacy-markdown projection of the Native FormalWorkPlan",
+    "provider_role": "grok-only",
+    "automatic_fallback": false,
+    "offline_default": true,
+    "live_exceptions": [],
+    "max_task_attempts": 3,
+    "max_agent_turns": 64,
+    "implementation_timeout_seconds": 900,
+    "validation_timeout_seconds": 900,
+    "merge_target": "codex/current-layout-20261114",
+    "remote_push": false,
+    "deployment": false,
+    "manual_holds_respected": true,
+    "parallelism": "CIMP-CUR-01 through CIMP-CUR-14 edit disjoint files and have no dependencies. CIMP-CUR-15 waits for every earlier task.",
+    "development_inputs": "Local baseline 9b4974f86 on codex/current-layout-20261114. That commit is origin/main. GitHub master is 6ad9ac3d1 and remains the default branch. Do not push, force-push, or change the default branch.",
+    "implementation_provider_scope": "Authorized Grok 4.7 development implementation via llm_router. Offline tests do not disable that provider process. Development permission is not consent to case-data egress.",
+    "product_inference": "This plan does not change case inference, consent, or legal conclusions.",
+    "context_exclude": [
+      ".complaint_workspace/**",
+      ".complaint_workspace*/**",
+      "data/**",
+      "output/**",
+      "statefiles/**",
+      "exports/**",
+      "secrets/**",
+      "evidence/**",
+      "uploads/**",
+      "attachments/**",
+      ".env*",
+      "*.key",
+      "*.pem",
+      "workspace/**",
+      "artifacts/**",
+      "external/**"
+    ],
+    "protected_state": "The completed intake, mediator-grounding, GUI collaboration, GUI UX, repository-reorganization, repository-consolidation, module-depth, module-boundaries, and module-seams campaigns, both retained quarantines, submodule pins, and unrelated campaign processes stay untouched. completion_authority stays false. integrations/ipfs_accelerate/improvement_runner.py stays out of the task targets.",
+    "upstream_checkout_policy": "Use the pinned external checkouts. Do not float pins, recursively initialize submodules, or clone CommonCrawl.",
+    "required_evidence": [
+      "A focused pytest module with positive checks and zero skips",
+      "Extracted symbols defined in the sibling and no longer implemented in the owner",
+      "Current docs that name modules and files which exist, and that no longer repeat the retired counts or future-UI claims",
+      "Locked architecture documents and interface owner lists left byte-for-byte in place"
+    ],
+    "qualification_scope": "One focused pytest command per task. Do not run the full historical suite inside the 900-second task budget.",
+    "stop_semantics": "A test that passes while a named body still lives in the owner, or while a retired documentation claim remains, is a failed task. Do not mark a task complete by hand."
+  },
+  "findings": [
+    {
+      "classification": "source_inspected",
+      "id": "ALLEGATION-BODY-REMAINS",
+      "path": "complaint_phases/document_pipeline.py",
+      "observation": "At 9b4974f86 the seams board is complete and document_pipeline.py is 8608 lines. Thirteen allegation and fact-assembly methods still live on FormalComplaintDocumentBuilder and total 768 lines. build_package stays. The email-timeline sibling already exists and is not part of this move."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "PERSISTENCE-BODY-REMAINS",
+      "path": "mediator/claim_support_hooks.py",
+      "observation": "claim_support_hooks.py is 8279 lines. Six persist_* methods still live on ClaimSupportHook and total 727 lines. upsert_support_link and _initialize_schema stay. private_storage.py is not part of this move."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "TEMPORAL-BODY-REMAINS",
+      "path": "mediator/mediator.py",
+      "observation": "mediator.py is 11053 lines. Nine temporal predicate and timeline-anchor methods still live on Mediator and total 429 lines. research_case_automatically, get_claim_follow_up_plan, and get_support_timeline stay. The follow-up query sibling already exists and is not part of this move."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "INDEX-STATS-ARE-STALE",
+      "path": "DOCUMENTATION_INDEX.md",
+      "observation": "The index links resolve, but its statistics still say 79+ markdown files, 13 root-level markdown files, 61 docs files, and 250+ pages. The root markdown set is five files, and docs/ contains 159 markdown files. Historical improvement plans, backlogs, and tasklists are listed beside current guides."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "ARCHITECTURE-CLAIMS-ARE-STALE",
+      "path": "docs/ARCHITECTURE.md",
+      "observation": "Layer 1 still calls the browser UI and the HTTP API future. The entrypoint table still points the planning daemon at docs/REFACTOR_SUPERVISOR_TASKBOARD.md. The browser UI and HTTP API already live under applications/. Campaign plans are compiled by integrations/ipfs_accelerate/improvement_plan.py. The extraction size table must keep matching splitlines()."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "DEPLOYMENT-HOME-IS-FICTIONAL",
+      "path": "docs/DEPLOYMENT.md",
+      "observation": "docs/DEPLOYMENT.md contains /home/complaint-app 26 times. The operator configs stay at the repository root because CLI defaults use those eight config JSON paths. The locked interface owner lists in module_boundaries.md match the interface.py files and must not grow in this campaign."
+    }
+  ],
+  "goals": [
+    {
+      "id": "CUR-modules",
+      "title": "Move the remaining allegation, persistence, and temporal bodies into sibling modules",
+      "subgoals": [
+        {
+          "id": "CUR-extract",
+          "title": "Extract three cohesive owners without touching finished siblings or interface files"
+        }
+      ]
+    },
+    {
+      "id": "CUR-docs",
+      "title": "Make the current documentation name the modules and files that exist",
+      "subgoals": [
+        {
+          "id": "CUR-index",
+          "title": "Correct the index, architecture overview, phase guide, configuration guide, applications guide, and current-layout note"
+        },
+        {
+          "id": "CUR-guides",
+          "title": "Point the root guides and the mediator readme at that current layout"
+        }
+      ]
+    },
+    {
+      "id": "CUR-closure",
+      "title": "Lock the current layout with an independent ratchet",
+      "subgoals": [
+        {
+          "id": "CUR-ratchet",
+          "title": "Fail the campaign if a moved body, a stale claim, or an edited locked document returns"
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "CIMP-CUR-01",
+      "title": "Move allegation assembly out of the document pipeline",
+      "goal_id": "CUR-modules",
+      "subgoal_id": "CUR-extract",
+      "priority": "P1",
+      "targets": [
+        "complaint_phases/document_pipeline.py",
+        "complaint_phases/document_pipeline_allegations.py",
+        "tests/test_cimp_cur_01.py"
+      ],
+      "acceptance": [
+        "The named FormalComplaintDocumentBuilder methods are one-line calls into document_pipeline_allegations, and build_package still has its body.",
+        "complaint_phases/document_pipeline.py has at most 7950 lines and complaint_phases/document_pipeline_allegations.py has at least 700 lines."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_01.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_phases/document_pipeline.py, complaint_phases/document_pipeline_allegations.py, and tests/test_cimp_cur_01.py.\nMove these methods of FormalComplaintDocumentBuilder into document_pipeline_allegations: _prune_near_duplicate_allegations, _formalize_allegation_fragment, _build_policy_process_allegations, _build_factual_allegation_entries, _build_factual_allegations, _attach_allegation_references, _build_missing_detail_allegations, _build_concrete_sequence_allegation, _select_allegation_references_for_claim, _synthesize_narrative_allegations, _is_factual_allegation_candidate, _grouped_allegation_text_lines, _prune_redundant_policy_rule_allegations.\nLeave build_package implemented on FormalComplaintDocumentBuilder. Do not edit document_pipeline_email.py, document_pipeline_render.py, document_pipeline_legacy.py, document_pipeline_guidance.py, or document_pipeline_readiness.py. Do not move build_package, build_draft, or the email-timeline helpers.\n\nEach moved owner method is exactly one Return of a Call to document_pipeline_allegations.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import document_pipeline_allegations` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 7950 lines and the sibling has at least 700 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor."
+    },
+    {
+      "id": "CIMP-CUR-02",
+      "title": "Move claim-support persistence out of ClaimSupportHook",
+      "goal_id": "CUR-modules",
+      "subgoal_id": "CUR-extract",
+      "priority": "P1",
+      "targets": [
+        "mediator/claim_support_hooks.py",
+        "mediator/claim_support_persistence.py",
+        "tests/test_cimp_cur_02.py"
+      ],
+      "acceptance": [
+        "The named ClaimSupportHook methods are one-line calls into claim_support_persistence, and the sentinels still have their bodies.",
+        "mediator/claim_support_hooks.py has at most 7700 lines and mediator/claim_support_persistence.py has at least 650 lines."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_02.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/claim_support_hooks.py, mediator/claim_support_persistence.py, and tests/test_cimp_cur_02.py.\nMove these methods of ClaimSupportHook into claim_support_persistence: persist_fact_record, persist_support_path, persist_typed_graph_snapshot, persist_claim_support_diagnostics, persist_claim_coverage_matrix_snapshot, persist_private_factual_graph.\nLeave upsert_support_link and _initialize_schema implemented on ClaimSupportHook. Do not edit claim_support_testimony.py, claim_support_recommendations.py, claim_support_review_followups.py, or private_storage.py. Do not change key derivation, wrapping, revocation, or recovery proofs. Copy the moved bodies verbatim.\n\nEach moved owner method is exactly one Return of a Call to claim_support_persistence.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import claim_support_persistence` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 7700 lines and the sibling has at least 650 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor."
+    },
+    {
+      "id": "CIMP-CUR-03",
+      "title": "Move temporal predicate builders out of Mediator",
+      "goal_id": "CUR-modules",
+      "subgoal_id": "CUR-extract",
+      "priority": "P1",
+      "targets": [
+        "mediator/mediator.py",
+        "mediator/mediator_temporal.py",
+        "tests/test_cimp_cur_03.py"
+      ],
+      "acceptance": [
+        "The named Mediator methods are one-line calls into mediator_temporal, and the sentinels still have their bodies.",
+        "mediator/mediator.py has at most 10750 lines and mediator/mediator_temporal.py has at least 380 lines."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_03.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/mediator.py, mediator/mediator_temporal.py, and tests/test_cimp_cur_03.py.\nMove these methods of Mediator into mediator_temporal: _build_temporal_next_actions_for_task, _derive_missing_temporal_predicates, _author_temporal_case_file_state, _build_temporal_relation_formulas_by_id, _build_timeline_anchor_ids_by_fact_id, _is_temporal_rule_gap_follow_up, _accumulate_temporal_rule_profile_counts, _build_support_packet_timeline_drilldown, _preferred_support_kind_for_temporal_rule_profile.\nLeave research_case_automatically and get_claim_follow_up_plan implemented on Mediator. Do not edit mediator_follow_up_queries.py, claim_follow_up_flow.py, intake_question_flow.py, or mediator_gap_packets.py. Do not move get_support_timeline, research_case_automatically, or get_claim_follow_up_plan.\n\nEach moved owner method is exactly one Return of a Call to mediator_temporal.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import mediator_temporal` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 10750 lines and the sibling has at least 380 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor."
+    },
+    {
+      "id": "CIMP-CUR-04",
+      "title": "Separate current docs from historical plans in the index",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "DOCUMENTATION_INDEX.md",
+        "tests/test_cimp_cur_04.py"
+      ],
+      "acceptance": [
+        "The index statistics no longer claim 79 markdown files, 13 root files, 61 docs files, or 250 pages, and historical plan links sit under Historical plans.",
+        "Every markdown link in DOCUMENTATION_INDEX.md resolves, and the required archive, shim, schema, and architecture links remain."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_04.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only DOCUMENTATION_INDEX.md and tests/test_cimp_cur_04.py.\nKeep these sentences present: docs/archive/sessions, docs/archive/reports, root shims, complaint-generator/module-interface@1, and 1.0.0. Keep resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not add or remove a root markdown file. The root markdown set stays README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nRemove these stale statistic substrings from the file: 79+, 13 root-level, 61 docs/, and 250+. The statistics section must say the root markdown set is exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nAdd a heading `## Historical plans`. Move every markdown link whose target contains IMPROVEMENT_PLAN, EXECUTION_BACKLOG, TASKLIST, NEXT_BATCH, or FILE_WORKLIST into that section. Those fragments must not appear before that heading. Do not move the linked files themselves and do not delete a linked document.\nThe test fails if a stale statistic substring remains, if one of those fragments appears before `## Historical plans`, if a required sentence or architecture link is missing, or if any markdown link fails to resolve."
+    },
+    {
+      "id": "CIMP-CUR-05",
+      "title": "Replace the future-UI and old-supervisor claims in the architecture overview",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "docs/ARCHITECTURE.md",
+        "tests/test_cimp_cur_05.py"
+      ],
+      "acceptance": [
+        "Layer 1 names the existing dashboard and HTTP modules, and the overview no longer points at the old refactor taskboard as the current planner.",
+        "Every size in Current Extraction Priorities equals splitlines() of the named file, and dashboard_hub.py stays in that table."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_05.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/ARCHITECTURE.md and tests/test_cimp_cur_05.py.\nIn `### Layer 1: User Interface`, replace `Browser-based UI (future)` with the statement that the browser UI is applications/dashboard_ui.py and applications/dashboard_hub.py. Replace `RESTful API for integrations (future)` with the statement that the HTTP API is applications/server.py and applications/case_routes.py.\nRemove every mention of docs/REFACTOR_SUPERVISOR_TASKBOARD.md. The public entrypoint row for scripts/refactor_agent_supervisor.py must say that file is an older operator script and that campaign plans are compiled by integrations/ipfs_accelerate/improvement_plan.py.\nRecompute every integer in `### Current Extraction Priorities` from splitlines() of the named path. Keep applications/dashboard_hub.py in that table. These stale strings must stay absent: `10,852 lines`, `7,881 lines`, `6,933 lines`, `5,691 lines`, `5,562 lines`, `5,309 lines`.\nDo not change the allowed-import package rows. The test fails if either future phrase remains, if the old taskboard path remains, if a displayed size differs from splitlines(), or if a stale size string returns."
+    },
+    {
+      "id": "CIMP-CUR-06",
+      "title": "Name the current phase modules in the three-phase guide",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "docs/THREE_PHASE_SYSTEM.md",
+        "tests/test_cimp_cur_06.py"
+      ],
+      "acceptance": [
+        "The three-phase guide names complaint_phases.interface, its three owners, the interface schema and version, and the four extracted phase siblings."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_06.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/THREE_PHASE_SYSTEM.md and tests/test_cimp_cur_06.py.\nAdd a `Current modules` section. It must state that new code imports complaint_phases.interface, name the owners complaint_phases.phase_manager, complaint_phases.knowledge_graph, and complaint_phases.intake_case_file, state INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0, and name complaint_phases/denoiser_questions.py, complaint_phases/denoiser_bindings.py, complaint_phases/denoiser_question_disposition.py, and complaint_phases/document_pipeline_email.py.\nDo not delete the phase-manager section. The test fails if any of those names or the schema string is missing. The test must not import the package."
+    },
+    {
+      "id": "CIMP-CUR-07",
+      "title": "Name the eight root operator configs without moving them",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "docs/CONFIGURATION.md",
+        "tests/test_cimp_cur_07.py"
+      ],
+      "acceptance": [
+        "The configuration guide has a Root operator configs section whose names are exactly the eight root config JSON files, and those files stay at the repository root."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_07.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/CONFIGURATION.md and tests/test_cimp_cur_07.py.\nAdd a `Root operator configs` section that names exactly these repository-root files and says they stay at the root because the CLI defaults use those paths: config.adversarial_autopatch_demo.json, config.adversarial_autopatch_live.json, config.adversarial_autopatch_live_batch.json, config.adversarial_autopatch_live_multibackend.json, config.huggingface_router.json, config.llm_router.json, config.review_surface.huggingface_router.json, config.review_surface.json.\nDo not move or edit the JSON files. Do not edit run.py. The test lists root files whose names start with config and end with .json, and it fails unless that set equals the names in the section and each file exists at the root."
+    },
+    {
+      "id": "CIMP-CUR-08",
+      "title": "Point the applications guide at the versioned application entry",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "docs/APPLICATIONS.md",
+        "tests/test_cimp_cur_08.py"
+      ],
+      "acceptance": [
+        "The applications guide names applications.interface, its three owners, the interface schema and version, and the dashboard hub split."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_08.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/APPLICATIONS.md and tests/test_cimp_cur_08.py.\nAdd a `Current entry` section that names applications.interface, the owners applications.server, applications.case_routes, and applications.launcher, INTERFACE_SCHEMA complaint-generator/module-interface@1, INTERFACE_VERSION 1.0.0, applications/dashboard_hub.py, and create_dashboard_ui_router in applications/dashboard_ui.py.\nKeep a resolving link to docs/SECURITY.md. The test fails if any required name is missing or the security link does not resolve."
+    },
+    {
+      "id": "CIMP-CUR-09",
+      "title": "Add the current-layout note without copying locked tables",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-index",
+      "priority": "P1",
+      "targets": [
+        "docs/architecture/current_layout.md",
+        "tests/test_cimp_cur_09.py"
+      ],
+      "acceptance": [
+        "current_layout.md names the root markdown set, the five root shims, the eight root configs, the interface schema and version, and the three architecture maps.",
+        "The note says historical plans are not the current architecture and does not duplicate the locked sibling tables."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_09.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/architecture/current_layout.md and tests/test_cimp_cur_09.py.\nCreate docs/architecture/current_layout.md. It must name README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md. It must name the root shims intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, and claim_support_review.py, and say each stays a shim of at most 40 lines. It must name these root configs and say they stay at the root: config.adversarial_autopatch_demo.json, config.adversarial_autopatch_live.json, config.adversarial_autopatch_live_batch.json, config.adversarial_autopatch_live_multibackend.json, config.huggingface_router.json, config.llm_router.json, config.review_surface.huggingface_router.json, config.review_surface.json. It must state INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0. It must link to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md without copying their tables. It must say historical plan, backlog, and tasklist documents are not the current architecture. It must name the plan compiler file improvement_plan.py under the accelerate facade directory. Build that facade stem in the test by concatenation so the test source does not contain those eight letters in a row.\nThe test fails if a required name or link is missing, if a link does not resolve, or if the note contains a markdown table row that starts with a sibling path from consolidation_modules.md."
+    },
+    {
+      "id": "CIMP-CUR-10",
+      "title": "Link the contribution guide to the current layout",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-guides",
+      "priority": "P1",
+      "targets": [
+        "CONTRIBUTING.md",
+        "tests/test_cimp_cur_10.py"
+      ],
+      "acceptance": [
+        "CONTRIBUTING.md links to docs/architecture/current_layout.md and keeps the archive, shim, schema, and architecture links."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_10.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only CONTRIBUTING.md and tests/test_cimp_cur_10.py.\nAdd one resolving markdown link to docs/architecture/current_layout.md. Keep these sentences present: docs/archive/sessions, docs/archive/reports, root shims, complaint-generator/module-interface@1, and 1.0.0. Keep resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not add or remove a root markdown file. The root markdown set stays README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nThe test fails if that new link is missing or does not resolve, or if a required sentence or existing architecture link is missing."
+    },
+    {
+      "id": "CIMP-CUR-11",
+      "title": "Link the testing guide to the current layout",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-guides",
+      "priority": "P1",
+      "targets": [
+        "TESTING.md",
+        "tests/test_cimp_cur_11.py"
+      ],
+      "acceptance": [
+        "TESTING.md links to docs/architecture/current_layout.md and keeps the archive, shim, schema, and architecture links."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_11.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only TESTING.md and tests/test_cimp_cur_11.py.\nAdd one resolving markdown link to docs/architecture/current_layout.md. Keep these sentences present: docs/archive/sessions, docs/archive/reports, root shims, complaint-generator/module-interface@1, and 1.0.0. Keep resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not add or remove a root markdown file. The root markdown set stays README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nThe test fails if that new link is missing or does not resolve, or if a required sentence or existing architecture link is missing."
+    },
+    {
+      "id": "CIMP-CUR-12",
+      "title": "Link the readme to the current layout",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-guides",
+      "priority": "P1",
+      "targets": [
+        "README.md",
+        "tests/test_cimp_cur_12.py"
+      ],
+      "acceptance": [
+        "README.md links to docs/architecture/current_layout.md and keeps the archive, shim, schema, and architecture links."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_12.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only README.md and tests/test_cimp_cur_12.py.\nAdd one resolving markdown link to docs/architecture/current_layout.md. Keep these sentences present: docs/archive/sessions, docs/archive/reports, root shims, complaint-generator/module-interface@1, and 1.0.0. Keep resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not add or remove a root markdown file. The root markdown set stays README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md.\nThe test fails if that new link is missing or does not resolve, or if a required sentence or existing architecture link is missing."
+    },
+    {
+      "id": "CIMP-CUR-13",
+      "title": "Remove the fictional deployment home from the deployment guide",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-guides",
+      "priority": "P1",
+      "targets": [
+        "docs/DEPLOYMENT.md",
+        "tests/test_cimp_cur_13.py"
+      ],
+      "acceptance": [
+        "The deployment guide no longer contains /home/complaint-app, and it still names config.llm_router.json and config.review_surface.json."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_13.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/DEPLOYMENT.md and tests/test_cimp_cur_13.py.\nRemove every occurrence of /home/complaint-app. Where a unit or container example used that prefix, use a repository-relative command that still runs python run.py with config.llm_router.json or config.review_surface.json. Do not add a new URL. Do not move the JSON files. The test fails if /home/complaint-app remains, or if either config filename is absent. The test must not contain a URL."
+    },
+    {
+      "id": "CIMP-CUR-14",
+      "title": "Name the current mediator entry in the mediator readme",
+      "goal_id": "CUR-docs",
+      "subgoal_id": "CUR-guides",
+      "priority": "P1",
+      "targets": [
+        "mediator/readme.md",
+        "tests/test_cimp_cur_14.py"
+      ],
+      "acceptance": [
+        "The mediator readme names mediator.interface, its three owners, the interface schema and version, and mediator/mediator.py as the Mediator owner."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_14.py"
+      ],
+      "depends_on": [],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/readme.md and tests/test_cimp_cur_14.py.\nAdd a `Current module entry` section that names mediator.interface, the owners mediator.workflow_service, mediator.hook_runtime, and mediator.state, INTERFACE_SCHEMA complaint-generator/module-interface@1, INTERFACE_VERSION 1.0.0, and mediator/mediator.py as the module that still defines Mediator. Do not say that importing the mediator package executes mediator.mediator. Do not edit mediator/interface.py or mediator/__init__.py.\nThe test fails if any required name is missing. The test must not import the package."
+    },
+    {
+      "id": "CIMP-CUR-15",
+      "title": "Lock the current layout and refresh the module map",
+      "goal_id": "CUR-closure",
+      "subgoal_id": "CUR-ratchet",
+      "priority": "P0",
+      "targets": [
+        "docs/architecture/repository_module_map.json",
+        "tests/test_cimp_cur_15.py"
+      ],
+      "acceptance": [
+        "The module map byte sizes, package list, and largest-module list match the tree, and applications/complaint_workspace.py stays the largest recorded module.",
+        "The ratchet fails if a new sibling floor slips, a locked architecture document changes, a stale index or future-UI claim returns, or an interface owner list changes."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_cur_15.py"
+      ],
+      "depends_on": [
+        "CIMP-CUR-01",
+        "CIMP-CUR-02",
+        "CIMP-CUR-03",
+        "CIMP-CUR-04",
+        "CIMP-CUR-05",
+        "CIMP-CUR-06",
+        "CIMP-CUR-07",
+        "CIMP-CUR-08",
+        "CIMP-CUR-09",
+        "CIMP-CUR-10",
+        "CIMP-CUR-11",
+        "CIMP-CUR-12",
+        "CIMP-CUR-13",
+        "CIMP-CUR-14"
+      ],
+      "submodules": [],
+      "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, or any tests/test_cimp_sea_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json. CIMP-CUR-15 is the only task that updates that map. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/architecture/repository_module_map.json and tests/test_cimp_cur_15.py.\nRefresh path byte_size and init_path init_byte_size from the tree. packages must equal the discovered top-level packages. largest_python_modules is the 15 largest Python files by byte size descending, then path ascending. Keep schema complaint-generator/repository-module-map@1, task_id CIMP-MOD-01, source_files_moved true, and source_files_rewritten false. largest_python_modules[0].path must stay applications/complaint_workspace.py. Walk skips .git, .venv, __pycache__, artifacts, complaint_generator.egg-info, data, external, node_modules, output, statefiles, and workspace.\nThe test also fails unless complaint_phases/document_pipeline.py has at most 7950 lines and complaint_phases/document_pipeline_allegations.py has at least 700, mediator/claim_support_hooks.py has at most 7700 lines and mediator/claim_support_persistence.py has at least 650, and mediator/mediator.py has at most 10750 lines and mediator/mediator_temporal.py has at least 380.\nThe test fails if the sha256 of docs/architecture/consolidation_modules.md is not 0fe1e10d04ffe3949eac0266ba30675535b9ff8a438c3351bd9d4c4a82878e2e, if the sha256 of docs/architecture/module_boundaries.md is not ea85b8f33fa2214e464ebbec700c715c3f9274b58677395141bc90f70815dea8, or if the sha256 of docs/architecture/module_seams.md is not 3d811e249073b56928553e16ce25a41b1385072993d952dab582ccb58cd06256.\nThe test fails if DOCUMENTATION_INDEX.md contains 79+, 13 root-level, 61 docs/, or 250+, if docs/ARCHITECTURE.md contains `Browser-based UI (future)`, `RESTful API for integrations (future)`, or docs/REFACTOR_SUPERVISOR_TASKBOARD.md, or if docs/DEPLOYMENT.md contains /home/complaint-app.\nREADME.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, and TESTING.md must each link to docs/architecture/current_layout.md. The root markdown set must stay exactly those four files plus TODO.md. The five root shims intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, and claim_support_review.py must each be at most 40 lines, define no function or class, and still delegate.\nThe eight root config JSON files named in CIMP-CUR-07 must still exist at the repository root.\nParse every product interface.py with ast. Do not import those modules. The headings and owner bullets in docs/architecture/module_boundaries.md must still equal the discovered interface paths and their OWNER_MODULES, and each file must still assign INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0.\nDo not import tests from earlier campaigns. Build any facade stem by concatenation so the test source does not contain the banned contiguous substrings."
+    }
+  ]
+}
