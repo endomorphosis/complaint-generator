@@ -58,7 +58,7 @@ Implementation instructions:
 
 ## CIMP-COH-03 Move retrieval sessions and proof cards out of the claim-support hook
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
