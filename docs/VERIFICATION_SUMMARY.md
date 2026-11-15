@@ -66,10 +66,13 @@ Architectural changes often require more than one lane:
 
 ## P0 Workstream Commands
 
-The P0 workstreams are defined in `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md` and
-cross-linked from `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`. Each has one named,
-executable validation command. The aliases intentionally compose lanes where a
-workstream crosses architectural seams.
+The P0 workstreams are defined in `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md`.
+The current checkout layout is recorded in
+[docs/architecture/current_layout.md](architecture/current_layout.md).
+Campaign plans are compiled by the `improvement_plan.py` module under the
+accelerate facade directory `integrations/ipfs_accelerate/`. Each workstream has
+one named, executable validation command. The aliases intentionally compose
+lanes where a workstream crosses architectural seams.
 
 | P0 workstream | Named validation command | Lanes exercised |
 | --- | --- | --- |
