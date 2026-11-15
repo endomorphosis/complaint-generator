@@ -187,7 +187,7 @@ Implementation instructions:
 
 ## CIMP-COH-08 Name the datasets interface in a datasets package note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
