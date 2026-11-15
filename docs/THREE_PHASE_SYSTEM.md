@@ -361,6 +361,30 @@ The three-phase system integrates with existing mediator capabilities:
 - **Memory:** Graphs are lightweight, stored as dictionaries
 - **Persistence:** JSON serialization enables resumption across sessions
 
+## Current modules
+
+New code imports `complaint_phases.interface`. That module is the versioned public surface for the package. It records owner modules and symbol names without importing those owners or starting a phase pipeline.
+
+The interface owners are:
+
+- `complaint_phases.phase_manager`
+- `complaint_phases.knowledge_graph`
+- `complaint_phases.intake_case_file`
+
+`complaint_phases/interface.py` assigns:
+
+- `INTERFACE_SCHEMA` `complaint-generator/module-interface@1`
+- `INTERFACE_VERSION` `1.0.0`
+
+Extracted phase siblings live beside the owners. They are:
+
+- `complaint_phases/denoiser_questions.py`
+- `complaint_phases/denoiser_bindings.py`
+- `complaint_phases/denoiser_question_disposition.py`
+- `complaint_phases/document_pipeline_email.py`
+
+The phase-manager section above still describes `complaint_phases/phase_manager.py`, including `ComplaintPhase` and `PhaseManager`.
+
 ## Future Enhancements
 
 Potential improvements for future versions:
