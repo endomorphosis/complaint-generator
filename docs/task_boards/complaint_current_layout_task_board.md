@@ -268,7 +268,7 @@ Implementation instructions:
 
 ## CIMP-CUR-09 Add the current-layout note without copying locked tables
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
