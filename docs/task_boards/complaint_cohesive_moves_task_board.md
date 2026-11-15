@@ -237,7 +237,7 @@ Implementation instructions:
 
 ## CIMP-COH-10 Name the versioned backend entry in the LLM router guide
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
