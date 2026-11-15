@@ -110,7 +110,7 @@ Implementation instructions:
 
 ## CIMP-COH-05 Move canonical formalization out of the datasets logic module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
