@@ -238,7 +238,7 @@ Implementation instructions:
 
 ## CIMP-ORG-08 Name the backend interface in the backends guide
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
