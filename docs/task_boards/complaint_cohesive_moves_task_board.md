@@ -162,7 +162,7 @@ Implementation instructions:
 
 ## CIMP-COH-07 Name the backend interface in a backends package note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
