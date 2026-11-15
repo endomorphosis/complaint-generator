@@ -385,7 +385,7 @@ Implementation instructions:
 
 ## CIMP-ORG-13 Lock the owner currency and refresh the recorded sizes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
