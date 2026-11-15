@@ -212,7 +212,7 @@ Implementation instructions:
 
 ## CIMP-COH-09 Name the mike interface in a mike package note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
