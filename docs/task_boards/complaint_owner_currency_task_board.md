@@ -355,7 +355,7 @@ Implementation instructions:
 
 ## CIMP-ORG-12 Link the index to the new owner note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
