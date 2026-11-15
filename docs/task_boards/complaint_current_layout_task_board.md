@@ -42,7 +42,7 @@ Implementation instructions:
 
 ## CIMP-CUR-02 Move claim-support persistence out of ClaimSupportHook
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
