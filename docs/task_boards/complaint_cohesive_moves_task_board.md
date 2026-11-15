@@ -32,7 +32,7 @@ Implementation instructions:
 
 ## CIMP-COH-02 Move workflow-phase planning out of the adversarial optimizer
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
