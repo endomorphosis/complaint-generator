@@ -138,14 +138,14 @@ chmod 700 statefiles
 
 #### 4. Configure Environment
 
-Create `/home/complaint-app/.env`:
+Create `.env` in the repository root:
 ```bash
 OPENAI_API_KEY=sk-prod-...
 BRAVE_SEARCH_API_KEY=...
 JWT_SECRET_KEY=<generate-securely>
 SERVER_HOSTNAME=https://yourdomain.com
 LOG_LEVEL=INFO
-DATABASE_PATH=/home/complaint-app/complaint-generator/statefiles
+DATABASE_PATH=statefiles
 ```
 
 **Generate secure JWT key:**
@@ -170,10 +170,10 @@ After=network.target
 Type=simple
 User=complaint-app
 Group=complaint-app
-WorkingDirectory=/home/complaint-app/complaint-generator
-Environment="PATH=/home/complaint-app/complaint-generator/venv/bin"
-EnvironmentFile=/home/complaint-app/.env
-ExecStart=/home/complaint-app/complaint-generator/venv/bin/python run.py --config config.llm_router.json
+WorkingDirectory=.
+Environment="PATH=venv/bin"
+EnvironmentFile=.env
+ExecStart=python run.py --config config.llm_router.json
 Restart=always
 RestartSec=10
 
@@ -182,7 +182,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/home/complaint-app/complaint-generator/statefiles /home/complaint-app/complaint-generator/logs
+ReadWritePaths=statefiles logs
 
 [Install]
 WantedBy=multi-user.target
@@ -211,10 +211,10 @@ After=network.target
 Type=simple
 User=complaint-app
 Group=complaint-app
-WorkingDirectory=/home/complaint-app/complaint-generator
-Environment="PATH=/home/complaint-app/complaint-generator/venv/bin"
-EnvironmentFile=/home/complaint-app/.env
-ExecStart=/home/complaint-app/complaint-generator/venv/bin/python run.py --config config.review_surface.json
+WorkingDirectory=.
+Environment="PATH=venv/bin"
+EnvironmentFile=.env
+ExecStart=python run.py --config config.review_surface.json
 Restart=always
 RestartSec=10
 
@@ -222,7 +222,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/home/complaint-app/complaint-generator/statefiles /home/complaint-app/complaint-generator/logs
+ReadWritePaths=statefiles logs
 
 [Install]
 WantedBy=multi-user.target
@@ -252,10 +252,10 @@ After=network.target
 Type=simple
 User=complaint-app
 Group=complaint-app
-WorkingDirectory=/home/complaint-app/complaint-generator
-Environment="PATH=/home/complaint-app/complaint-generator/.venv/bin:/usr/local/bin:/usr/bin"
-EnvironmentFile=/home/complaint-app/.env
-ExecStart=/home/complaint-app/complaint-generator/.venv/bin/python -m complaint_generator.ui_optimizer_daemon run --user-id demo-user --daemon-root /home/complaint-app/complaint-generator/artifacts/ui-optimizer-daemon/demo-user --max-rounds 2 --poll-seconds 1800 --goal "keep export and testimony actions obvious" --goal "make the generated complaint read like a formal pleading" --use-llm-draft --json
+WorkingDirectory=.
+Environment="PATH=.venv/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile=.env
+ExecStart=python -m complaint_generator.ui_optimizer_daemon run --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --max-rounds 2 --poll-seconds 1800 --goal "keep export and testimony actions obvious" --goal "make the generated complaint read like a formal pleading" --use-llm-draft --json
 Restart=always
 RestartSec=30
 
@@ -263,7 +263,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/home/complaint-app/complaint-generator/.complaint_workspace /home/complaint-app/complaint-generator/artifacts
+ReadWritePaths=.complaint_workspace artifacts
 
 [Install]
 WantedBy=multi-user.target
@@ -352,7 +352,7 @@ server {
     
     # Static files (if serving directly)
     location /static/ {
-        alias /home/complaint-app/complaint-generator/static/;
+        alias static/;
         expires 30d;
         add_header Cache-Control "public, immutable";
     }
@@ -434,7 +434,7 @@ For the dedicated review surface service, probe `/health` instead:
 
 ```bash
 #!/bin/bash
-# /home/complaint-app/backup.sh
+# backup.sh (run from the repository root)
 
 BACKUP_DIR="/var/backups/complaint-generator"
 DATE=$(date +%Y%m%d_%H%M%S)
@@ -442,10 +442,10 @@ DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p $BACKUP_DIR
 
 # Backup database
-cp -r /home/complaint-app/complaint-generator/statefiles $BACKUP_DIR/statefiles_$DATE
+cp -r statefiles $BACKUP_DIR/statefiles_$DATE
 
 # Backup logs
-tar czf $BACKUP_DIR/logs_$DATE.tar.gz /home/complaint-app/complaint-generator/logs
+tar czf $BACKUP_DIR/logs_$DATE.tar.gz logs
 
 # Keep only last 7 days
 find $BACKUP_DIR -mtime +7 -delete
@@ -456,7 +456,7 @@ find $BACKUP_DIR -mtime +7 -delete
 
 Add to crontab:
 ```bash
-0 2 * * * /home/complaint-app/backup.sh
+0 2 * * * ./backup.sh
 ```
 
 ## Docker Deployment
