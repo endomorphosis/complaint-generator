@@ -238,7 +238,7 @@ Implementation instructions:
 
 ## CIMP-CUR-08 Point the applications guide at the versioned application entry
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
