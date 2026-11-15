@@ -50,7 +50,7 @@ modules.
 | UI optimizer daemon | `complaint-ui-optimizer-daemon` -> `complaint_generator.ui_optimizer_daemon:main` | `complaint_generator/ui_optimizer_daemon.py` | Long-running UI optimization daemon with status, logs, screenshots, and review artifacts. | Align daemon status payloads with other daemons; keep task derivation separate from process lifecycle code. |
 | Review API | `applications.review_api:create_review_api_app` | `applications/review_api.py`, `applications/document_api.py` | FastAPI claim-support and document review endpoints. | Keep route handlers as DTO adapters; move normalization and payload assembly behind explicit helpers. |
 | Dashboard UI | `applications.dashboard_ui` | `applications/dashboard_ui.py`, templates/static assets | Browser dashboard, review hub, IPFS dashboard links, and fixture-backed display surfaces. | Split fixture/data assembly from route rendering before changing UI behavior. |
-| Refactor supervisor | `scripts/refactor_agent_supervisor.py` | `data/refactor_supervisor/*`, `docs/REFACTOR_SUPERVISOR_TASKBOARD.md` | Codebase scan, goal/subgoal generation, DuckDB taskboard refill using `ipfs_accelerate_py.p2p_tasks.TaskQueue`. | Planning-only daemon; implementation agents should claim scoped tasks and run the task's validation command. |
+| Refactor supervisor | `scripts/refactor_agent_supervisor.py` | `scripts/refactor_agent_supervisor.py` is an older operator script. Campaign plans are compiled by `integrations/ipfs_accelerate/improvement_plan.py`. | Older operator script. Campaign plans are compiled by `integrations/ipfs_accelerate/improvement_plan.py`. | Do not treat this file as the current campaign planner. |
 
 ### Package Ownership Boundaries
 
@@ -73,13 +73,13 @@ runtime modules and their first extraction direction are:
 
 | Module | Current size signal | First safe extraction |
 |---|---:|---|
-| `mediator/mediator.py` | 11053 lines | Move one cohesive workflow service behind private helpers while keeping `Mediator` public methods stable. |
+| `mediator/mediator.py` | 10693 lines | Move one cohesive workflow service behind private helpers while keeping `Mediator` public methods stable. |
 | `applications/complaint_workspace.py` | 16112 lines | Extract route/service payload builders and workspace state helpers from request-level orchestration. |
 | `scripts/synthesize_hacc_complaint.py` | 6935 lines | Split batch orchestration, data loading, and report rendering into importable helpers before behavior changes. |
 | `complaint_phases/denoiser.py` | 6968 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
 | `applications/dashboard_ui.py` | 1015 lines | Route setup stays in this module. Dashboard hub rendering lives in `applications/dashboard_hub.py`, and this module still defines `create_dashboard_ui_router`. |
 | `applications/dashboard_hub.py` | 4689 lines | Hub rendering extracted from `applications/dashboard_ui.py`. |
-| `mediator/claim_support_hooks.py` | 8279 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
+| `mediator/claim_support_hooks.py` | 7626 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
 
 ### Allowed Import Direction
 
@@ -131,8 +131,8 @@ mediator state.
 
 ### Layer 1: User Interface
 - **CLI Application** - Command-line interface for interactive complaints
-- **Web Application** - Browser-based UI (future)
-- **API Endpoints** - RESTful API for integrations (future)
+- **Web Application** - The browser UI is `applications/dashboard_ui.py` and `applications/dashboard_hub.py`.
+- **API Endpoints** - The HTTP API is `applications/server.py` and `applications/case_routes.py`.
 
 ### Layer 2: Mediator (Orchestration)
 - **Core Mediator** - Central coordinator for all operations
