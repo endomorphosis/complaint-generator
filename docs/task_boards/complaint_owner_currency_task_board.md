@@ -267,7 +267,7 @@ Implementation instructions:
 
 ## CIMP-ORG-09 Retire the old supervisor taskboard from the verification summary
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
