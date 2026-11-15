@@ -1,0 +1,1452 @@
+{
+  "abstraction_ids": [],
+  "actors": [
+    {
+      "actor_id": "actor.complaint_improvement",
+      "authority_ids": [],
+      "capabilities": [
+        "behavioral_validation",
+        "implementation"
+      ],
+      "contract_version": 1,
+      "kind": "agent",
+      "metadata": {
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        }
+      },
+      "principal_id": "complaint-generator",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-actor@1"
+    }
+  ],
+  "contract_version": 1,
+  "effects": [],
+  "events": [],
+  "evidence_requirements": [
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_01.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "ComplaintDenoiser.process_answer is a one-line call into denoiser_answer, and select_question_candidates still has its body.",
+          "complaint_phases/denoiser.py has at most 5200 lines and complaint_phases/denoiser_answer.py has at least 1800 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_01.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-01",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-01",
+        "ORG-extract",
+        "ORG-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_02.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named temporal functions are defined in temporal_reasoning and only re-exported by logic.py.",
+          "integrations/ipfs_datasets/logic.py has at most 7200 lines and integrations/ipfs_datasets/temporal_reasoning.py has at least 550 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_02.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-02",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-02",
+        "ORG-extract",
+        "ORG-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_03.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named search methods are one-line calls into legal_authority_search, and search_case_law still has its body.",
+          "mediator/legal_authority_hooks.py has at most 3150 lines and mediator/legal_authority_search.py has at least 560 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_03.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-03",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-03",
+        "ORG-extract",
+        "ORG-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_04.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "find_gaps, build_from_text, and merge_with are one-line calls into knowledge_graph_build, and record_answer_graph_revision still has its body.",
+          "complaint_phases/knowledge_graph.py has at most 3120 lines and complaint_phases/knowledge_graph_build.py has at least 700 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_04.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-04",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-04",
+        "ORG-extract",
+        "ORG-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_05.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The named legacy functions are defined in private_storage_legacy and only re-exported by private_storage.py.",
+          "integrations/private_storage.py has at most 8100 lines and integrations/private_storage_legacy.py has at least 450 lines."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_05.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-05",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-05",
+        "ORG-extract",
+        "ORG-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_06.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The analysis readme names complaint_analysis.interface, its three owners, and the interface schema and version."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_06.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-06",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-06",
+        "ORG-docs",
+        "ORG-packages"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_07.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The harness readme names adversarial_harness.interface, its three owners, and the interface schema and version."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_07.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-07",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-07",
+        "ORG-docs",
+        "ORG-packages"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_08.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The backends guide names backends.interface, backends.llm_router_backend, and the interface schema and version."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_08.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-08",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-08",
+        "ORG-docs",
+        "ORG-packages"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_09.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The verification summary no longer names the old refactor taskboard and links to the current-layout note."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_09.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-09",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-09",
+        "ORG-docs",
+        "ORG-packages"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_10.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "lib/README.md names lib.interface, its three owners, and the interface schema and version, and it does not name the legacy lib modules."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_10.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-10",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-10",
+        "ORG-docs",
+        "ORG-packages"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_11.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "owner_currency.md lists the five new sibling modules and their owners, and each sibling meets its line floor."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_11.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-11",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-11",
+        "ORG-docs",
+        "ORG-record"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_12.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The index links to docs/architecture/owner_currency.md and still keeps the archive, shim, schema, and current-layout sentences."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_12.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-12",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-12",
+        "ORG-docs",
+        "ORG-record"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_org_13.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The module map matches the tree and applications/complaint_workspace.py stays the largest recorded module.",
+          "The architecture size column matches splitlines(), and the ratchet fails if a new floor slips or a locked document changes."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_13.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-ORG-13",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-ORG-13",
+        "ORG-closure",
+        "ORG-ratchet"
+      ]
+    }
+  ],
+  "fluents": [],
+  "formulas": [
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "ORG-docs",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "ORG-closure",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "ORG-ratchet",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "ORG-packages",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "ORG-record",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "ORG-modules",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "ORG-extract",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    }
+  ],
+  "goals": [
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-13"
+      ],
+      "goal_id": "ORG-closure",
+      "metadata": {
+        "title": "Lock the owner currency with an independent ratchet"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeera2wzrfvitrnptwshozamhby4hyz72kiayg2htk74h5ltb4ubdbncq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_owner_currency_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-06",
+        "test.CIMP-ORG-07",
+        "test.CIMP-ORG-08",
+        "test.CIMP-ORG-09",
+        "test.CIMP-ORG-10",
+        "test.CIMP-ORG-11",
+        "test.CIMP-ORG-12"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "title": "Name the current package entries and record the new siblings"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeera2m5ckemvoizig3puipa5irmxm6x26z7lt33gyupy2qr2v2hagikq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_owner_currency_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-01",
+        "test.CIMP-ORG-02",
+        "test.CIMP-ORG-03",
+        "test.CIMP-ORG-04",
+        "test.CIMP-ORG-05"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "title": "Move the next five cohesive bodies into sibling modules"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeeraylddtdsrzxnx4yik4qb6ijlurwwri6kg4qqzqadstao667pnqxuq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_owner_currency_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    }
+  ],
+  "metadata": {
+    "evidence_policy": "Ingestion and bounded consistency are not execution or task completion.",
+    "execution_policy": {
+      "automatic_fallback": false,
+      "context_exclude": [
+        ".complaint_workspace/**",
+        ".complaint_workspace*/**",
+        "data/**",
+        "output/**",
+        "statefiles/**",
+        "exports/**",
+        "secrets/**",
+        "evidence/**",
+        "uploads/**",
+        "attachments/**",
+        ".env*",
+        "*.key",
+        "*.pem",
+        "workspace/**",
+        "artifacts/**",
+        "external/**"
+      ],
+      "deployment": false,
+      "development_inputs": "Local baseline is the current-layout tip 4c1601450 on codex/owner-currency-20261115. origin/main is 9b4974f86 and does not contain the current-layout commits. GitHub master stays the default branch. Do not push, force-push, rebase onto origin/main, or change the default branch.",
+      "implementation_provider_scope": "Authorized Grok 4.7 development implementation via llm_router. Offline tests do not disable that provider process. Development permission is not consent to case-data egress.",
+      "implementation_timeout_seconds": 900,
+      "initial_lanes": 4,
+      "initial_ready_task": "CIMP-ORG-01",
+      "live_exceptions": [],
+      "manual_holds_respected": true,
+      "max_agent_turns": 64,
+      "max_task_attempts": 3,
+      "merge_target": "codex/owner-currency-20261115",
+      "native_task_source_profile": "explicit legacy-markdown projection of the Native FormalWorkPlan",
+      "offline_default": true,
+      "parallelism": "CIMP-ORG-01 through CIMP-ORG-10 edit disjoint files and have no dependencies. CIMP-ORG-11 waits for the five extractions. CIMP-ORG-12 waits for that note. CIMP-ORG-13 waits for every earlier task.",
+      "product_inference": "This plan does not change case inference, consent, or legal conclusions.",
+      "protected_state": "The completed intake, mediator-grounding, GUI collaboration, GUI UX, repository-reorganization, repository-consolidation, module-depth, module-boundaries, module-seams, and current-layout campaigns, both retained quarantines, submodule pins, and unrelated campaign processes stay untouched. completion_authority stays false. integrations/ipfs_accelerate/improvement_runner.py stays out of the task targets.",
+      "provider_role": "grok-only",
+      "qualification_scope": "One focused pytest command per task. Do not run the full historical suite inside the 900-second task budget.",
+      "remote_push": false,
+      "required_evidence": [
+        "A focused pytest module with positive checks and zero skips",
+        "Extracted symbols defined in the sibling and no longer implemented in the owner",
+        "Package notes that name the existing versioned interface owners",
+        "Locked architecture documents and interface owner lists left byte-for-byte in place"
+      ],
+      "stop_semantics": "A test that passes while a named body still lives in the owner, or while a package note still omits its interface, is a failed task. Do not mark a task complete by hand.",
+      "upstream_checkout_policy": "Use the pinned external checkouts. Do not float pins, recursively initialize submodules, or clone CommonCrawl.",
+      "validation_timeout_seconds": 900,
+      "worktree_pool_max_entries": 4
+    },
+    "provider": {
+      "allow_fallback": false,
+      "model": "grok-4.7",
+      "provider": "grok_cli",
+      "router": "ipfs_accelerate_py.llm_router"
+    },
+    "spec_sha256": "a9ecc2222f8f2cf694a460e9fe9d28b3c1e1704923b0f4ab6409de4832da93d8",
+    "title": "Move the next owner bodies and name the current package entries"
+  },
+  "norms": [],
+  "plan_id": "baguqeerat4vuujo3nk4wppfj4tqfdpvnrph5tgdoqkf2zq6xbzevmx4sdfzq",
+  "preconditions": [],
+  "repository_tree_id": "",
+  "schema": "ipfs_accelerate_py/agent-supervisor/formal-work-plan@1",
+  "source_ids": [
+    "complaint-generator",
+    "docs/task_boards/complaint_owner_currency_spec.json"
+  ],
+  "subgoals": [
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-01",
+        "test.CIMP-ORG-02",
+        "test.CIMP-ORG-03",
+        "test.CIMP-ORG-04",
+        "test.CIMP-ORG-05"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "title": "Extract answer processing, temporal reasoning, authority search, graph build, and legacy private migration"
+      },
+      "parent_id": "ORG-modules",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeerayqfxa4umcgaiaeecbdh7ywtojseowiy3ynmqsmpjpaa66ardmvkq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "ORG-extract"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-06",
+        "test.CIMP-ORG-07",
+        "test.CIMP-ORG-08",
+        "test.CIMP-ORG-09",
+        "test.CIMP-ORG-10"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "title": "Point the analysis, harness, backend, verification, and lib notes at the existing interfaces"
+      },
+      "parent_id": "ORG-docs",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeral6tijanxyy3ggxhnp5gczmxfy6uq6svt5px6kq7spcktjctbzeeq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "ORG-packages"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-13"
+      ],
+      "goal_id": "ORG-closure",
+      "metadata": {
+        "title": "Refresh recorded sizes and fail if a moved body or a locked document slips"
+      },
+      "parent_id": "ORG-closure",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeraffuyedtrvmglu3msqmpyzsk3vj5yom5lxkryesitepziyoxsn34q",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "ORG-ratchet"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-11",
+        "test.CIMP-ORG-12"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "title": "Record the five new siblings and link them from the index"
+      },
+      "parent_id": "ORG-docs",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeranoctvp2t4qkhlsqpaiznnp5qdcpkplu3yp7patsahqnm2wrrvdpq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "ORG-record"
+    }
+  ],
+  "tasks": [
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-01"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "acceptance": [
+          "ComplaintDenoiser.process_answer is a one-line call into denoiser_answer, and select_question_candidates still has its body.",
+          "complaint_phases/denoiser.py has at most 5200 lines and complaint_phases/denoiser_answer.py has at least 1800 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_phases/denoiser.py, complaint_phases/denoiser_answer.py, and tests/test_cimp_org_01.py.\nMove ComplaintDenoiser.process_answer into denoiser_answer. Leave select_question_candidates implemented on ComplaintDenoiser. Do not edit denoiser_questions.py, denoiser_bindings.py, or denoiser_question_disposition.py. Do not move select_question_candidates or project_stopping_policy.\n\nEach moved owner method is exactly one Return of a Call to denoiser_answer.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import denoiser_answer` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 5200 lines and the sibling has at least 1800 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_answer.py",
+          "tests/test_cimp_org_01.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_answer.py",
+          "tests/test_cimp_org_01.py"
+        ],
+        "title": "Move answer processing out of ComplaintDenoiser",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_01.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-extract",
+      "task_id": "CIMP-ORG-01",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-02"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "acceptance": [
+          "The named temporal functions are defined in temporal_reasoning and only re-exported by logic.py.",
+          "integrations/ipfs_datasets/logic.py has at most 7200 lines and integrations/ipfs_datasets/temporal_reasoning.py has at least 550 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only integrations/ipfs_datasets/logic.py, integrations/ipfs_datasets/temporal_reasoning.py, and tests/test_cimp_org_02.py.\nMove these module-level functions into temporal_reasoning: _build_temporal_reasoning_payload, evaluate_temporal_requirement_applicability, _normalize_temporal_proof_bundle, _normalize_claim_support_temporal_handoff, _temporal_input_reason, _build_temporal_formula_for_fact, _unavailable_temporal_applicability, _temporal_authority_api, _label_temporal_status.\nLeave prepare_acquired_authority_record and route_bound_legal_ir_proof defined in logic.py. Do not edit canonical_legal_ir.py or legal_corpus.py.\n\nThese are module-level functions. The sibling defines each moved function with its current body and no decorator. The owner must no longer contain a function definition for those names. At the end of the owner, re-export them with `from .temporal_reasoning import` and the moved names. Do not copy the bodies into the owner.\nThe owner file has at most 7200 lines and the sibling has at least 550 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved name, if the sibling is missing one, if a sentinel is missing or has only one statement, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/ipfs_datasets/logic.py",
+          "integrations/ipfs_datasets/temporal_reasoning.py",
+          "tests/test_cimp_org_02.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/ipfs_datasets/logic.py",
+          "integrations/ipfs_datasets/temporal_reasoning.py",
+          "tests/test_cimp_org_02.py"
+        ],
+        "title": "Move temporal reasoning out of the datasets logic module",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_02.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-extract",
+      "task_id": "CIMP-ORG-02",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-03"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "acceptance": [
+          "The named search methods are one-line calls into legal_authority_search, and search_case_law still has its body.",
+          "mediator/legal_authority_hooks.py has at most 3150 lines and mediator/legal_authority_search.py has at least 560 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only mediator/legal_authority_hooks.py, mediator/legal_authority_search.py, and tests/test_cimp_org_03.py.\nOn LegalAuthoritySearchHook move build_search_programs, search_all_sources, _search_courtlistener_fallback, _normalize_courtlistener_result, _search_oregon_statutes_fallback, _search_federal_statutes_fallback, _search_ecfr_fallback, _search_agency_guidance_fallback, and _collect_search_diagnostics. On LegalAuthorityStorageHook move _build_search_program_records, _normalize_search_programs, and _build_search_program_summary.\nLeave search_case_law implemented on LegalAuthoritySearchHook. Do not move search_state_laws, search_us_code, search_federal_register, search_administrative_law, search_web_archives, or _generate_search_terms. Do not edit legal_authority_storage.py.\n\nEach moved owner method is exactly one Return of a Call to legal_authority_search.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import legal_authority_search` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 3150 lines and the sibling has at least 560 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "mediator/legal_authority_hooks.py",
+          "mediator/legal_authority_search.py",
+          "tests/test_cimp_org_03.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "mediator/legal_authority_hooks.py",
+          "mediator/legal_authority_search.py",
+          "tests/test_cimp_org_03.py"
+        ],
+        "title": "Move authority search programs out of the legal-authority hooks",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_03.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-extract",
+      "task_id": "CIMP-ORG-03",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-04"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "acceptance": [
+          "find_gaps, build_from_text, and merge_with are one-line calls into knowledge_graph_build, and record_answer_graph_revision still has its body.",
+          "complaint_phases/knowledge_graph.py has at most 3120 lines and complaint_phases/knowledge_graph_build.py has at least 700 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_phases/knowledge_graph.py, complaint_phases/knowledge_graph_build.py, and tests/test_cimp_org_04.py.\nMove KnowledgeGraph.find_gaps, KnowledgeGraphBuilder.build_from_text, and KnowledgeGraph.merge_with into knowledge_graph_build. Leave the module-level function record_answer_graph_revision defined in knowledge_graph.py. Do not edit intake_case_file.py.\n\nEach moved owner method is exactly one Return of a Call to knowledge_graph_build.method_name. The sibling function has an empty decorator list and a body longer than one statement. Do not pad a body that already has more than one statement.\nKeep a classmethod or staticmethod decorator on the owner method. A classmethod call passes cls. A staticmethod call passes no receiver. Any other call passes the owner's first parameter as its first argument.\nAppend `from . import knowledge_graph_build` at column 0 after the owner's helpers are bound. Do not redefine the moved names. Preserve the owner's indentation.\nThe owner file has at most 3120 lines and the sibling has at least 700 lines.\nThe test parses both files with ast. It fails if a named method still has its old body, if a sentinel is missing or has only one statement, if the sibling decorates the function, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_phases/knowledge_graph.py",
+          "complaint_phases/knowledge_graph_build.py",
+          "tests/test_cimp_org_04.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "complaint_phases/knowledge_graph.py",
+          "complaint_phases/knowledge_graph_build.py",
+          "tests/test_cimp_org_04.py"
+        ],
+        "title": "Move gap finding and text build out of the knowledge graph",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_04.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-extract",
+      "task_id": "CIMP-ORG-04",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-05"
+      ],
+      "goal_id": "ORG-modules",
+      "metadata": {
+        "acceptance": [
+          "The named legacy functions are defined in private_storage_legacy and only re-exported by private_storage.py.",
+          "integrations/private_storage.py has at most 8100 lines and integrations/private_storage_legacy.py has at least 450 lines."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only integrations/private_storage.py, integrations/private_storage_legacy.py, and tests/test_cimp_org_05.py.\nMove these module-level functions into private_storage_legacy: _legacy_hook_migration, delete_private_case, and reconstruct_workflow_continuity.\nLeave publish_case_manifest defined in private_storage.py. Do not move any UserOwnedKeySession method. Do not change key derivation, wrapping, revocation, or recovery proofs. Copy the three bodies verbatim. Do not edit private_workspace_transfer.py.\n\nThese are module-level functions. The sibling defines each moved function with its current body and no decorator. The owner must no longer contain a function definition for those names. At the end of the owner, re-export them with `from .private_storage_legacy import` and the moved names. Do not copy the bodies into the owner.\nThe owner file has at most 8100 lines and the sibling has at least 450 lines.\nThe test parses both files with ast. It fails if the owner still defines a moved name, if the sibling is missing one, if a sentinel is missing or has only one statement, or if a line count misses its floor.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "integrations/private_storage.py",
+          "integrations/private_storage_legacy.py",
+          "tests/test_cimp_org_05.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "integrations/private_storage.py",
+          "integrations/private_storage_legacy.py",
+          "tests/test_cimp_org_05.py"
+        ],
+        "title": "Move legacy private-storage migration out of the storage owner",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_05.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-extract",
+      "task_id": "CIMP-ORG-05",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-06"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "The analysis readme names complaint_analysis.interface, its three owners, and the interface schema and version."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only complaint_analysis/README.md and tests/test_cimp_org_06.py.\nAdd a Current entry section that names complaint_analysis.interface, the owners complaint_analysis.analyzer, complaint_analysis.legal_patterns, and complaint_analysis.response_parsers, INTERFACE_SCHEMA complaint-generator/module-interface@1, and INTERFACE_VERSION 1.0.0. Do not edit complaint_analysis/interface.py. The test fails if any required name is missing. The test must not import the package.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_analysis/README.md",
+          "tests/test_cimp_org_06.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "complaint_analysis/README.md",
+          "tests/test_cimp_org_06.py"
+        ],
+        "title": "Name the analysis interface in the analysis readme",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_06.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-packages",
+      "task_id": "CIMP-ORG-06",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-07"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "The harness readme names adversarial_harness.interface, its three owners, and the interface schema and version."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only adversarial_harness/README.md and tests/test_cimp_org_07.py.\nAdd a Current entry section that names adversarial_harness.interface, the owners adversarial_harness.harness, adversarial_harness.optimizer, and adversarial_harness.session, INTERFACE_SCHEMA complaint-generator/module-interface@1, and INTERFACE_VERSION 1.0.0. Do not edit adversarial_harness/interface.py. The test fails if any required name is missing. The test must not import the package.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "adversarial_harness/README.md",
+          "tests/test_cimp_org_07.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "adversarial_harness/README.md",
+          "tests/test_cimp_org_07.py"
+        ],
+        "title": "Name the harness interface in the harness readme",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_07.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-packages",
+      "task_id": "CIMP-ORG-07",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-08"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "The backends guide names backends.interface, backends.llm_router_backend, and the interface schema and version."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/BACKENDS.md and tests/test_cimp_org_08.py.\nAdd a Current entry section that names backends.interface, the owner backends.llm_router_backend, INTERFACE_SCHEMA complaint-generator/module-interface@1, and INTERFACE_VERSION 1.0.0. Do not edit backends/interface.py. Do not move the root config JSON files. The test fails if any required name is missing. The test must not import the package.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/BACKENDS.md",
+          "tests/test_cimp_org_08.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/BACKENDS.md",
+          "tests/test_cimp_org_08.py"
+        ],
+        "title": "Name the backend interface in the backends guide",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_08.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-packages",
+      "task_id": "CIMP-ORG-08",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-09"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "The verification summary no longer names the old refactor taskboard and links to the current-layout note."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/VERIFICATION_SUMMARY.md and tests/test_cimp_org_09.py.\nRemove every mention of docs/REFACTOR_SUPERVISOR_TASKBOARD.md. Add a resolving link to docs/architecture/current_layout.md and state that campaign plans are compiled by the improvement_plan.py module under the accelerate facade directory. Build that facade stem in the test by concatenation so the test source does not contain those eight letters in a row. The test fails if the old taskboard path remains or the current-layout link does not resolve.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/VERIFICATION_SUMMARY.md",
+          "tests/test_cimp_org_09.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/VERIFICATION_SUMMARY.md",
+          "tests/test_cimp_org_09.py"
+        ],
+        "title": "Retire the old supervisor taskboard from the verification summary",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_09.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-packages",
+      "task_id": "CIMP-ORG-09",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-10"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "lib/README.md names lib.interface, its three owners, and the interface schema and version, and it does not name the legacy lib modules."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nCreate lib/README.md and tests/test_cimp_org_10.py. Do not edit lib/interface.py.\nThe readme must name lib.interface, the owners lib.log, lib.formal_logic, and lib.knowledge_graph_export, INTERFACE_SCHEMA complaint-generator/module-interface@1, and INTERFACE_VERSION 1.0.0. Do not mention lib.deontic_logic or lib.legal_document. The test fails if a required owner is missing or either legacy name appears. The test must not import the package.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "lib/README.md",
+          "tests/test_cimp_org_10.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "lib/README.md",
+          "tests/test_cimp_org_10.py"
+        ],
+        "title": "Add a lib package note for the versioned lib entry",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_10.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-packages",
+      "task_id": "CIMP-ORG-10",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-ORG-01",
+        "CIMP-ORG-02",
+        "CIMP-ORG-03",
+        "CIMP-ORG-04",
+        "CIMP-ORG-05"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-11"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "owner_currency.md lists the five new sibling modules and their owners, and each sibling meets its line floor."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/architecture/owner_currency.md and tests/test_cimp_org_11.py.\nCreate a table with these rows and no others: complaint_phases/denoiser_answer.py from complaint_phases/denoiser.py, integrations/ipfs_datasets/temporal_reasoning.py from integrations/ipfs_datasets/logic.py, mediator/legal_authority_search.py from mediator/legal_authority_hooks.py, complaint_phases/knowledge_graph_build.py from complaint_phases/knowledge_graph.py, and integrations/private_storage_legacy.py from integrations/private_storage.py. State INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0. Link to docs/architecture/current_layout.md, docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md without copying their tables.\nThe test fails unless the table equals that sequence, each sibling file exists, denoiser_answer.py has at least 1800 lines, temporal_reasoning.py has at least 550, legal_authority_search.py has at least 560, knowledge_graph_build.py has at least 700, and private_storage_legacy.py has at least 450.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/owner_currency.md",
+          "tests/test_cimp_org_11.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/architecture/owner_currency.md",
+          "tests/test_cimp_org_11.py"
+        ],
+        "title": "Record the five new owner siblings",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_11.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-record",
+      "task_id": "CIMP-ORG-11",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-ORG-11"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-12"
+      ],
+      "goal_id": "ORG-docs",
+      "metadata": {
+        "acceptance": [
+          "The index links to docs/architecture/owner_currency.md and still keeps the archive, shim, schema, and current-layout sentences."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only DOCUMENTATION_INDEX.md and tests/test_cimp_org_12.py.\nAdd one resolving markdown link to docs/architecture/owner_currency.md. Keep docs/archive/sessions, docs/archive/reports, root shims, complaint-generator/module-interface@1, 1.0.0, and resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, and docs/architecture/current_layout.md. Do not reintroduce 79+, 13 root-level, 61 docs/, or 250+. Do not add or remove a root markdown file.\nThe test fails if the new link is missing or does not resolve, or if a required sentence is missing, or if a stale statistic substring returns.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "DOCUMENTATION_INDEX.md",
+          "tests/test_cimp_org_12.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "DOCUMENTATION_INDEX.md",
+          "tests/test_cimp_org_12.py"
+        ],
+        "title": "Link the index to the new owner note",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_12.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-record",
+      "task_id": "CIMP-ORG-12",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-ORG-01",
+        "CIMP-ORG-02",
+        "CIMP-ORG-03",
+        "CIMP-ORG-04",
+        "CIMP-ORG-05",
+        "CIMP-ORG-06",
+        "CIMP-ORG-07",
+        "CIMP-ORG-08",
+        "CIMP-ORG-09",
+        "CIMP-ORG-10",
+        "CIMP-ORG-11",
+        "CIMP-ORG-12"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-ORG-13"
+      ],
+      "goal_id": "ORG-closure",
+      "metadata": {
+        "acceptance": [
+          "The module map matches the tree and applications/complaint_workspace.py stays the largest recorded module.",
+          "The architecture size column matches splitlines(), and the ratchet fails if a new floor slips or a locked document changes."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve behavior. Move or expose only the named code. A catalog, an index, or a test that allows the old definition to remain is a failed task. Do not edit external/, gitlinks, or dependency pins. Do not run git submodule update and do not initialize nested submodules. Do not touch campaign state, DuckDB, launcher files, quarantines, other task boards, or attempt counters. Do not weaken tests, skip them, or xfail them. Do not lower a line-count floor in this prompt. Do not edit docs/task_boards/complaint_repository_consolidation_task_board.md, docs/task_boards/complaint_module_depth_task_board.md, docs/task_boards/complaint_module_boundaries_task_board.md, docs/task_boards/complaint_module_seams_task_board.md, docs/task_boards/complaint_current_layout_task_board.md, tests/test_cimp_con_26.py, tests/test_cimp_mod_01.py, any tests/test_cimp_dep_*.py file, any tests/test_cimp_bnd_*.py file, any tests/test_cimp_sea_*.py file, or any tests/test_cimp_cur_*.py file. Do not restart a completed campaign. Do not edit integrations/ipfs_accelerate/improvement_runner.py. Do not edit any interface.py file. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, or docs/architecture/module_seams.md. Do not edit docs/architecture/repository_module_map.json except in CIMP-ORG-13. Do not grant completion_authority. Do not invent content identifiers or formula identifiers. Do not push. Do not change the GitHub default branch. Do not start a supervisor, a server, a browser, or a provider. Write only the declared target files.\nThe new test file must not contain the contiguous substrings https://, http://, urllib, openai, accelerate, torch, playwright, or socket. A skipped test is a failed task. Do not paste this prompt into the test. Use the repository line count from splitlines(). Do not satisfy a floor by deleting comments or docstrings from functions you did not move.\nIf a moved body references a name assigned only inside a try/except import guard, copy that same guard into the sibling. Do not import that name from the owner. If the extractor would see global or nonlocal, stop and leave the body in the owner rather than rebinding a sibling global.\n\nEdit only docs/architecture/repository_module_map.json, the size integers in docs/ARCHITECTURE.md, and tests/test_cimp_org_13.py.\nRefresh path byte_size and init_path init_byte_size from the tree. packages must equal the discovered top-level packages. largest_python_modules is the 15 largest Python files by byte size descending, then path ascending. Keep schema complaint-generator/repository-module-map@1, task_id CIMP-MOD-01, source_files_moved true, and source_files_rewritten false. largest_python_modules[0].path must stay applications/complaint_workspace.py. Walk skips .git, .venv, __pycache__, artifacts, complaint_generator.egg-info, data, external, node_modules, output, statefiles, and workspace.\nIn docs/ARCHITECTURE.md recompute every integer in ### Current Extraction Priorities from splitlines() of the named path. Do not add or remove a path in that table. Keep applications/dashboard_hub.py in it. These strings must stay absent: `10,852 lines`, `7,881 lines`, `6,933 lines`, `5,691 lines`, `5,562 lines`, `5,309 lines`, `Browser-based UI (future)`, `RESTful API for integrations (future)`, and docs/REFACTOR_SUPERVISOR_TASKBOARD.md.\nThe test fails if complaint_phases/denoiser.py has more than 5200 lines or complaint_phases/denoiser_answer.py has fewer than 1800, if integrations/ipfs_datasets/logic.py has more than 7200 lines or integrations/ipfs_datasets/temporal_reasoning.py has fewer than 550, if mediator/legal_authority_hooks.py has more than 3150 lines or mediator/legal_authority_search.py has fewer than 560, if complaint_phases/knowledge_graph.py has more than 3120 lines or complaint_phases/knowledge_graph_build.py has fewer than 700, or if integrations/private_storage.py has more than 8100 lines or integrations/private_storage_legacy.py has fewer than 450.\nThe test fails if the sha256 of docs/architecture/consolidation_modules.md is not 0fe1e10d04ffe3949eac0266ba30675535b9ff8a438c3351bd9d4c4a82878e2e, if the sha256 of docs/architecture/module_boundaries.md is not ea85b8f33fa2214e464ebbec700c715c3f9274b58677395141bc90f70815dea8, or if the sha256 of docs/architecture/module_seams.md is not 3d811e249073b56928553e16ce25a41b1385072993d952dab582ccb58cd06256.\nREADME.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, and TESTING.md must still link to docs/architecture/current_layout.md. DOCUMENTATION_INDEX.md must link to docs/architecture/owner_currency.md. The root markdown set must stay exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md. The five root shims intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, and claim_support_review.py must each be at most 40 lines, define no function or class, and still delegate. The eight root config JSON files must still exist at the repository root. docs/DEPLOYMENT.md must not contain /home/complaint-app.\nParse every product interface.py with ast. Do not import those modules. The headings and owner bullets in docs/architecture/module_boundaries.md must still equal the discovered interface paths and their OWNER_MODULES, and each file must still assign INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0.\nDo not import tests from earlier campaigns. Build any facade stem by concatenation so the test source does not contain the banned contiguous substrings.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/repository_module_map.json",
+          "docs/ARCHITECTURE.md",
+          "tests/test_cimp_org_13.py"
+        ],
+        "priority": "P0",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "submodules": [],
+        "targets": [
+          "docs/architecture/repository_module_map.json",
+          "docs/ARCHITECTURE.md",
+          "tests/test_cimp_org_13.py"
+        ],
+        "title": "Lock the owner currency and refresh the recorded sizes",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_org_13.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "ORG-ratchet",
+      "task_id": "CIMP-ORG-13",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    }
+  ],
+  "temporal_constraints": [],
+  "trace_bound": 1,
+  "vocabulary_profile_id": "supervisor-reviewed",
+  "vocabulary_version": 2
+}
