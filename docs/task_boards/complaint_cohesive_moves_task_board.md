@@ -287,7 +287,7 @@ Implementation instructions:
 
 ## CIMP-COH-12 Link the index to the cohesive-move note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
