@@ -80,14 +80,7 @@ The root `ipfs_datasets_py/` tree in this checkout is an empty compatibility dir
 - [docs/EVIDENCE_MANAGEMENT.md](docs/EVIDENCE_MANAGEMENT.md) - IPFS storage and DuckDB metadata
 - [docs/WEB_EVIDENCE_DISCOVERY.md](docs/WEB_EVIDENCE_DISCOVERY.md) - Automated web evidence discovery
 - [docs/PAYLOAD_CONTRACTS.md](docs/PAYLOAD_CONTRACTS.md) - Central reference for evidence, authority, follow-up, graph projection, and formal complaint document package payloads, including agentic document optimization
-- [docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md](docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md) - Comprehensive roadmap for improving Phase 1 intake questioning and Phase 2 evidence organization around claim-element proof readiness
-- [docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md](docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md) - Milestone-based execution backlog for intake readiness, question planning, chronology, evidence matrices, and proof-readiness scoring
-- [docs/CHRONOLOGY_FIRST_INTAKE_EVIDENCE_NEXT_BATCH_PLAN.md](docs/CHRONOLOGY_FIRST_INTAKE_EVIDENCE_NEXT_BATCH_PLAN.md) - Concrete next-batch plan for making authored intake chronology the primary execution contract across inquiry planning, evidence tasks, and readiness scoring
 - [docs/TEMPORAL_TIMELINE_PROOF_PLAN.md](docs/TEMPORAL_TIMELINE_PROOF_PLAN.md) - Comprehensive plan for turning collected evidence into a partial-order timeline and theorem-ready temporal proof bundles for TDFOL and DCEC workflows
-- [docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md](docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md) - Implementation backlog for the canonical temporal registry, claim-type timing rules, theorem exports, follow-up planning, and chronology regressions
-- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md) - Strategic roadmap for evolving `/claim-support-review` into a testimony, document, graph, retrieval, and legal-proof workflow
-- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md) - Milestone-based execution backlog with acceptance criteria, degraded-mode expectations, and validation guidance
-- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_FILE_WORKLIST.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_FILE_WORKLIST.md) - File-by-file worklist for the earliest dashboard implementation slices
 
 ### Search Integration
 - [docs/SEARCH_HOOKS.md](docs/SEARCH_HOOKS.md) - Legal corpus RAG and search integration
@@ -97,19 +90,12 @@ The root `ipfs_datasets_py/` tree in this checkout is an empty compatibility dir
 - [docs/IPFS_DATASETS_PY_INTEGRATION.md](docs/IPFS_DATASETS_PY_INTEGRATION.md) - Current-state `ipfs_datasets_py` integration guide for adapters, mediator hooks, search, parsing, graphs, and reasoning workflows
 - [integrations/README.md](integrations/README.md) - In-tree integrations overview. The root `ipfs_datasets_py/README.md` path recorded by the drift report is absent from this checkout.
 - [integrations/ipfs_datasets/legal_data.py](integrations/ipfs_datasets/legal_data.py) - In-tree legal-data owner. The drift report's `ipfs_datasets_py/scripts/ops/legal_data/README.md` target is absent from this checkout.
-- [docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md](docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md) - Comprehensive integration roadmap for legal scrapers, search, graph reasoning, theorem validation, and archival tooling
-- [docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md](docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md) - Implementation backlog with work packages, dependencies, acceptance criteria, and sprint sequencing
-- [docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md](docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md) - Concrete next implementation batches with file targets, validation commands, and stop or go criteria
 - [docs/IPFS_DATASETS_PY_BATCH1_IMPLEMENTATION_PLAN.md](docs/IPFS_DATASETS_PY_BATCH1_IMPLEMENTATION_PLAN.md) - Issue-sized Batch 1 execution plan for parse completion, corpus unification, and cross-source provenance normalization
-- [docs/IPFS_DATASETS_PY_BATCH1_SLICE1_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE1_TASKLIST.md) - Completed task list for the adapter-contract stabilization and import-boundary cleanup slice
-- [docs/IPFS_DATASETS_PY_BATCH1_SLICE2_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE2_TASKLIST.md) - Exact task list and completion notes for the archived-page corpus-normalization slice
-- [docs/IPFS_DATASETS_PY_BATCH1_SLICE3_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE3_TASKLIST.md) - Active task list for shared fact-registry completion in Batch 1
 - [docs/IPFS_DATASETS_PY_BATCH1_STATUS_AUDIT.md](docs/IPFS_DATASETS_PY_BATCH1_STATUS_AUDIT.md) - Current-state audit against Batch 1 acceptance criteria
 - [docs/IPFS_DATASETS_PY_BATCH6_IMPLEMENTATION_PLAN.md](docs/IPFS_DATASETS_PY_BATCH6_IMPLEMENTATION_PLAN.md) - Issue-sized Batch 6 execution plan for support-aware drafting, filing readiness, and `/document` workflow integration
 - [docs/IPFS_DATASETS_PY_DIRECT_IMPORT_AUDIT.md](docs/IPFS_DATASETS_PY_DIRECT_IMPORT_AUDIT.md) - Production-only audit of direct `ipfs_datasets_py` imports, separating real adapter-boundary violations from test and documentation noise
 - [docs/IPFS_DATASETS_PY_DEPENDENCY_MAP.md](docs/IPFS_DATASETS_PY_DEPENDENCY_MAP.md) - Runtime and implementation dependency map for search, archival, parsing, graphs, GraphRAG, logic, and review workflows
 - [docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md](docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md) - Milestone-by-milestone execution checklist with file targets, acceptance criteria, and validation expectations
-- [docs/IPFS_DATASETS_PY_FILE_WORKLIST.md](docs/IPFS_DATASETS_PY_FILE_WORKLIST.md) - File-by-file implementation worklist for the early milestones, with code targets and slice selection guidance
 - [docs/IPFS_DATASETS_PY_CAPABILITY_MATRIX.md](docs/IPFS_DATASETS_PY_CAPABILITY_MATRIX.md) - Validated module map and adapter targets for the checked out `ipfs_datasets_py` submodule
 - [docs/DOCUMENT_GENERATION_AGENTIC_OPTIMIZATION_PLAN.md](docs/DOCUMENT_GENERATION_AGENTIC_OPTIMIZATION_PLAN.md) - Focused next-step plan for support-aware actor/mediator/critic optimization of formal complaint document packages and rendered artifacts
 
@@ -177,14 +163,10 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 23 ex
 
 ## Documentation Statistics
 
-- **Total Markdown Files**: 79+ (13 root-level + 61 docs/ + 5 module READMEs)
-- **Module READMEs**: 5 (adversarial_harness, complaint_analysis, complaint_phases, mediator, tests)
-- **Core Documentation**: 3 (README.md, TESTING.md, CONTRIBUTING.md)
-- **Feature Documentation**: 61 docs/*.md files
+- **Root markdown set**: exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md
+- **Module READMEs**: adversarial_harness, complaint_analysis, complaint_phases, mediator, and tests
 - **Example Scripts Documented**: 23
-- **Test Files**: 100+
 - **Complaint Types Covered**: 14
-- **Total Pages of Documentation**: 250+
 
 ## Documentation by Topic
 
@@ -251,10 +233,10 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 23 ex
 - **Contribute code** → CONTRIBUTING.md
 - **Write tests** → tests/README.md, TESTING.md
 - **Integrate IPFS** → docs/IPFS_DATASETS_INTEGRATION.md
-- **Plan `ipfs_datasets_py` integration work** → docs/IPFS_DATASETS_PY_INTEGRATION.md, docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, docs/IPFS_DATASETS_PY_BATCH1_IMPLEMENTATION_PLAN.md, docs/IPFS_DATASETS_PY_DIRECT_IMPORT_AUDIT.md, docs/IPFS_DATASETS_PY_DEPENDENCY_MAP.md, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md, docs/IPFS_DATASETS_PY_FILE_WORKLIST.md, docs/DOCUMENT_GENERATION_AGENTIC_OPTIMIZATION_PLAN.md
+- **Plan `ipfs_datasets_py` integration work** → docs/IPFS_DATASETS_PY_INTEGRATION.md, docs/IPFS_DATASETS_PY_BATCH1_IMPLEMENTATION_PLAN.md, docs/IPFS_DATASETS_PY_DIRECT_IMPORT_AUDIT.md, docs/IPFS_DATASETS_PY_DEPENDENCY_MAP.md, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md, docs/DOCUMENT_GENERATION_AGENTIC_OPTIMIZATION_PLAN.md. Older roadmaps and batch notes are listed under Historical plans.
 - **Perform legal research** → docs/LEGAL_AUTHORITY_RESEARCH.md
 - **Manage evidence** → docs/EVIDENCE_MANAGEMENT.md
-- **Plan `/claim-support-review` improvement work** → docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_FILE_WORKLIST.md
+- **Plan `/claim-support-review` improvement work** → Historical plans
 - **Use search/RAG** → docs/SEARCH_HOOKS.md
 
 ## Navigation Tips
@@ -284,7 +266,26 @@ Found an issue with documentation? Please:
 2. Submit a PR with improvements
 3. Start a discussion for questions
 
+## Historical plans
+
+Older roadmaps, execution notes, batch notes, and file-level worklists stay linked here. The documents themselves remain in `docs/`.
+
+- [docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md](docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md) - Comprehensive roadmap for improving Phase 1 intake questioning and Phase 2 evidence organization around claim-element proof readiness
+- [docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md](docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md) - Milestone-based execution backlog for intake readiness, question planning, chronology, evidence matrices, and proof-readiness scoring
+- [docs/CHRONOLOGY_FIRST_INTAKE_EVIDENCE_NEXT_BATCH_PLAN.md](docs/CHRONOLOGY_FIRST_INTAKE_EVIDENCE_NEXT_BATCH_PLAN.md) - Concrete next-batch plan for making authored intake chronology the primary execution contract across inquiry planning, evidence tasks, and readiness scoring
+- [docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md](docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md) - Implementation backlog for the canonical temporal registry, claim-type timing rules, theorem exports, follow-up planning, and chronology regressions
+- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md) - Strategic roadmap for evolving `/claim-support-review` into a testimony, document, graph, retrieval, and legal-proof workflow
+- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md) - Milestone-based execution backlog with acceptance criteria, degraded-mode expectations, and validation guidance
+- [docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_FILE_WORKLIST.md](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_FILE_WORKLIST.md) - File-by-file worklist for the earliest dashboard implementation slices
+- [docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md](docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md) - Comprehensive integration roadmap for legal scrapers, search, graph reasoning, theorem validation, and archival tooling
+- [docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md](docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md) - Implementation backlog with work packages, dependencies, acceptance criteria, and sprint sequencing
+- [docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md](docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md) - Concrete next implementation batches with file targets, validation commands, and stop or go criteria
+- [docs/IPFS_DATASETS_PY_BATCH1_SLICE1_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE1_TASKLIST.md) - Completed task list for the adapter-contract stabilization and import-boundary cleanup slice
+- [docs/IPFS_DATASETS_PY_BATCH1_SLICE2_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE2_TASKLIST.md) - Exact task list and completion notes for the archived-page corpus-normalization slice
+- [docs/IPFS_DATASETS_PY_BATCH1_SLICE3_TASKLIST.md](docs/IPFS_DATASETS_PY_BATCH1_SLICE3_TASKLIST.md) - Active task list for shared fact-registry completion in Batch 1
+- [docs/IPFS_DATASETS_PY_FILE_WORKLIST.md](docs/IPFS_DATASETS_PY_FILE_WORKLIST.md) - File-by-file implementation worklist for the early milestones, with code targets and slice selection guidance
+
 ---
 
-**Last Updated**: 2026-11-07
-**Total Documentation**: 79+ markdown files, 250+ pages
+**Last Updated**: 2026-11-15
+**Root markdown set**: exactly README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md
