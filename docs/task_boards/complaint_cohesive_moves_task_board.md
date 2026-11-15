@@ -136,7 +136,7 @@ Implementation instructions:
 
 ## CIMP-COH-06 Move optimization guidance out of the document optimizer
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
