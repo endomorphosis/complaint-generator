@@ -180,7 +180,7 @@ Implementation instructions:
 
 ## CIMP-ORG-06 Name the analysis interface in the analysis readme
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
