@@ -328,7 +328,7 @@ Implementation instructions:
 
 ## CIMP-CUR-11 Link the testing guide to the current layout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
