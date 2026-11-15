@@ -262,7 +262,7 @@ Implementation instructions:
 
 ## CIMP-COH-11 Record the six cohesive-move siblings
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
