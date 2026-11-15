@@ -208,7 +208,7 @@ Implementation instructions:
 
 ## CIMP-CUR-07 Name the eight root operator configs without moving them
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
