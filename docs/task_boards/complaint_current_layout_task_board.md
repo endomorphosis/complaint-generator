@@ -298,7 +298,7 @@ Implementation instructions:
 
 ## CIMP-CUR-10 Link the contribution guide to the current layout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
