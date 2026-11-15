@@ -358,7 +358,7 @@ Implementation instructions:
 
 ## CIMP-CUR-12 Link the readme to the current layout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
