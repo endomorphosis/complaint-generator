@@ -296,7 +296,7 @@ Implementation instructions:
 
 ## CIMP-ORG-10 Add a lib package note for the versioned lib entry
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
