@@ -2,6 +2,17 @@
 
 Complete guide to the backend systems that power the complaint generator's LLM routing and integrations.
 
+## Current entry
+
+New code imports `backends.interface`. That module is the versioned public surface for router backends. It records the owner module and public symbol names without importing the owner implementation or a provider backend.
+
+The interface owner is `backends.llm_router_backend`.
+
+`backends/interface.py` assigns:
+
+- `INTERFACE_SCHEMA` `complaint-generator/module-interface@1`
+- `INTERFACE_VERSION` `1.0.0`
+
 ## Overview
 
 The complaint generator uses a flexible backend architecture that supports multiple LLM providers through a unified interface. The system includes:
