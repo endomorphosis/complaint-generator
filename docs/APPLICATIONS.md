@@ -2,6 +2,25 @@
 
 This document describes the user-facing applications in the Complaint Generator system, including the command-line interface (CLI) and web server.
 
+## Current entry
+
+New code imports `applications.interface`. That module is the versioned public surface for the applications package. It records owner modules and symbol names without importing those owners, starting a server, or reading a private workspace path.
+
+The interface owners are:
+
+- `applications.server`
+- `applications.case_routes`
+- `applications.launcher`
+
+`applications/interface.py` assigns:
+
+- `INTERFACE_SCHEMA` `complaint-generator/module-interface@1`
+- `INTERFACE_VERSION` `1.0.0`
+
+Dashboard hub rendering lives in `applications/dashboard_hub.py`. `applications/dashboard_ui.py` still defines `create_dashboard_ui_router`. Route setup stays in the UI module; hub rendering is the extracted sibling.
+
+Security guidance remains in [docs/SECURITY.md](SECURITY.md).
+
 The review operator surface also has dedicated app factories for non-legacy deployments:
 
 - `applications.create_review_api_app(mediator)` mounts only the claim-support review and follow-up execution API routes.
