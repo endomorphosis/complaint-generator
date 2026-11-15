@@ -325,7 +325,7 @@ Implementation instructions:
 
 ## CIMP-ORG-11 Record the five new owner siblings
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
