@@ -146,7 +146,7 @@ Implementation instructions:
 
 ## CIMP-CUR-05 Replace the future-UI and old-supervisor claims in the architecture overview
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
