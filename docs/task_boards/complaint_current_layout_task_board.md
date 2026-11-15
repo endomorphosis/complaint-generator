@@ -78,7 +78,7 @@ Implementation instructions:
 
 ## CIMP-CUR-03 Move temporal predicate builders out of Mediator
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
