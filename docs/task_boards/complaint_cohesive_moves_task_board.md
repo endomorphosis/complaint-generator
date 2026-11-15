@@ -84,7 +84,7 @@ Implementation instructions:
 
 ## CIMP-COH-04 Move the intake temporal registry out of the intake case file
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
