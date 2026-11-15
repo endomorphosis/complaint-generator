@@ -41,7 +41,7 @@ Implementation instructions:
 
 ## CIMP-ORG-02 Move temporal reasoning out of the datasets logic module
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
