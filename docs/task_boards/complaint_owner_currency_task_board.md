@@ -146,7 +146,7 @@ Implementation instructions:
 
 ## CIMP-ORG-05 Move legacy private-storage migration out of the storage owner
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
