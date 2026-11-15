@@ -312,7 +312,7 @@ Implementation instructions:
 
 ## CIMP-COH-13 Refresh the module map and architecture sizes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
