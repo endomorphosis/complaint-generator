@@ -79,7 +79,7 @@ runtime modules and their first extraction direction are:
 | `complaint_phases/denoiser.py` | 5119 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
 | `applications/dashboard_ui.py` | 1015 lines | Route setup stays in this module. Dashboard hub rendering lives in `applications/dashboard_hub.py`, and this module still defines `create_dashboard_ui_router`. |
 | `applications/dashboard_hub.py` | 4689 lines | Hub rendering extracted from `applications/dashboard_ui.py`. |
-| `mediator/claim_support_hooks.py` | 7626 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
+| `mediator/claim_support_hooks.py` | 7015 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
 
 ### Allowed Import Direction
 
