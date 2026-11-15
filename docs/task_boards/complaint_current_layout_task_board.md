@@ -388,7 +388,7 @@ Implementation instructions:
 
 ## CIMP-CUR-13 Remove the fictional deployment home from the deployment guide
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
