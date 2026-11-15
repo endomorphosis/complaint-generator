@@ -447,7 +447,7 @@ Implementation instructions:
 
 ## CIMP-CUR-15 Lock the current layout and refresh the module map
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
