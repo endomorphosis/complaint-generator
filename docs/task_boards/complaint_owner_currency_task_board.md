@@ -111,7 +111,7 @@ Implementation instructions:
 
 ## CIMP-ORG-04 Move gap finding and text build out of the knowledge graph
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
