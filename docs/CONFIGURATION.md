@@ -25,6 +25,19 @@ python run.py
 
 The repository also includes `config.review_surface.json` for the dedicated claim-support operator surface.
 
+## Root operator configs
+
+These operator config files stay at the repository root because the CLI defaults use those paths:
+
+- `config.adversarial_autopatch_demo.json`
+- `config.adversarial_autopatch_live.json`
+- `config.adversarial_autopatch_live_batch.json`
+- `config.adversarial_autopatch_live_multibackend.json`
+- `config.huggingface_router.json`
+- `config.llm_router.json`
+- `config.review_surface.huggingface_router.json`
+- `config.review_surface.json`
+
 ## Configuration Structure
 
 ```json
