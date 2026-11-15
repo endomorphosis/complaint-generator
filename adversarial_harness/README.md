@@ -2,6 +2,21 @@
 
 An LLM-based adversarial testing framework for optimizing complaint generation through multi-agent interaction and evaluation.
 
+## Current entry
+
+New code imports `adversarial_harness.interface`. That module is the versioned public surface for the adversarial harness. It records owner modules and symbol names without importing those owners.
+
+The interface owners are:
+
+- `adversarial_harness.harness`
+- `adversarial_harness.optimizer`
+- `adversarial_harness.session`
+
+`adversarial_harness/interface.py` assigns:
+
+- `INTERFACE_SCHEMA` `complaint-generator/module-interface@1`
+- `INTERFACE_VERSION` `1.0.0`
+
 ## Overview
 
 The adversarial test harness implements a sophisticated system for testing and optimizing the mediator's complaint processing capabilities using three LLM-based agents:
