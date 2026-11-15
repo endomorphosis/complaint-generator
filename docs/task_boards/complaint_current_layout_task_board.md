@@ -417,7 +417,7 @@ Implementation instructions:
 
 ## CIMP-CUR-14 Name the current mediator entry in the mediator readme
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
