@@ -114,7 +114,7 @@ Implementation instructions:
 
 ## CIMP-CUR-04 Separate current docs from historical plans in the index
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
