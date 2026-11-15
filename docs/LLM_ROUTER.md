@@ -2,6 +2,10 @@
 
 The complaint-generator backend routes LLM requests through `integrations/ipfs_accelerate/routers.py`, which calls `ipfs_accelerate_py.llm_router`. The datasets `llm_router` module is a compatibility alias of that same module. Embeddings and multimodal calls use the matching accelerate routers. This provides a unified interface for working with multiple LLM providers.
 
+## Current entry
+
+The versioned backend entry is `backends.interface`. Its only owner is `backends.llm_router_backend`. `INTERFACE_SCHEMA` is `complaint-generator/module-interface@1`. `INTERFACE_VERSION` is `1.0.0`. The compatibility router module is not that versioned entry.
+
 ## Features
 
 - **Multiple Provider Support**: Route requests to OpenRouter, Hugging Face router/inference endpoints, local Hugging Face models, and more
