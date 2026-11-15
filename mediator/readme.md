@@ -2,6 +2,20 @@
 
 Core orchestration module of the complaint generator. Sits between the frontend application and the backend services, coordinating all complaint processing workflows. The package directory is `mediator`, and its initializer is [`mediator/__init__.py`](__init__.py). The repository module map records this package at [`docs/architecture/repository_module_map.json`](../docs/architecture/repository_module_map.json).
 
+## Current module entry
+
+The current module entry is `mediator.interface`.
+
+| Field | Value |
+| --- | --- |
+| INTERFACE_SCHEMA | `complaint-generator/module-interface@1` |
+| INTERFACE_VERSION | `1.0.0` |
+| Module | `mediator.interface` |
+
+The three owners of `mediator.interface` are `mediator.workflow_service`, `mediator.hook_runtime`, and `mediator.state`.
+
+[`mediator/mediator.py`](mediator.py) is the module that still defines `Mediator`. It is the Mediator owner: the source file that defines the `Mediator` class. The interface owners above are separate from that class definition.
+
 ## Interface
 
 Public entry for new code is [`mediator.interface`](interface.py).
