@@ -178,7 +178,7 @@ Implementation instructions:
 
 ## CIMP-CUR-06 Name the current phase modules in the three-phase guide
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
