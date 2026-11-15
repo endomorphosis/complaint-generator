@@ -75,7 +75,7 @@ Implementation instructions:
 
 ## CIMP-ORG-03 Move authority search programs out of the legal-authority hooks
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
