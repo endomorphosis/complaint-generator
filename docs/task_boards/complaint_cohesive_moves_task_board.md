@@ -6,7 +6,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 
 ## CIMP-COH-01 Move document chronology and fact-entry assembly out of the document builder
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
