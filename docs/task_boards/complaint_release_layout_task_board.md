@@ -158,7 +158,7 @@ Implementation instructions:
 
 ## CIMP-RLS-07 Record the root keepers and the removed generated files
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
