@@ -258,7 +258,7 @@ Implementation instructions:
 
 ## CIMP-RLS-11 Refresh the module map after the release layout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
