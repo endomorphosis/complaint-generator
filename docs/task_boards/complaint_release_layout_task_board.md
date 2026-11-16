@@ -233,7 +233,7 @@ Implementation instructions:
 
 ## CIMP-RLS-10 Link the index to the release notes
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
