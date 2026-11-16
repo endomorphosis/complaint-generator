@@ -25,6 +25,8 @@ setup(
             "lib.*",
             "mediator",
             "mediator.*",
+            "scripts",
+            "scripts.*",
         ]
     ),
     include_package_data=True,
