@@ -183,7 +183,7 @@ Implementation instructions:
 
 ## CIMP-RLS-08 Write the release build note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
