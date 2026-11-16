@@ -208,7 +208,7 @@ Implementation instructions:
 
 ## CIMP-RLS-09 Link the readme to the release note
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
