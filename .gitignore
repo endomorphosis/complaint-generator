@@ -61,3 +61,8 @@ data/refactor_supervisor/objective_datasets/
 data/refactor_supervisor/merge_resolver_watchdog_status.json
 data/refactor_supervisor/refactor_supervisor_status.json
 data/manual_worktrees/
+
+# Generated release artifacts
+drift_report_mcp.json
+*.egg-info/
+.tmp-demo-output-sessions*
