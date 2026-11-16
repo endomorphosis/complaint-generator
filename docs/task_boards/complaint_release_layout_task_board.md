@@ -83,7 +83,7 @@ Implementation instructions:
 
 ## CIMP-RLS-04 Make the setuptools package list match the project table
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
