@@ -1,0 +1,398 @@
+{
+  "schema_version": "complaint-generator/improvement-spec@1",
+  "title": "Prepare the root and the package build for a release",
+  "created_at": "2026-11-16T12:00:00+00:00",
+  "baseline_commit": "b45e28024d61363d724ccb499c75a2e13eac4100",
+  "campaign": {
+    "spec_relative": "docs/task_boards/complaint_release_layout_spec.json",
+    "plan_relative": "docs/task_boards/complaint_release_layout_formal_work_plan.json",
+    "board_relative": "docs/task_boards/complaint_release_layout_task_board.md",
+    "board_namespace": "complaint-release-layout"
+  },
+  "provider": {
+    "router": "ipfs_accelerate_py.llm_router",
+    "provider": "grok_cli",
+    "model": "grok-4.7",
+    "allow_fallback": false
+  },
+  "execution_policy": {
+    "initial_lanes": 4,
+    "worktree_pool_max_entries": 4,
+    "initial_ready_task": "CIMP-RLS-01",
+    "native_task_source_profile": "explicit legacy-markdown projection of the Native FormalWorkPlan",
+    "provider_role": "grok-only",
+    "automatic_fallback": false,
+    "offline_default": true,
+    "live_exceptions": [],
+    "max_task_attempts": 3,
+    "max_agent_turns": 64,
+    "implementation_timeout_seconds": 900,
+    "validation_timeout_seconds": 900,
+    "merge_target": "codex/release-layout-20261116",
+    "remote_push": false,
+    "deployment": false,
+    "manual_holds_respected": true,
+    "parallelism": "CIMP-RLS-01, CIMP-RLS-02, CIMP-RLS-03, CIMP-RLS-04, and CIMP-RLS-06 edit disjoint files and have no dependencies. CIMP-RLS-05 waits for the root cleanup and the setuptools list. CIMP-RLS-07 waits for the cleanup. CIMP-RLS-08 waits for the root note. CIMP-RLS-09 waits for the release note. CIMP-RLS-10 waits for both notes. CIMP-RLS-11 waits for every earlier task.",
+    "development_inputs": "Local baseline is origin/main b45e28024d61363d724ccb499c75a2e13eac4100, which contains the cohesive-moves publication. GitHub master stays 6ad9ac3d1 and remains the default branch. Do not push, force-push, or change the default branch. Do not change gitlinks. The local datasets and kit checkouts may still be on the previous pins because this clone could not fetch the published objects.",
+    "implementation_provider_scope": "Authorized Grok 4.7 development implementation via llm_router. Offline tests do not disable that provider process. Development permission is not consent to case-data egress.",
+    "product_inference": "This plan does not change case inference, consent, or legal conclusions.",
+    "context_exclude": [
+      ".complaint_workspace/**",
+      ".complaint_workspace*/**",
+      "data/**",
+      "output/**",
+      "statefiles/**",
+      "exports/**",
+      "secrets/**",
+      "evidence/**",
+      "uploads/**",
+      "attachments/**",
+      ".env*",
+      "*.key",
+      "*.pem",
+      "workspace/**",
+      "artifacts/**",
+      "external/**"
+    ],
+    "protected_state": "The completed intake, mediator-grounding, GUI collaboration, GUI UX, repository-reorganization, repository-consolidation, module-depth, module-boundaries, module-seams, current-layout, owner-currency, and cohesive-moves campaigns, both retained quarantines, submodule pins, and unrelated campaign processes stay untouched. completion_authority stays false. integrations/ipfs_accelerate/improvement_runner.py stays out of the task targets.",
+    "upstream_checkout_policy": "Use the pinned external checkouts recorded by HEAD. Do not float pins, recursively initialize submodules, or clone CommonCrawl.",
+    "required_evidence": [
+      "A focused pytest module with positive checks and zero skips",
+      "Extracted symbols defined in the sibling and no longer implemented in the owner",
+      "A local wheel built by the setuptools backend at version 0.1.0",
+      "Generated root files removed and the locked root keepers left in place"
+    ],
+    "qualification_scope": "One focused pytest command per task. Do not run the full historical suite inside the 900-second task budget.",
+    "stop_semantics": "A test that passes while a named body still lives in the owner, while a generated root file remains, or while the wheel does not build, is a failed task. Do not mark a task complete by hand."
+  },
+  "findings": [
+    {
+      "classification": "source_inspected",
+      "id": "DOCUMENT-REVIEW-REMAINS",
+      "path": "applications/document_api.py",
+      "observation": "At b45e28024 the file is 2323 splitlines. Four module-level review-assembly functions total 983 lines. create_document_router and project_complaint_outline stay."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "DEPENDENCY-TIMELINE-REMAINS",
+      "path": "complaint_phases/dependency_graph.py",
+      "observation": "dependency_graph.py is 2621 splitlines. Five DependencyGraphBuilder timeline methods total 541 lines. dependency_graph_readiness.py already exists and is not part of this move."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "ROOT-GENERATED-FILES",
+      "path": "drift_report_mcp.json",
+      "observation": "The tracked root contains drift_report_mcp.json, complaint_generator.egg-info, and eight .tmp-demo-output-sessions demo JSON files. The historical MCP drift test skips when the report is absent. The five markdown files, five shims, eight config JSON files, main.py, and run.py are keepers."
+    },
+    {
+      "classification": "source_inspected",
+      "id": "PACKAGE-LIST-DRIFT",
+      "path": "setup.py",
+      "observation": "pyproject.toml includes scripts and scripts.* in the setuptools package find list. setup.py find_packages does not. The version is 0.1.0 in both files. requirements.txt keeps the editable local lines and pyarrow, and it omits mcp>=1.2.0."
+    }
+  ],
+  "goals": [
+    {
+      "id": "RLS-modules",
+      "title": "Move the remaining review and timeline bodies",
+      "subgoals": [
+        {
+          "id": "RLS-extract",
+          "title": "Extract document review assembly and dependency timeline updates"
+        }
+      ]
+    },
+    {
+      "id": "RLS-release",
+      "title": "Clear generated root clutter and make the package build",
+      "subgoals": [
+        {
+          "id": "RLS-root",
+          "title": "Remove generated files from the root"
+        },
+        {
+          "id": "RLS-build",
+          "title": "Align the package list and build a local wheel"
+        }
+      ]
+    },
+    {
+      "id": "RLS-docs",
+      "title": "Record the root contract and the release build",
+      "subgoals": [
+        {
+          "id": "RLS-notes",
+          "title": "Write the root and release notes and link them"
+        }
+      ]
+    },
+    {
+      "id": "RLS-closure",
+      "title": "Refresh the recorded sizes without moving the locked maps",
+      "subgoals": [
+        {
+          "id": "RLS-ratchet",
+          "title": "Recompute the module map and architecture size integers"
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "CIMP-RLS-01",
+      "title": "Move document review assembly out of the document API",
+      "goal_id": "RLS-modules",
+      "subgoal_id": "RLS-extract",
+      "priority": "P1",
+      "targets": [
+        "applications/document_api.py",
+        "applications/document_review.py",
+        "tests/test_cimp_rls_01.py"
+      ],
+      "acceptance": [
+        "applications/document_api.py is at most 1392 splitlines and no longer defines the four named functions.",
+        "The owner re-exports those four names from applications/document_review.py.",
+        "applications/document_review.py is at least 921 splitlines. create_document_router and project_complaint_outline stay defined in the owner."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_01.py"
+      ],
+      "depends_on": [],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nThese are module-level functions. Delete their definitions from the owner. Do not leave stubs. Re-export them with `from .<sibling stem> import <names>` at column 0 after the helpers they call are bound. Do not redefine the moved names. The sibling defines the functions with the original signatures and bodies. The sibling may import helper names that remain defined in the owner. Do not import the moved names from the owner. Stop if a moved function uses global or nonlocal.\nMove only these module-level functions into applications/document_review.py: _build_document_review_workflow_phase_priority (102 lines), _build_document_review_workflow_priority (483), _build_document_builder_summary (109), and _annotate_review_links (289). At baseline the owner is 2323 splitlines. The owner ceiling is 1392. The sibling floor is 921. create_document_router and project_complaint_outline stay defined in the owner with bodies longer than one statement. Do not move create_document_router. The test parses both files and checks the four names, both sentinels, the re-export, and both line bounds."
+    },
+    {
+      "id": "CIMP-RLS-02",
+      "title": "Move intake timeline updates out of the dependency graph builder",
+      "goal_id": "RLS-modules",
+      "subgoal_id": "RLS-extract",
+      "priority": "P1",
+      "targets": [
+        "complaint_phases/dependency_graph.py",
+        "complaint_phases/dependency_graph_timeline.py",
+        "tests/test_cimp_rls_02.py"
+      ],
+      "acceptance": [
+        "complaint_phases/dependency_graph.py is at most 2220 splitlines and the five named methods each have exactly one Return of a Call.",
+        "complaint_phases/dependency_graph_timeline.py is at least 504 splitlines and defines those five functions.",
+        "DependencyGraph._optimize_blocker_issues_for_actor_critic stays implemented in the owner with a body longer than one statement."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_02.py"
+      ],
+      "depends_on": [],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nFor each named instance method, keep the original signature and an empty decorator list. Replace the body with exactly one Return of a Call to the same-named sibling function. Pass self first. The sibling function keeps self first, an empty decorator list, and the original body, and that body stays longer than one statement. Add `from . import <sibling stem>` at column 0 beside the existing end-of-file sibling import, after helpers are bound. The sibling may import helper names that remain defined in the owner. Do not import the moved names from the owner. Do not move unnamed helpers. Preserve indentation. Stop if a moved function uses global or nonlocal.\nMove only these DependencyGraphBuilder methods into complaint_phases/dependency_graph_timeline.py: sync_intake_timeline_to_graph (126 lines), add_fact_rule_link (118), apply_retrieval_nomination (108), invalidate_factual_dependents (97), and apply_derived_dependency_requirements (92). All five are undecorated instance methods. At baseline the owner is 2621 splitlines. The owner ceiling is 2220. The sibling floor is 504. DependencyGraph._optimize_blocker_issues_for_actor_critic stays. Do not edit dependency_graph_readiness.py. Add the sibling import next to the existing end-of-file dependency_graph_readiness import. The test parses both files and checks every named method, the sentinel, and both line bounds."
+    },
+    {
+      "id": "CIMP-RLS-03",
+      "title": "Remove generated files from the repository root",
+      "goal_id": "RLS-release",
+      "subgoal_id": "RLS-root",
+      "priority": "P1",
+      "targets": [
+        ".gitignore",
+        "tests/test_cimp_rls_03.py"
+      ],
+      "acceptance": [
+        "drift_report_mcp.json, complaint_generator.egg-info/PKG-INFO, and the eight .tmp-demo-output-sessions demo JSON files are absent.",
+        ".gitignore ignores drift_report_mcp.json, egg-info directories, and .tmp-demo-output-sessions.",
+        "The five root markdown files, five root shims, eight root config JSON files, main.py, and run.py stay."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_03.py"
+      ],
+      "depends_on": [],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nDelete these tracked generated paths from the worktree and do not recreate them: drift_report_mcp.json; complaint_generator.egg-info/PKG-INFO; complaint_generator.egg-info/SOURCES.txt; complaint_generator.egg-info/dependency_links.txt; complaint_generator.egg-info/entry_points.txt; complaint_generator.egg-info/requires.txt; complaint_generator.egg-info/top_level.txt; .tmp-demo-output-sessions/demo-output-user.json; .tmp-demo-output-sessions-fast/demo-output-user.json; .tmp-demo-output-sessions-fast-2/demo-output-user.json; .tmp-demo-output-sessions-fast-3/demo-output-user.json; .tmp-demo-output-sessions-fast-4/demo-output-user.json; .tmp-demo-output-sessions-fast-5/demo-output-user.json; .tmp-demo-output-sessions-fast-6/demo-output-user.json; .tmp-demo-output-sessions-fast-7/demo-output-user.json. Append gitignore patterns for drift_report_mcp.json, *.egg-info/, and .tmp-demo-output-sessions* when they are absent. Do not edit tests/mcp/unit/test_mcplusplus_v38_session83.py. That historical test already skips when the report is absent. Do not remove README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, TODO.md, intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, claim_support_review.py, main.py, run.py, or the eight root config JSON files. Do not edit logs. The test checks the generated paths are absent, the gitignore patterns are present, and the keepers still exist."
+    },
+    {
+      "id": "CIMP-RLS-04",
+      "title": "Make the setuptools package list match the project table",
+      "goal_id": "RLS-release",
+      "subgoal_id": "RLS-build",
+      "priority": "P1",
+      "targets": [
+        "setup.py",
+        "tests/test_cimp_rls_04.py"
+      ],
+      "acceptance": [
+        "setup.py find_packages include equals the pyproject packages.find include list.",
+        "That list contains scripts and scripts.*.",
+        "The project name stays complaint-generator, the version stays 0.1.0, and the dependency lines in pyproject.toml stay unchanged."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_04.py"
+      ],
+      "depends_on": [],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only setup.py. Its find_packages include list omits scripts and scripts.*, while pyproject.toml [tool.setuptools.packages.find].include contains both. Add those two include entries so the two lists are equal and keep the existing package names. Do not change install_requires, the version 0.1.0, the name complaint-generator, python_requires, or the console-script entry points. Do not edit pyproject.toml. The test parses setup.py with ast and pyproject.toml with tomllib and asserts the include lists are equal. The test source must not paste a dependency that contains a banned substring."
+    },
+    {
+      "id": "CIMP-RLS-05",
+      "title": "Build a local wheel from the project metadata",
+      "goal_id": "RLS-release",
+      "subgoal_id": "RLS-build",
+      "priority": "P1",
+      "targets": [
+        "tests/test_cimp_rls_05.py"
+      ],
+      "acceptance": [
+        "The test builds a wheel with setuptools.build_meta.build_wheel into a temporary directory.",
+        "The wheel filename contains complaint_generator-0.1.0 and the wheel contains complaint_generator/entrypoints.py.",
+        "The wheel metadata names the complaint-generator console script. The test does not install the wheel and does not download packages."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_05.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-03",
+        "CIMP-RLS-04"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nCreate only tests/test_cimp_rls_05.py. Use setuptools.build_meta.build_wheel to write a wheel into a temporary directory created by the test. Assert the wheel filename starts with complaint_generator-0.1.0. Open it as a zip and assert it contains complaint_generator/entrypoints.py and a dist-info entry-points file that names complaint-generator and complaint_generator.entrypoints:main. Do not call pip, do not contact a package index, and do not install the wheel. Also compile the product packages adversarial_harness, applications, backends, complaint_analysis, complaint_generator, complaint_phases, integrations, lib, and mediator with compileall. Do not compile external, data, tests, or artifacts. Do not edit pyproject.toml or setup.py. The test source must not contain the banned substrings, including the browser-test package name."
+    },
+    {
+      "id": "CIMP-RLS-06",
+      "title": "Lock the requirements file to the project dependency names",
+      "goal_id": "RLS-release",
+      "subgoal_id": "RLS-build",
+      "priority": "P1",
+      "targets": [
+        "requirements.txt",
+        "tests/test_cimp_rls_06.py"
+      ],
+      "acceptance": [
+        "requirements.txt contains mcp>=1.2.0 and every other pyproject dependency name.",
+        "The three editable local lines, the pyarrow requirement, and cryptography>=41.0.0 stay.",
+        "No version floor is lowered and pyproject.toml is unchanged."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_06.py"
+      ],
+      "depends_on": [],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only requirements.txt. It already contains every pyproject dependency name except mcp. Add the line mcp>=1.2.0. Do not lower any existing floor. Do not remove pyarrow. Do not edit pyproject.toml. Keep these three lines: `-e .`, `-e ./external/ipfs_kit_py[api,ipld,ai_ml]`, and `-e ./external/ipfs_datasets_py[file_conversion,ipld,knowledge_graphs,logic,scraping,vectors,api]`. Keep cryptography>=41.0.0. The test reads both files, asserts mcp>=1.2.0 is present, asserts the editable lines and the cryptography floor stay, and parses project.dependencies with tomllib to assert each distribution name appears in requirements.txt. Do not paste a dependency whose name contains a banned substring into the test source."
+    },
+    {
+      "id": "CIMP-RLS-07",
+      "title": "Record the root keepers and the removed generated files",
+      "goal_id": "RLS-docs",
+      "subgoal_id": "RLS-notes",
+      "priority": "P1",
+      "targets": [
+        "docs/architecture/root_release.md",
+        "tests/test_cimp_rls_07.py"
+      ],
+      "acceptance": [
+        "docs/architecture/root_release.md names the five root markdown files, five root shims, eight root config files, main.py, and run.py as keepers.",
+        "It states that drift_report_mcp.json, egg-info, and .tmp-demo-output-sessions are generated and are not product modules.",
+        "It states schema complaint-generator/module-interface@1 and version 1.0.0 and links the current layout without copying locked tables."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_07.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-03"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nCreate only docs/architecture/root_release.md after the generated root files are gone. Name these keepers and no extra root markdown files: README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md. Name these root shims: intake_status.py, workflow_phase_guidance.py, document_pipeline.py, document_optimization.py, and claim_support_review.py. Name the eight root config JSON files that stay because the CLI defaults use those paths: config.adversarial_autopatch_demo.json, config.adversarial_autopatch_live.json, config.adversarial_autopatch_live_batch.json, config.adversarial_autopatch_live_multibackend.json, config.huggingface_router.json, config.llm_router.json, config.review_surface.huggingface_router.json, and config.review_surface.json. Name main.py and run.py as compatibility entrypoints. State that drift_report_mcp.json, complaint_generator.egg-info, and .tmp-demo-output-sessions are generated and are not product modules. State INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0. Link docs/architecture/current_layout.md, docs/architecture/owner_currency.md, docs/architecture/cohesive_moves.md, docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not copy their tables. The test reads the note and checks the keeper names, the generated-file statement, and that the linked files exist."
+    },
+    {
+      "id": "CIMP-RLS-08",
+      "title": "Write the release build note",
+      "goal_id": "RLS-docs",
+      "subgoal_id": "RLS-notes",
+      "priority": "P1",
+      "targets": [
+        "docs/RELEASE.md",
+        "tests/test_cimp_rls_08.py"
+      ],
+      "acceptance": [
+        "docs/RELEASE.md states version 0.1.0, the setuptools build backend, and the complaint-generator console script.",
+        "It says the wheel is built locally and does not say the package was published to a package index.",
+        "It links docs/architecture/root_release.md."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_08.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-07"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nCreate only docs/RELEASE.md. State that the project version is 0.1.0, that the build backend is setuptools.build_meta as declared in pyproject.toml, and that the console script complaint-generator calls complaint_generator.entrypoints:main. Say a local wheel is the release build and that this repository has not been published to a package index by this note. Link docs/architecture/root_release.md. Do not add a URL. Do not change the version. Do not edit pyproject.toml. The test reads the note and checks the version, the build backend, the console script, the local-wheel statement, and the root-release link. The test source must not contain a URL or the banned substrings."
+    },
+    {
+      "id": "CIMP-RLS-09",
+      "title": "Link the readme to the release note",
+      "goal_id": "RLS-docs",
+      "subgoal_id": "RLS-notes",
+      "priority": "P1",
+      "targets": [
+        "README.md",
+        "tests/test_cimp_rls_09.py"
+      ],
+      "acceptance": [
+        "README.md links to docs/RELEASE.md and that file exists.",
+        "README.md still links to docs/architecture/current_layout.md.",
+        "No root markdown file is added or removed."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_09.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-08"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only README.md. Add one resolving link to docs/RELEASE.md. Keep the existing link to docs/architecture/current_layout.md. Do not add or remove a root markdown file. The root markdown files stay README.md, DOCUMENTATION_INDEX.md, CONTRIBUTING.md, TESTING.md, and TODO.md. The test checks both links resolve."
+    },
+    {
+      "id": "CIMP-RLS-10",
+      "title": "Link the index to the release notes",
+      "goal_id": "RLS-docs",
+      "subgoal_id": "RLS-notes",
+      "priority": "P1",
+      "targets": [
+        "DOCUMENTATION_INDEX.md",
+        "tests/test_cimp_rls_10.py"
+      ],
+      "acceptance": [
+        "DOCUMENTATION_INDEX.md links to docs/RELEASE.md and docs/architecture/root_release.md and both files exist.",
+        "The index still links consolidation_modules.md, module_boundaries.md, module_seams.md, current_layout.md, owner_currency.md, and cohesive_moves.md.",
+        "The index does not contain 79+, 13 root-level, 61 docs/, or 250+."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_10.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-07",
+        "CIMP-RLS-08"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only DOCUMENTATION_INDEX.md. Add resolving links to docs/RELEASE.md and docs/architecture/root_release.md. Keep INTERFACE_SCHEMA complaint-generator/module-interface@1, INTERFACE_VERSION 1.0.0, and the resolving links to docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/current_layout.md, docs/architecture/owner_currency.md, and docs/architecture/cohesive_moves.md. Do not reintroduce 79+, 13 root-level, 61 docs/, or 250+. Do not add or remove a root markdown file. The test checks the new links resolve and the older links and forbidden phrases still hold."
+    },
+    {
+      "id": "CIMP-RLS-11",
+      "title": "Refresh the module map after the release layout",
+      "goal_id": "RLS-closure",
+      "subgoal_id": "RLS-ratchet",
+      "priority": "P0",
+      "targets": [
+        "docs/architecture/repository_module_map.json",
+        "docs/ARCHITECTURE.md",
+        "tests/test_cimp_rls_11.py"
+      ],
+      "acceptance": [
+        "The module map schema stays complaint-generator/repository-module-map@1, task_id stays CIMP-MOD-01, and largest[0] stays applications/complaint_workspace.py.",
+        "The architecture size integers match splitlines() and the path set is unchanged.",
+        "The three locked architecture documents keep their sha256 values. The release notes and the new sibling floors hold. Generated root files stay absent."
+      ],
+      "validation_commands": [
+        "python -m pytest -q tests/test_cimp_rls_11.py"
+      ],
+      "depends_on": [
+        "CIMP-RLS-01",
+        "CIMP-RLS-02",
+        "CIMP-RLS-03",
+        "CIMP-RLS-04",
+        "CIMP-RLS-05",
+        "CIMP-RLS-06",
+        "CIMP-RLS-07",
+        "CIMP-RLS-08",
+        "CIMP-RLS-09",
+        "CIMP-RLS-10"
+      ],
+      "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, and tests/test_cimp_coh_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RLS-11. Do not add an interface.py file. Do not change OWNER_MODULES. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only docs/architecture/repository_module_map.json, the integer size column in docs/ARCHITECTURE.md under ### Current Extraction Priorities, and tests/test_cimp_rls_11.py. Do not add or remove a path in that table. Keep applications/dashboard_hub.py. Keep these strings absent from docs/ARCHITECTURE.md: 10,852 lines; 7,881 lines; 6,933 lines; 5,691 lines; 5,562 lines; 5,309 lines; Browser-based UI (future); RESTful API for integrations (future); docs/REFACTOR_SUPERVISOR_TASKBOARD.md. Refresh sizes from splitlines(). Discover packages as top-level directories that contain __init__.py. Discover the largest 15 Python files by byte size descending, then path ascending. Skip .git, .venv, __pycache__, artifacts, complaint_generator.egg-info, data, external, node_modules, output, statefiles, and workspace. Keep schema complaint-generator/repository-module-map@1, task_id CIMP-MOD-01, source_files_moved true, and source_files_rewritten false. largest[0] stays applications/complaint_workspace.py. Assert sibling floors: document_review.py 921 and dependency_graph_timeline.py 504. Also keep the cohesive-move floors: document_pipeline_chronology.py 800, optimizer_workflow.py 800, claim_support_retrieval.py 650, intake_case_temporal.py 540, canonical_formalization.py 700, and document_optimization_guidance.py 720. Assert the locked sha256 values: docs/architecture/consolidation_modules.md 0fe1e10d04ffe3949eac0266ba30675535b9ff8a438c3351bd9d4c4a82878e2e; docs/architecture/module_boundaries.md ea85b8f33fa2214e464ebbec700c715c3f9274b58677395141bc90f70815dea8; docs/architecture/module_seams.md 3d811e249073b56928553e16ce25a41b1385072993d952dab582ccb58cd06256. Assert README.md links docs/RELEASE.md and docs/architecture/current_layout.md. Assert the index links docs/architecture/root_release.md, docs/RELEASE.md, docs/architecture/owner_currency.md, and docs/architecture/cohesive_moves.md. Assert drift_report_mcp.json and complaint_generator.egg-info/PKG-INFO are absent. Assert .gitignore contains drift_report_mcp.json and *.egg-info/. Assert the root markdown set, the five shims at most 40 splitlines with no function or class, the eight root config JSON files, and that docs/DEPLOYMENT.md does not contain /home/complaint-app. Parse each interface.py with ast and assert its OWNER_MODULES tuple still matches the headings in docs/architecture/module_boundaries.md, with schema complaint-generator/module-interface@1 and version 1.0.0. Do not import interface modules. Do not import earlier campaign tests. The test source must not contain the banned substrings."
+    }
+  ]
+}
