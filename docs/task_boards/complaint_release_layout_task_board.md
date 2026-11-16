@@ -133,7 +133,7 @@ Implementation instructions:
 
 ## CIMP-RLS-06 Lock the requirements file to the project dependency names
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
