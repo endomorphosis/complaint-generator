@@ -58,7 +58,7 @@ Implementation instructions:
 
 ## CIMP-RLS-03 Remove generated files from the repository root
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
