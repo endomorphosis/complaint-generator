@@ -108,7 +108,7 @@ Implementation instructions:
 
 ## CIMP-RLS-05 Build a local wheel from the project metadata
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
