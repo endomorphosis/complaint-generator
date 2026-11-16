@@ -32,7 +32,7 @@ Implementation instructions:
 
 ## CIMP-RLS-02 Move intake timeline updates out of the dependency graph builder
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
