@@ -1,19 +1,19 @@
 # Example Scripts Reference
 
-Complete guide to all 22 example scripts in the repository, organized by category.
+Complete guide to all 26 example scripts in the repository, organized by category.
 
 ## Overview
 
-The `examples/` directory contains 22 demonstration scripts covering all major features of the complaint generator system. Scripts are organized into four categories:
+The `examples/` directory contains 26 demonstration scripts covering all major features of the complaint generator system. Scripts are organized into four categories:
 
 1. **Core System Examples** (7) - Basic workflows and core features
 2. **Complaint Analysis Examples** (5) - Analysis and classification
-3. **Adversarial Testing Examples** (7) - Testing and optimization
-4. **Advanced Examples** (3) - Code generation and autopatch
+3. **Adversarial Testing Examples** (9) - Testing and optimization
+4. **Advanced Examples** (5) - Code generation, autopatch, and observability
 
 ## Core System Examples
 
-### 1. three_phase_example.py
+### 1. `three_phase_example.py`
 
 **Purpose:** Complete demonstration of the three-phase complaint processing workflow.
 
@@ -49,7 +49,7 @@ print(f"Formal Complaint: {result['formal_complaint']}")
 
 ---
 
-### 2. legal_analysis_demo.py
+### 2. `legal_analysis_demo.py`
 
 **Purpose:** Demonstrate the 4-stage legal analysis pipeline.
 
@@ -78,7 +78,7 @@ print("4. Questions - Generate targeted questions")
 
 ---
 
-### 3. evidence_management_demo.py
+### 3. `evidence_management_demo.py`
 
 **Purpose:** IPFS-based evidence storage and management.
 
@@ -112,7 +112,7 @@ print(f"Recommendations: {analysis['recommendation']}")
 
 ---
 
-### 4. legal_authority_research_demo.py
+### 4. `legal_authority_research_demo.py`
 
 **Purpose:** Multi-source legal research demonstration.
 
@@ -147,7 +147,7 @@ for auth in authorities:
 
 ---
 
-### 5. web_evidence_discovery_demo.py
+### 5. `web_evidence_discovery_demo.py`
 
 **Purpose:** Automated web evidence discovery.
 
@@ -185,7 +185,7 @@ search_results = mediator.search_web_for_evidence(
 
 ---
 
-### 6. search_hooks_demo.py
+### 6. `search_hooks_demo.py`
 
 **Purpose:** Legal corpus RAG and search integration.
 
@@ -228,7 +228,7 @@ questions = hook.suggest_questions(
 
 ---
 
-### 7. claim_support_review_demo.py
+### 7. `claim_support_review_demo.py`
 
 **Purpose:** Review claim-element support coverage using the new matrix and summary payloads.
 
@@ -261,7 +261,7 @@ for element in matrix['claims'][claim_type]['elements']:
 
 ## Complaint Analysis Examples
 
-### 8. complaint_analysis_integration_demo.py
+### 8. `complaint_analysis_integration_demo.py`
 
 **Purpose:** End-to-end complaint analysis with all features.
 
@@ -306,7 +306,7 @@ entities = parser.parse(llm_response)
 
 ---
 
-### 9. complaint_analysis_taxonomies_demo.py
+### 9. `complaint_analysis_taxonomies_demo.py`
 
 **Purpose:** Demonstrate all 14 complaint type taxonomies.
 
@@ -343,7 +343,7 @@ for complaint_type in types:
 
 ---
 
-### 10. dei_taxonomy_example.py
+### 10. `dei_taxonomy_example.py`
 
 **Purpose:** DEI-specific analysis demonstration.
 
@@ -378,7 +378,7 @@ for prov in provisions:
 
 ---
 
-### 11. hacc_integration_example.py
+### 11. `hacc_integration_example.py`
 
 **Purpose:** Full DEI policy analysis pipeline (formerly HACC).
 
@@ -419,7 +419,7 @@ print(f"Reports: {list(reports.keys())}")
 
 ---
 
-### 12. hacc_dei_analysis_example.py
+### 12. `hacc_dei_analysis_example.py`
 
 **Purpose:** DEI analysis with synthetic policy documents.
 
@@ -438,7 +438,7 @@ python examples/hacc_dei_analysis_example.py
 
 ## Adversarial Testing Examples
 
-### 13. adversarial_harness_example.py
+### 13. `adversarial_harness_example.py`
 
 **Purpose:** Basic adversarial harness usage.
 
@@ -475,7 +475,7 @@ print(f"Success Rate: {results['success_rate']}")
 
 ---
 
-### 14. adversarial_harness_standalone.py
+### 14. `adversarial_harness_standalone.py`
 
 **Purpose:** Standalone adversarial session without harness.
 
@@ -508,7 +508,7 @@ print(f"Score: {result.critic_score.overall}")
 
 ---
 
-### 15. adversarial_optimization_demo.py
+### 15. `adversarial_optimization_demo.py`
 
 **Purpose:** SGD cycle optimization demonstration.
 
@@ -544,7 +544,7 @@ for cycle in range(10):
 
 ---
 
-### 16. batch_sgd_cycle.py
+### 16. `batch_sgd_cycle.py`
 
 **Purpose:** Batch SGD testing with state persistence.
 
@@ -561,7 +561,7 @@ python examples/batch_sgd_cycle.py
 
 ---
 
-### 17. session_sgd_report.py
+### 17. `session_sgd_report.py`
 
 **Purpose:** Report generation from adversarial sessions.
 
@@ -578,7 +578,7 @@ python examples/session_sgd_report.py
 
 ---
 
-### 18. parallelism_backoff_sweep.py
+### 18. `parallelism_backoff_sweep.py`
 
 **Purpose:** Parameter sweeping for parallelism and backoff.
 
@@ -612,7 +612,7 @@ print(f"Optimal: parallelism={optimal['p']}, backoff={optimal['b']}")
 
 ---
 
-### 19. sweep_ranker.py
+### 19. `sweep_ranker.py`
 
 **Purpose:** Ranking parameter sweep results.
 
@@ -629,7 +629,43 @@ python examples/sweep_ranker.py
 
 ---
 
-### 20. codex_autopatch_from_run.py
+### 20. `adversarial_harness_autopatch_demo.py`
+
+**Purpose:** Run a small adversarial batch and emit an autopatch artifact.
+
+**Features Demonstrated:**
+- Mock complainant and mediator batch
+- Result analysis through the optimizer bridge
+- Patch artifact written to disk
+- No automatic patch application
+
+**Usage:**
+```bash
+python examples/adversarial_harness_autopatch_demo.py
+```
+
+---
+
+### 21. `chaos_testing_scenarios.py`
+
+**Purpose:** Chaos and stress scenarios for circuit-breaker resilience.
+
+**Features Demonstrated:**
+- Gradual failure injection
+- Recovery after an open circuit
+- Concurrent load against observability hooks
+- Scenario selection from the command line
+
+**Usage:**
+```bash
+python examples/chaos_testing_scenarios.py
+```
+
+---
+
+## Advanced Examples
+
+### 22. `codex_autopatch_from_run.py`
 
 **Purpose:** Code autopatch from adversarial run results.
 
@@ -648,7 +684,7 @@ python examples/codex_autopatch_from_run.py
 
 ---
 
-### 21. codex_multi_run_autopatch.py
+### 23. `codex_multi_run_autopatch.py`
 
 **Purpose:** Multi-run autopatch loop.
 
@@ -671,7 +707,7 @@ python examples/codex_multi_run_autopatch.py \
 
 ---
 
-### 22. codex_multi_run_autopatch_loop.py
+### 24. `codex_multi_run_autopatch_loop.py`
 
 **Purpose:** Extended autopatch loop with convergence.
 
@@ -690,6 +726,40 @@ python examples/codex_multi_run_autopatch_loop.py
 python examples/codex_multi_run_autopatch_loop.py \
     --codex-wait-on-429-fallback-s 60 \
     --codex-wait-on-429-fallback-max-s 900
+```
+
+---
+
+### 25. `observability_benchmarks.py`
+
+**Purpose:** Benchmark metrics, traces, and circuit-breaker decisions.
+
+**Features Demonstrated:**
+- Metrics collection latency and throughput
+- Trace generation and export timing
+- Circuit-breaker decision latency
+- Memory footprint and concurrent scaling
+
+**Usage:**
+```bash
+python examples/observability_benchmarks.py
+```
+
+---
+
+### 26. `session84_observability_examples.py`
+
+**Purpose:** Integration patterns for metrics, tracing, and structured logs.
+
+**Features Demonstrated:**
+- Prometheus metrics collection
+- Distributed tracing hooks
+- Structured event and error logs
+- Circuit-breaker usage around external calls
+
+**Usage:**
+```bash
+python examples/session84_observability_examples.py
 ```
 
 ---
@@ -738,10 +808,10 @@ done
 
 | Category | Script Count | Key Features |
 |----------|--------------|--------------|
-| **Core System** | 6 | Three-phase workflow, legal analysis, evidence, research |
+| **Core System** | 7 | Three-phase workflow, legal analysis, evidence, research |
 | **Complaint Analysis** | 5 | All 14 types, DEI analysis, seed generation, decision trees |
-| **Adversarial Testing** | 8 | Harness, optimization, SGD cycles, parameter sweeping |
-| **Advanced** | 2 | Code generation, automated patching |
+| **Adversarial Testing** | 9 | Harness, optimization, SGD cycles, parameter sweeping, chaos |
+| **Advanced** | 5 | Code generation, automated patching, observability |
 
 ## Common Patterns
 
