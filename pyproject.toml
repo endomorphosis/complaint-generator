@@ -106,6 +106,10 @@ include = [
   "mediator.*",
   "scripts",
   "scripts.*",
+  "templates",
+  "templates.*",
+  "static",
+  "static.*",
 ]
 
 [tool.complaint_generator.import_boundaries]

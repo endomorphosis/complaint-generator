@@ -27,6 +27,10 @@ setup(
             "mediator.*",
             "scripts",
             "scripts.*",
+            "templates",
+            "templates.*",
+            "static",
+            "static.*",
         ]
     ),
     include_package_data=True,
