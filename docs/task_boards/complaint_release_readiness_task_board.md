@@ -133,7 +133,7 @@ Implementation instructions:
 
 ## CIMP-RDY-06 Record the current release surface
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
