@@ -1,0 +1,1126 @@
+{
+  "abstraction_ids": [],
+  "actors": [
+    {
+      "actor_id": "actor.complaint_improvement",
+      "authority_ids": [],
+      "capabilities": [
+        "behavioral_validation",
+        "implementation"
+      ],
+      "contract_version": 1,
+      "kind": "agent",
+      "metadata": {
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        }
+      },
+      "principal_id": "complaint-generator",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-actor@1"
+    }
+  ],
+  "contract_version": 1,
+  "effects": [],
+  "events": [],
+  "evidence_requirements": [
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_01.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "logs/UNCAUGHT_EXCEPTION.log, logs/app.log, logs/test.log, and the three datasets/CCINDEX_WARC_CACHE_DIR range binaries are absent from git ls-files.",
+          ".gitignore contains logs/*.log and datasets/CCINDEX_WARC_CACHE_DIR/.",
+          "The five root markdown keepers, five root shims, eight root config JSON files, main.py, and run.py stay tracked."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_01.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-01",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-01",
+        "RDY-release",
+        "RDY-root"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_02.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "setup.py and pyproject.toml both include templates, templates.*, static, and static.* and still include the existing package names.",
+          "The project name stays complaint-generator and the version stays 0.1.0.",
+          "A locally built wheel contains templates/claim_support_review.html and static/complaint_app_shell.js."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_02.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-02",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-02",
+        "RDY-build",
+        "RDY-release"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_03.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "complaint_phases/denoiser.py is at most 4620 splitlines and no longer defines the sixteen named functions or the three lane constants.",
+          "complaint_phases/denoiser_diagnostics.py is at least 520 splitlines, defines those names, and publishes the versioned interface constants.",
+          "The owner re-exports the moved public names. ComplaintDenoiser stays defined in the owner."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_03.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-03",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-03",
+        "RDY-extract",
+        "RDY-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_04.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "adversarial_harness/optimizer.py is at most 3890 splitlines and no longer defines the four report classes.",
+          "adversarial_harness/optimizer_reports.py is at least 220 splitlines and defines those four classes.",
+          "The owner re-exports the four names. Optimizer stays defined in the owner."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_04.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-04",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-04",
+        "RDY-extract",
+        "RDY-modules"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_05.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "docs/EXAMPLES.md lists exactly the 26 tracked examples/*.py filenames and no other Python filenames.",
+          "The overview counts and the category counts sum to 26.",
+          "No example script is added or deleted."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_05.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-05",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-05",
+        "RDY-docs",
+        "RDY-notes"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_06.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "docs/architecture/release_readiness.md is the only new file and it publishes the versioned interface constants.",
+          "The note links the existing release and architecture maps and names the build entrypoints that stay at the root.",
+          "The note records 26 example scripts, the scratch paths that are not product source, and that patches stays tracked."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_06.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-06",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-06",
+        "RDY-docs",
+        "RDY-notes"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_07.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "DOCUMENTATION_INDEX.md and README.md link docs/architecture/release_readiness.md.",
+          "The index no longer says 23 example scripts and it does say 26.",
+          "The existing release, root, and architecture links stay."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_07.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-07",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-07",
+        "RDY-docs",
+        "RDY-notes"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "fallback_check_ids": [
+        "python -m pytest -q tests/test_cimp_rdy_08.py"
+      ],
+      "freshness_seconds": null,
+      "kind": "test",
+      "metadata": {
+        "acceptance": [
+          "The module map schema stays complaint-generator/repository-module-map@1, task_id stays CIMP-MOD-01, and largest[0] stays applications/complaint_workspace.py.",
+          "The architecture size integers match splitlines() and the path set is unchanged.",
+          "The locked architecture documents, sibling floors, package includes, and scratch absences still hold."
+        ],
+        "required_evidence": "Behavioral assertions at the tested source revision; skipped or unexecuted checks do not satisfy this requirement.",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_08.py"
+        ]
+      },
+      "minimum_code_assurance": "unverified",
+      "requirement_id": "test.CIMP-RDY-08",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-evidence-requirement@1",
+      "source_scope_ids": [],
+      "subject_ids": [
+        "CIMP-RDY-08",
+        "RDY-closure",
+        "RDY-ratchet"
+      ]
+    }
+  ],
+  "fluents": [],
+  "formulas": [
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "RDY-release",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "RDY-notes",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "RDY-root",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "RDY-modules",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "RDY-build",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "RDY-closure",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "RDY-extract",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "goal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "goal",
+          "value": "RDY-docs",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    },
+    {
+      "lower_bound": null,
+      "operands": [],
+      "operator": "atom",
+      "predicate": "subgoal_satisfied",
+      "profile_id": "supervisor-reviewed",
+      "profile_version": 2,
+      "schema": "ipfs_accelerate_py/agent-supervisor/reviewed-formula@1",
+      "terms": [
+        {
+          "kind": "constant",
+          "schema": "ipfs_accelerate_py/agent-supervisor/logic-term@1",
+          "sort": "subgoal",
+          "value": "RDY-ratchet",
+          "vocabulary_version": 2
+        }
+      ],
+      "upper_bound": null,
+      "vocabulary_version": 2
+    }
+  ],
+  "goals": [
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-08"
+      ],
+      "goal_id": "RDY-closure",
+      "metadata": {
+        "title": "Refresh the recorded sizes without moving the locked maps"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeerannwqbxjqf63eblg7ep4x6m3qeircdiqapatqdsvafwolk5t7hu3q",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_release_readiness_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-05",
+        "test.CIMP-RDY-06",
+        "test.CIMP-RDY-07"
+      ],
+      "goal_id": "RDY-docs",
+      "metadata": {
+        "title": "Make the release notes match the current tree"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeeras7y7rtbv7h6qwsgwcxdeyewsxt23232jobbghq4u5c34uxsbycsq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_release_readiness_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-03",
+        "test.CIMP-RDY-04"
+      ],
+      "goal_id": "RDY-modules",
+      "metadata": {
+        "title": "Move closed diagnostic and report seams"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeeraksmc66kcixxrab4n7kl7hmceyzkyjpjksy2r3a3hucuidsjbwexa",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_release_readiness_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    },
+    {
+      "contract_version": 1,
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-01",
+        "test.CIMP-RDY-02"
+      ],
+      "goal_id": "RDY-release",
+      "metadata": {
+        "title": "Remove tracked scratch and ship the UI packages"
+      },
+      "owner_actor_id": "actor.complaint_improvement",
+      "satisfaction_formula_id": "baguqeera7thul277tavihsnyalauaq435vzn5gri2rgyjy4t6folwd7yv6ja",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-goal@1",
+      "source_ids": [
+        "docs/task_boards/complaint_release_readiness_spec.json"
+      ],
+      "terminal_states": [
+        "satisfied"
+      ]
+    }
+  ],
+  "metadata": {
+    "evidence_policy": "Ingestion and bounded consistency are not execution or task completion.",
+    "execution_policy": {
+      "automatic_fallback": false,
+      "context_exclude": [
+        ".complaint_workspace/**",
+        ".complaint_workspace*/**",
+        "data/**",
+        "output/**",
+        "statefiles/**",
+        "exports/**",
+        "secrets/**",
+        "evidence/**",
+        "uploads/**",
+        "attachments/**",
+        ".env*",
+        "*.key",
+        "*.pem",
+        "workspace/**",
+        "artifacts/**",
+        "external/**"
+      ],
+      "deployment": false,
+      "development_inputs": "Local baseline is origin/main ca2471e2445b4f95d897e51438cd4aff23794802, which contains the release-layout publication. GitHub master stays 6ad9ac3d1 and remains the default branch. Do not push, force-push, or change the default branch. Do not change gitlinks. The local datasets checkout may still differ from the published pin.",
+      "implementation_provider_scope": "Authorized Grok 4.7 development implementation via llm_router. Offline tests do not disable that provider process. Development permission is not consent to case-data egress.",
+      "implementation_timeout_seconds": 900,
+      "initial_lanes": 4,
+      "initial_ready_task": "CIMP-RDY-01",
+      "live_exceptions": [],
+      "manual_holds_respected": true,
+      "max_agent_turns": 64,
+      "max_task_attempts": 3,
+      "merge_target": "codex/release-readiness-20261117",
+      "native_task_source_profile": "explicit legacy-markdown projection of the Native FormalWorkPlan",
+      "offline_default": true,
+      "parallelism": "CIMP-RDY-01, CIMP-RDY-02, CIMP-RDY-03, CIMP-RDY-04, CIMP-RDY-05, and CIMP-RDY-06 edit disjoint files and have no dependencies. CIMP-RDY-07 waits for the example note and the readiness note. CIMP-RDY-08 waits for every earlier task.",
+      "product_inference": "This plan does not change case inference, consent, or legal conclusions.",
+      "protected_state": "The completed intake, mediator-grounding, GUI collaboration, GUI UX, repository-reorganization, repository-consolidation, module-depth, module-boundaries, module-seams, current-layout, owner-currency, cohesive-moves, and release-layout campaigns, both retained quarantines, submodule pins, and unrelated campaign processes stay untouched. completion_authority stays false. integrations/ipfs_accelerate/improvement_runner.py stays out of the task targets. The dead release-layout owner is not restarted by this plan.",
+      "provider_role": "grok-only",
+      "qualification_scope": "One focused pytest command per task. Do not run the full historical suite inside the 900-second task budget.",
+      "remote_push": false,
+      "required_evidence": [
+        "A focused pytest module with positive checks and zero skips",
+        "Tracked runtime logs and crawl-cache binaries removed from the index",
+        "templates and static included by both package lists and present in a local wheel",
+        "Diagnostic helpers and optimizer report types defined in their new siblings",
+        "Example documentation matching the 26 tracked example scripts"
+      ],
+      "stop_semantics": "A test that passes while a named body still lives in the owner, while a tracked scratch file remains, while the example count is still wrong, or while the wheel omits the named assets, is a failed task. Do not mark a task complete by hand.",
+      "upstream_checkout_policy": "Use the pinned external checkouts recorded by HEAD. Do not float pins, recursively initialize submodules, or clone CommonCrawl.",
+      "validation_timeout_seconds": 900,
+      "worktree_pool_max_entries": 4
+    },
+    "provider": {
+      "allow_fallback": false,
+      "model": "grok-4.7",
+      "provider": "grok_cli",
+      "router": "ipfs_accelerate_py.llm_router"
+    },
+    "spec_sha256": "7e9cd6974777a29b65444471b4777509d7086605d9453ceae6ab5c10e40ff6b5",
+    "title": "Prepare the remaining release surface, current docs, and module seams"
+  },
+  "norms": [],
+  "plan_id": "baguqeeradbh3vaid6apwv3zh6q2ows7oe7rzlt6a6v3eo2fqq2bzqecs5qna",
+  "preconditions": [],
+  "repository_tree_id": "",
+  "schema": "ipfs_accelerate_py/agent-supervisor/formal-work-plan@1",
+  "source_ids": [
+    "complaint-generator",
+    "docs/task_boards/complaint_release_readiness_spec.json"
+  ],
+  "subgoals": [
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-02"
+      ],
+      "goal_id": "RDY-release",
+      "metadata": {
+        "title": "Include the template and static packages in the wheel"
+      },
+      "parent_id": "RDY-release",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeramlnlyr2mldl4bawu2gaevs3w5dpsxf7qohkj2kcx453lhyah5wpq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "RDY-build"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-03",
+        "test.CIMP-RDY-04"
+      ],
+      "goal_id": "RDY-modules",
+      "metadata": {
+        "title": "Extract denoiser diagnostics and optimizer reports"
+      },
+      "parent_id": "RDY-modules",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeeraorp7t5b2p4kfree5bgolvdhlzgcyyi4zzt6k7t4symdth7g7tkcq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "RDY-extract"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-05",
+        "test.CIMP-RDY-06",
+        "test.CIMP-RDY-07"
+      ],
+      "goal_id": "RDY-docs",
+      "metadata": {
+        "title": "Correct the example catalog and write the readiness note"
+      },
+      "parent_id": "RDY-docs",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeerac4grtu2eckrkkjhakieixdmvkmdlvdfzxlwkt5cgyjlbpsmewzxa",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "RDY-notes"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-08"
+      ],
+      "goal_id": "RDY-closure",
+      "metadata": {
+        "title": "Recompute the module map and architecture size integers"
+      },
+      "parent_id": "RDY-closure",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeerawth2a7lqvyoy4tyibcv4g3zkkktq6c2b6pwfll4oeztqqaqgzvma",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "RDY-ratchet"
+    },
+    {
+      "contract_version": 1,
+      "depends_on": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-01"
+      ],
+      "goal_id": "RDY-release",
+      "metadata": {
+        "title": "Untrack runtime logs and the crawl cache"
+      },
+      "parent_id": "RDY-release",
+      "refinement_mode": "sufficient",
+      "satisfaction_formula_id": "baguqeerair6h2lwbtkmwzniivqmarrzqspz2glile5bwgjmv4yewyej3exzq",
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-subgoal@1",
+      "subgoal_id": "RDY-root"
+    }
+  ],
+  "tasks": [
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-01"
+      ],
+      "goal_id": "RDY-release",
+      "metadata": {
+        "acceptance": [
+          "logs/UNCAUGHT_EXCEPTION.log, logs/app.log, logs/test.log, and the three datasets/CCINDEX_WARC_CACHE_DIR range binaries are absent from git ls-files.",
+          ".gitignore contains logs/*.log and datasets/CCINDEX_WARC_CACHE_DIR/.",
+          "The five root markdown keepers, five root shims, eight root config JSON files, main.py, and run.py stay tracked."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only .gitignore and tests/test_cimp_rdy_01.py. Delete these tracked files from the worktree: logs/UNCAUGHT_EXCEPTION.log, logs/app.log, logs/test.log, datasets/CCINDEX_WARC_CACHE_DIR/ranges/120cd4f5b5e33aaf77863e1199943e3245bc174a7ef393de54e9b34700ef7dea.bin, datasets/CCINDEX_WARC_CACHE_DIR/ranges/14ce88a48f01c45f629f7cf04ca8d8f0e496d33b94ad06b1e5ae8697c2384767.bin, and datasets/CCINDEX_WARC_CACHE_DIR/ranges/e913dc0afb1c39ca04b5be97e6f6cbcc43219df2d38cc17623f363d9fb6a1dc0.bin. Add logs/*.log and datasets/CCINDEX_WARC_CACHE_DIR/ under the existing generated-release comment in .gitignore. Do not delete patches/, any tracked JSON file, or a gitlink. Do not edit data/. The test runs git ls-files and asserts those six paths are absent, the two ignore lines are present, and the locked root keepers are still tracked.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          ".gitignore",
+          "tests/test_cimp_rdy_01.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          ".gitignore",
+          "tests/test_cimp_rdy_01.py"
+        ],
+        "title": "Untrack runtime logs and the crawl-cache binaries",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_01.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-root",
+      "task_id": "CIMP-RDY-01",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-02"
+      ],
+      "goal_id": "RDY-release",
+      "metadata": {
+        "acceptance": [
+          "setup.py and pyproject.toml both include templates, templates.*, static, and static.* and still include the existing package names.",
+          "The project name stays complaint-generator and the version stays 0.1.0.",
+          "A locally built wheel contains templates/claim_support_review.html and static/complaint_app_shell.js."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only setup.py, pyproject.toml, and tests/test_cimp_rdy_02.py. Add templates, templates.*, static, and static.* to both setuptools package find include lists. Keep every existing include, the name complaint-generator, version 0.1.0, install_requires, python_requires, and console-script entry points. Adjust package-data only if that is required for the two named assets to appear in the wheel. Do not pip install. The test builds a wheel with setuptools.build_meta.build_wheel into a temporary directory, asserts the filename starts complaint_generator-0.1.0, and asserts the zip contains templates/claim_support_review.html and static/complaint_app_shell.js. Do not compile external, data, tests, or artifacts.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "setup.py",
+          "pyproject.toml",
+          "tests/test_cimp_rdy_02.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "setup.py",
+          "pyproject.toml",
+          "tests/test_cimp_rdy_02.py"
+        ],
+        "title": "Ship the template and static packages in the local wheel",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_02.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-build",
+      "task_id": "CIMP-RDY-02",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-03"
+      ],
+      "goal_id": "RDY-modules",
+      "metadata": {
+        "acceptance": [
+          "complaint_phases/denoiser.py is at most 4620 splitlines and no longer defines the sixteen named functions or the three lane constants.",
+          "complaint_phases/denoiser_diagnostics.py is at least 520 splitlines, defines those names, and publishes the versioned interface constants.",
+          "The owner re-exports the moved public names. ComplaintDenoiser stays defined in the owner."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nThese are module-level names. Delete their definitions from the owner. Do not leave stubs. Re-export the public names with a column-0 import from the sibling after the helpers that remain in the owner are bound. Do not redefine the moved names. The sibling defines the functions and the three constants with the original bodies. The sibling may import names that remain defined above the moved block in the owner. Do not import the moved names from the owner. Stop if a moved function uses global or nonlocal. Do not edit complaint_phases/interface.py, complaint_phases/denoiser_questions.py, or complaint_phases/denoiser_bindings.py. The re-export keeps their existing imports working.\nMove _clip_public, _state_token, _mapping, _factual_target_view, _law_requirement_view, _admitted_authorities, _support_states, _support_conditions, question_support_view, _support_display_lines, public_why_diagnostic_receipt, redact_diagnostic_value, format_terminal_why, project_stopping_policy, _DEPENDENCY_LANE_ALIASES, _DEPENDENCY_LANE_ACTIONS, MAX_DEPENDENCY_ACTION_ATTEMPTS, dependency_lane_for, and publish_authorized_dependency_action into complaint_phases/denoiser_diagnostics.py. At baseline the owner is 5120 splitlines. The owner ceiling is 4620. The sibling floor is 520. ComplaintDenoiser stays in the owner with a body longer than one statement. Set INTERFACE_SCHEMA to complaint-generator/module-interface@1 and INTERFACE_VERSION to 1.0.0 in the sibling. The test parses both files with ast, checks the moved names, the ComplaintDenoiser sentinel, the re-export, the interface constants, and both line bounds.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_diagnostics.py",
+          "tests/test_cimp_rdy_03.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "complaint_phases/denoiser.py",
+          "complaint_phases/denoiser_diagnostics.py",
+          "tests/test_cimp_rdy_03.py"
+        ],
+        "title": "Move denoiser diagnostics out of the denoiser engine",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_03.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-extract",
+      "task_id": "CIMP-RDY-03",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-04"
+      ],
+      "goal_id": "RDY-modules",
+      "metadata": {
+        "acceptance": [
+          "adversarial_harness/optimizer.py is at most 3890 splitlines and no longer defines the four report classes.",
+          "adversarial_harness/optimizer_reports.py is at least 220 splitlines and defines those four classes.",
+          "The owner re-exports the four names. Optimizer stays defined in the owner."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nThese are module-level classes. Delete their definitions from the owner. Do not leave stubs. Re-export OptimizationReport, WorkflowOptimizationBundle, UIUXOptimizationBundle, and UIOptimizationBundle with a column-0 import from the sibling. Do not redefine them. The sibling defines the classes with the original bodies and empty decorator lists where the originals have empty decorator lists. Do not edit adversarial_harness/__init__.py. The re-export keeps its lazy map pointed at .optimizer. Do not edit adversarial_harness/optimizer_workflow.py or adversarial_harness/optimizer_ui_feedback.py.\nAt baseline optimizer.py is 4097 splitlines. The owner ceiling is 3890. The sibling floor is 220. Optimizer stays in the owner with a body longer than one statement. Set INTERFACE_SCHEMA to complaint-generator/module-interface@1 and INTERFACE_VERSION to 1.0.0 in the sibling. The test parses both files with ast and checks the four classes, the Optimizer sentinel, the re-export, the interface constants, and both line bounds.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "adversarial_harness/optimizer.py",
+          "adversarial_harness/optimizer_reports.py",
+          "tests/test_cimp_rdy_04.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "adversarial_harness/optimizer.py",
+          "adversarial_harness/optimizer_reports.py",
+          "tests/test_cimp_rdy_04.py"
+        ],
+        "title": "Move optimizer report types out of the optimizer engine",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_04.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-extract",
+      "task_id": "CIMP-RDY-04",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-05"
+      ],
+      "goal_id": "RDY-docs",
+      "metadata": {
+        "acceptance": [
+          "docs/EXAMPLES.md lists exactly the 26 tracked examples/*.py filenames and no other Python filenames.",
+          "The overview counts and the category counts sum to 26.",
+          "No example script is added or deleted."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only docs/EXAMPLES.md and tests/test_cimp_rdy_05.py. The tracked set is the 26 examples/*.py files at baseline: adversarial_harness_autopatch_demo.py, adversarial_harness_example.py, adversarial_harness_standalone.py, adversarial_optimization_demo.py, batch_sgd_cycle.py, chaos_testing_scenarios.py, claim_support_review_demo.py, codex_autopatch_from_run.py, codex_multi_run_autopatch.py, codex_multi_run_autopatch_loop.py, complaint_analysis_integration_demo.py, complaint_analysis_taxonomies_demo.py, dei_taxonomy_example.py, evidence_management_demo.py, hacc_dei_analysis_example.py, hacc_integration_example.py, legal_analysis_demo.py, legal_authority_research_demo.py, observability_benchmarks.py, parallelism_backoff_sweep.py, search_hooks_demo.py, session84_observability_examples.py, session_sgd_report.py, sweep_ranker.py, three_phase_example.py, and web_evidence_discovery_demo.py. Replace the statements that say 22 scripts. Group every filename under a category and make the category counts sum to 26. Do not add a URL. Do not add or delete a script. The test compares the backtick-quoted Python filenames in the document with the examples directory.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/EXAMPLES.md",
+          "tests/test_cimp_rdy_05.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "docs/EXAMPLES.md",
+          "tests/test_cimp_rdy_05.py"
+        ],
+        "title": "Make the example catalog match the tracked scripts",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_05.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-notes",
+      "task_id": "CIMP-RDY-05",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-06"
+      ],
+      "goal_id": "RDY-docs",
+      "metadata": {
+        "acceptance": [
+          "docs/architecture/release_readiness.md is the only new file and it publishes the versioned interface constants.",
+          "The note links the existing release and architecture maps and names the build entrypoints that stay at the root.",
+          "The note records 26 example scripts, the scratch paths that are not product source, and that patches stays tracked."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nCreate only docs/architecture/release_readiness.md and tests/test_cimp_rdy_06.py. Do not edit the locked architecture notes or docs/architecture/root_release.md. The new note states INTERFACE_SCHEMA complaint-generator/module-interface@1 and INTERFACE_VERSION 1.0.0. It links docs/architecture/root_release.md, docs/RELEASE.md, docs/architecture/current_layout.md, docs/architecture/owner_currency.md, docs/architecture/cohesive_moves.md, docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. It names these root build files as keepers: Makefile, package.json, playwright.config.js, MANIFEST.in, pyproject.toml, setup.py, requirements.txt, and pytest.ini. It says templates and static are packages included by the setuptools find lists. It says the three logs and the datasets/CCINDEX_WARC_CACHE_DIR range cache are not product source. It says patches/ remains tracked autopatch scratch and is not a product package. It says the example set is 26 scripts in docs/EXAMPLES.md. It says historical plan and backlog documents are not the current module contract. Do not add a URL. The test checks those statements, the links resolve, and no other file changed in the task outputs.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/release_readiness.md",
+          "tests/test_cimp_rdy_06.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "docs/architecture/release_readiness.md",
+          "tests/test_cimp_rdy_06.py"
+        ],
+        "title": "Record the current release surface",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_06.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-notes",
+      "task_id": "CIMP-RDY-06",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-RDY-05",
+        "CIMP-RDY-06"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-07"
+      ],
+      "goal_id": "RDY-docs",
+      "metadata": {
+        "acceptance": [
+          "DOCUMENTATION_INDEX.md and README.md link docs/architecture/release_readiness.md.",
+          "The index no longer says 23 example scripts and it does say 26.",
+          "The existing release, root, and architecture links stay."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only DOCUMENTATION_INDEX.md, README.md, and tests/test_cimp_rdy_07.py. Add resolving links to docs/architecture/release_readiness.md in both files. Replace the index phrases that say 23 example scripts with 26 example scripts. Keep the resolving links to docs/RELEASE.md, docs/architecture/root_release.md, docs/architecture/current_layout.md, docs/architecture/owner_currency.md, docs/architecture/cohesive_moves.md, docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, and docs/architecture/module_seams.md. Do not add or remove a root markdown file. Do not reintroduce 79+, 13 root-level, 61 docs/, or 250+. The test checks the new link, the count, and the older links.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "DOCUMENTATION_INDEX.md",
+          "README.md",
+          "tests/test_cimp_rdy_07.py"
+        ],
+        "priority": "P1",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "DOCUMENTATION_INDEX.md",
+          "README.md",
+          "tests/test_cimp_rdy_07.py"
+        ],
+        "title": "Link the index and readme to the current release note",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_07.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-notes",
+      "task_id": "CIMP-RDY-07",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    },
+    {
+      "actor_ids": [
+        "actor.complaint_improvement"
+      ],
+      "contract_version": 1,
+      "depends_on": [
+        "CIMP-RDY-01",
+        "CIMP-RDY-02",
+        "CIMP-RDY-03",
+        "CIMP-RDY-04",
+        "CIMP-RDY-05",
+        "CIMP-RDY-06",
+        "CIMP-RDY-07"
+      ],
+      "effect_ids": [],
+      "event_ids": [],
+      "evidence_requirement_ids": [
+        "test.CIMP-RDY-08"
+      ],
+      "goal_id": "RDY-closure",
+      "metadata": {
+        "acceptance": [
+          "The module map schema stays complaint-generator/repository-module-map@1, task_id stays CIMP-MOD-01, and largest[0] stays applications/complaint_workspace.py.",
+          "The architecture size integers match splitlines() and the path set is unchanged.",
+          "The locked architecture documents, sibling floors, package includes, and scratch absences still hold."
+        ],
+        "completion": "validation",
+        "implementation_prompt": "Preserve current behavior. Do not edit earlier campaign boards or tests, including tests/test_cimp_con_*.py, tests/test_cimp_dep_*.py, tests/test_cimp_bnd_*.py, tests/test_cimp_sea_*.py, tests/test_cimp_cur_*.py, tests/test_cimp_org_*.py, tests/test_cimp_coh_*.py, and tests/test_cimp_rls_*.py. Do not edit docs/architecture/consolidation_modules.md, docs/architecture/module_boundaries.md, docs/architecture/module_seams.md, docs/architecture/owner_currency.md, docs/architecture/current_layout.md, docs/architecture/cohesive_moves.md, docs/architecture/root_release.md, docs/RELEASE.md, any interface.py, or integrations/ipfs_accelerate/improvement_runner.py. Do not edit docs/architecture/repository_module_map.json or the size integers in docs/ARCHITECTURE.md except in CIMP-RDY-08. Do not add an interface.py file. Do not change OWNER_MODULES. Do not edit applications/complaint_workspace.py, applications/dashboard_hub.py, mediator/mediator.py, integrations/ipfs_datasets/legal.py, integrations/ipfs_datasets/llm.py, integrations/private_storage.py, static JavaScript, or the five root shims. Do not push, force-push, rebase, change the default branch, grant completion_authority, edit DuckDB, refund attempts, invent formula or content CIDs, or change a gitlink. Do not run git submodule update. Do not start a supervisor. Count lines with splitlines(). The new test must contain zero skips. Put module-level pytestmark no_auto_llm, no_auto_network, and no_auto_heavy on it. The test source must not contain https://, http://, urllib, openai, accelerate, torch, playwright, or socket. Build any facade stem by concatenation. Parse source with ast or tomllib. Do not import the product package under test except for the wheel-build task, which may call the setuptools build backend. Run only the declared validation command.\nEdit only docs/architecture/repository_module_map.json, the integer size column in docs/ARCHITECTURE.md under ### Current Extraction Priorities, and tests/test_cimp_rdy_08.py. Do not add or remove a path in that table. Keep applications/dashboard_hub.py. Keep these strings absent from docs/ARCHITECTURE.md: 10,852 lines; 7,881 lines; 6,933 lines; 5,691 lines; 5,562 lines; 5,309 lines; Browser-based UI (future); RESTful API for integrations (future); docs/REFACTOR_SUPERVISOR_TASKBOARD.md. Refresh sizes from splitlines(). Discover packages as top-level directories that contain __init__.py. Discover the largest 15 Python files by byte size descending, then path ascending. Skip .git, .venv, __pycache__, artifacts, complaint_generator.egg-info, data, external, node_modules, output, statefiles, and workspace. Keep schema complaint-generator/repository-module-map@1, task_id CIMP-MOD-01, source_files_moved true, and source_files_rewritten false. largest[0] stays applications/complaint_workspace.py. Assert sibling floors: document_review.py 921, dependency_graph_timeline.py 504, denoiser_diagnostics.py 520, and optimizer_reports.py 220. Also keep the cohesive-move floors: document_pipeline_chronology.py 800, optimizer_workflow.py 800, claim_support_retrieval.py 650, intake_case_temporal.py 540, canonical_formalization.py 700, and document_optimization_guidance.py 720. Assert the locked sha256 values: docs/architecture/consolidation_modules.md 0fe1e10d04ffe3949eac0266ba30675535b9ff8a438c3351bd9d4c4a82878e2e; docs/architecture/module_boundaries.md ea85b8f33fa2214e464ebbec700c715c3f9274b58677395141bc90f70815dea8; docs/architecture/module_seams.md 3d811e249073b56928553e16ce25a41b1385072993d952dab582ccb58cd06256. Assert README.md and DOCUMENTATION_INDEX.md link docs/architecture/release_readiness.md. Assert the index says 26 example scripts. Assert the six scratch paths are absent from git ls-files and that .gitignore contains logs/*.log and datasets/CCINDEX_WARC_CACHE_DIR/. Assert setup.py and pyproject.toml include templates and static. Assert drift_report_mcp.json and complaint_generator.egg-info/PKG-INFO are absent. Assert the root markdown set, the five shims at most 40 splitlines with no function or class, the eight root config JSON files, and that docs/DEPLOYMENT.md does not contain /home/complaint-app. Parse each interface.py with ast and assert its OWNER_MODULES tuple still matches the headings in docs/architecture/module_boundaries.md, with schema complaint-generator/module-interface@1 and version 1.0.0. Do not import interface modules. Do not import earlier campaign tests. The test source must not contain the banned substrings. The facade stem for the accelerate package is built by concatenation when a path must be named.",
+        "implementation_provider": "grok",
+        "model": "grok-4.7",
+        "outputs": [
+          "docs/architecture/repository_module_map.json",
+          "docs/ARCHITECTURE.md",
+          "tests/test_cimp_rdy_08.py"
+        ],
+        "priority": "P0",
+        "provider": {
+          "allow_fallback": false,
+          "model": "grok-4.7",
+          "provider": "grok_cli",
+          "router": "ipfs_accelerate_py.llm_router"
+        },
+        "provider_role": "grok-only",
+        "targets": [
+          "docs/architecture/repository_module_map.json",
+          "docs/ARCHITECTURE.md",
+          "tests/test_cimp_rdy_08.py"
+        ],
+        "title": "Refresh the module map after the readiness layout",
+        "validation_commands": [
+          "python -m pytest -q tests/test_cimp_rdy_08.py"
+        ]
+      },
+      "precondition_ids": [],
+      "schema": "ipfs_accelerate_py/agent-supervisor/formal-plan-task@1",
+      "subgoal_id": "RDY-ratchet",
+      "task_id": "CIMP-RDY-08",
+      "terminal_states": [
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    }
+  ],
+  "temporal_constraints": [],
+  "trace_bound": 1,
+  "vocabulary_profile_id": "supervisor-reviewed",
+  "vocabulary_version": 2
+}
