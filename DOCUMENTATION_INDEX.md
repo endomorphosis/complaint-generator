@@ -2,7 +2,7 @@
 
 Complete index of all documentation in the complaint-generator repository.
 
-Session reports live in [docs/archive/sessions](docs/archive/sessions/INDEX.md). Plans and profiles live in [docs/archive/reports](docs/archive/reports/INDEX.md). The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. Public modules use `INTERFACE_SCHEMA` `complaint-generator/module-interface@1` and `INTERFACE_VERSION` `1.0.0`. The Git remote is `endomorphosis/complaint-generator`. The sibling map is [docs/architecture/consolidation_modules.md](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [docs/architecture/module_boundaries.md](docs/architecture/module_boundaries.md). Seam siblings are recorded in [docs/architecture/module_seams.md](docs/architecture/module_seams.md). The current layout is recorded in [docs/architecture/current_layout.md](docs/architecture/current_layout.md). Owner currency siblings are recorded in [docs/architecture/owner_currency.md](docs/architecture/owner_currency.md). Cohesive moves are recorded in [docs/architecture/cohesive_moves.md](docs/architecture/cohesive_moves.md). The release build note is [docs/RELEASE.md](docs/RELEASE.md). Root release keepers are recorded in [docs/architecture/root_release.md](docs/architecture/root_release.md).
+Session reports live in [docs/archive/sessions](docs/archive/sessions/INDEX.md). Plans and profiles live in [docs/archive/reports](docs/archive/reports/INDEX.md). The document pipeline, document optimization, intake status, and workflow guidance bodies live in `complaint_phases` with root shims. Claim-support review lives in `mediator/claim_support_review.py`. Public modules use `INTERFACE_SCHEMA` `complaint-generator/module-interface@1` and `INTERFACE_VERSION` `1.0.0`. The Git remote is `endomorphosis/complaint-generator`. The sibling map is [docs/architecture/consolidation_modules.md](docs/architecture/consolidation_modules.md). Module boundaries are recorded in [docs/architecture/module_boundaries.md](docs/architecture/module_boundaries.md). Seam siblings are recorded in [docs/architecture/module_seams.md](docs/architecture/module_seams.md). The current layout is recorded in [docs/architecture/current_layout.md](docs/architecture/current_layout.md). Owner currency siblings are recorded in [docs/architecture/owner_currency.md](docs/architecture/owner_currency.md). Cohesive moves are recorded in [docs/architecture/cohesive_moves.md](docs/architecture/cohesive_moves.md). The release build note is [docs/RELEASE.md](docs/RELEASE.md). Root release keepers are recorded in [docs/architecture/root_release.md](docs/architecture/root_release.md). The current release note is [docs/architecture/release_readiness.md](docs/architecture/release_readiness.md).
 
 ## Quick Start
 
@@ -125,14 +125,14 @@ The root `ipfs_datasets_py/` tree in this checkout is an empty compatibility dir
 - [docs/API_REFERENCE_AGENTIC.md](docs/API_REFERENCE_AGENTIC.md) - Agentic optimizer API: AgenticOptimizer, AgenticCLI, Session management, FeedbackLoop, and integration examples for iterative artifact optimization
 
 ### Additional Documentation
-- [docs/EXAMPLES.md](docs/EXAMPLES.md) - Complete reference for all 23 example scripts
+- [docs/EXAMPLES.md](docs/EXAMPLES.md) - Complete reference for all 26 example scripts
 - [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) - Implementation summary
 - [docs/TAXONOMY_EXPANSION_SUMMARY.md](docs/TAXONOMY_EXPANSION_SUMMARY.md) - Taxonomy expansion
 - [docs/VERIFICATION_SUMMARY.md](docs/VERIFICATION_SUMMARY.md) - Verification summary
 
 ## Example Scripts
 
-See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 23 example scripts, organized by category:
+See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 26 example scripts, organized by category:
 
 ### Core System Examples (7)
 1. three_phase_example.py
