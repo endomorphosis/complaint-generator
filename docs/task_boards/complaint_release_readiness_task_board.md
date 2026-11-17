@@ -31,7 +31,7 @@ Implementation instructions:
 
 ## CIMP-RDY-02 Ship the template and static packages in the local wheel
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
