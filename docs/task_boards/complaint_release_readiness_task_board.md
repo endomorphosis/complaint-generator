@@ -108,7 +108,7 @@ Implementation instructions:
 
 ## CIMP-RDY-05 Make the example catalog match the tracked scripts
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
