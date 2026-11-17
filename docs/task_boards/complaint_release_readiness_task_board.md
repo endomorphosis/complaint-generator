@@ -82,7 +82,7 @@ Implementation instructions:
 
 ## CIMP-RDY-04 Move optimizer report types out of the optimizer engine
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
