@@ -183,7 +183,7 @@ Implementation instructions:
 
 ## CIMP-RDY-08 Refresh the module map after the readiness layout
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P0
