@@ -66,3 +66,5 @@ data/manual_worktrees/
 drift_report_mcp.json
 *.egg-info/
 .tmp-demo-output-sessions*
+logs/*.log
+datasets/CCINDEX_WARC_CACHE_DIR/
