@@ -6,7 +6,7 @@ Implementation tasks begin pending. Completion requires behavioral validation ev
 
 ## CIMP-RDY-01 Untrack runtime logs and the crawl-cache binaries
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - No-change completion: allowed
 - Priority: P1
