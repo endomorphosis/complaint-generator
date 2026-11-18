@@ -158,7 +158,7 @@
     },
     {
       "path": "setup.py",
-      "byte_size": 2465
+      "byte_size": 2563
     },
     {
       "path": "scripts/legacy_root_checks/test_complaint_mcp_protocol.py",
@@ -245,7 +245,7 @@
     },
     {
       "path": "DOCUMENTATION_INDEX.md",
-      "byte_size": 21880,
+      "byte_size": 21990,
       "session_or_batch_report": false
     },
     {
@@ -295,7 +295,7 @@
     },
     {
       "path": "README.md",
-      "byte_size": 8124,
+      "byte_size": 8236,
       "session_or_batch_report": false
     },
     {
@@ -669,13 +669,13 @@
     },
     {
       "rank": 14,
-      "path": "complaint_phases/denoiser.py",
-      "byte_size": 235785
+      "path": "tests/test_document_pipeline.py",
+      "byte_size": 228680
     },
     {
       "rank": 15,
-      "path": "tests/test_document_pipeline.py",
-      "byte_size": 228680
+      "path": "tests/test_mediator_three_phase.py",
+      "byte_size": 218595
     }
   ]
 }

@@ -76,7 +76,7 @@ runtime modules and their first extraction direction are:
 | `mediator/mediator.py` | 10693 lines | Move one cohesive workflow service behind private helpers while keeping `Mediator` public methods stable. |
 | `applications/complaint_workspace.py` | 16112 lines | Extract route/service payload builders and workspace state helpers from request-level orchestration. |
 | `scripts/synthesize_hacc_complaint.py` | 6935 lines | Split batch orchestration, data loading, and report rendering into importable helpers before behavior changes. |
-| `complaint_phases/denoiser.py` | 5119 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
+| `complaint_phases/denoiser.py` | 4550 lines | Separate scoring, prompt/question generation, and graph gap analysis. |
 | `applications/dashboard_ui.py` | 1015 lines | Route setup stays in this module. Dashboard hub rendering lives in `applications/dashboard_hub.py`, and this module still defines `create_dashboard_ui_router`. |
 | `applications/dashboard_hub.py` | 4689 lines | Hub rendering extracted from `applications/dashboard_ui.py`. |
 | `mediator/claim_support_hooks.py` | 7015 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
